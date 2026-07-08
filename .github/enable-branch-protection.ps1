@@ -34,6 +34,7 @@ $payload = @"
   "enforce_admins": false,
   "allow_force_pushes": false,
   "allow_deletions": false,
+  "restrictions": null,
   "required_pull_request_reviews": {
     "required_approving_review_count": 1,
     "dismiss_stale_reviews": false,
@@ -66,7 +67,7 @@ try {
   Write-Host "  https://github.com/$OWNER/$REPO/settings/branch_protection_rules"
   exit 1
 } finally {
-  Remove-Item -LiteralPath $tempFile -ErrorActionSilentlyContinue
+  Remove-Item -LiteralPath $tempFile -ErrorAction SilentlyContinue
 }
 
 Write-Host
