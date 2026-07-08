@@ -19,7 +19,7 @@
 		"obsidian",
 		"obsidian-plugin"
 	],
-	"author": "Your Name",
+	"author": "Scott Otterson",
 	"license": "MIT",
 	"devDependencies": {
 		"@eslint/js": "^9.39.4",
