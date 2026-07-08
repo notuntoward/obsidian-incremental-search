@@ -19,7 +19,7 @@ This template contains **no plugin logic** — only the tooling and a minimal
    - `manifest.json`: `id`, `name`, `description` (`author`/`authorUrl` are pre-filled with your account).
    - `package.json`: `name`, `description` (`author` is pre-filled).
    - `README.md` / `SECURITY.md`: update the repo name in the URLs (the account is pre-filled).
-   - `.github/enable-branch-protection.ps1`: `$REPO` (and `$OWNER` only if different).
+   - `.github/enable-branch-protection.{ps1,sh}`: `$REPO` (and `$OWNER` only if different) — see below.
 3. Install dependencies: `npm install`
 4. Start developing: `npm run dev`
 
@@ -36,12 +36,31 @@ This template contains **no plugin logic** — only the tooling and a minimal
 | Dependency updates | Dependabot | weekly |
 | Release build | `release.yml` | on version tags |
 
-Branch protection that satisfies Scorecard's "Branch-Protection" check can be
-enabled with:
+## Branch protection (Scorecard)
 
-```powershell
-pwsh .github/enable-branch-protection.ps1
-```
+Scorecard's "Branch-Protection" check requires the default branch to block
+force-pushes/deletion and to require a passing status check before merge.
+Branch protection is a repository **setting**, not a file, so it is **not**
+copied when you create a repo from this template — you must enable it in each
+new repo after creation.
+
+Set `$REPO` (and `$OWNER` only if different) at the top of the script for your
+platform, then run it (requires `gh` authenticated via `gh auth login`):
+
+- **Windows (PowerShell):**
+
+  ```powershell
+  pwsh .github/enable-branch-protection.ps1
+  ```
+
+- **macOS / Linux (bash):**
+
+  ```bash
+  bash .github/enable-branch-protection.sh
+  ```
+
+Both scripts require write access to the repo. Admins are not restricted, so
+you can still direct-push or force-push when needed. Re-running is idempotent.
 
 ## Scripts
 
