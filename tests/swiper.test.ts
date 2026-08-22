@@ -1,27 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import SwiperSearchPlugin from '../src/main';
+import { describe, it, expect, beforeEach } from "vitest";
+import SwiperSearchPlugin from "../src/main";
+import { getActiveWidget } from "../src/widget";
 
-// Basic DOM mocks for Node environment
-const mockElement = () => ({
-  style: {},
-  appendChild: () => {},
-  addEventListener: () => {},
-  focus: () => {},
-  select: () => {},
-  remove: () => {},
-  querySelector: () => null,
-  className: "",
-  textContent: "",
-});
 
-(global as any).document = {
-  createElement: mockElement,
-  head: { appendChild: () => {} },
-  getElementById: () => null
-};
-(global as any).Event = class {};
 
-describe('SwiperSearchPlugin Hotkey Routing', () => {
+describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
   let plugin: any;
   let commands: Record<string, any>;
   let dispatches: any[];
@@ -31,33 +14,38 @@ describe('SwiperSearchPlugin Hotkey Routing', () => {
     commands = {};
     dispatches = [];
     currentSession = null;
-    
+
     // Mock the Obsidian Plugin app/manifest
     const app = {
       workspace: {
         on: () => {},
-      }
+      },
     };
     plugin = new SwiperSearchPlugin(app as any, {} as any);
-    
+
     // Intercept addCommand to capture the callbacks
     plugin.addCommand = (cmd: any) => {
       commands[cmd.id] = cmd;
     };
-    
+
     // Mock loadSettings
-    plugin.loadData = async () => ({ doubleTapWindowMs: 600, fuzzyMode: true, usePopupModal: false });
+    plugin.loadData = async () => ({
+      doubleTapWindowMs: 600,
+      fuzzyMode: true,
+      usePopupModal: false,
+      lastQuery: "",
+    });
     plugin.saveData = async () => {};
-    
+
     await plugin.onload();
   });
 
-  it('registers forward and backward commands', () => {
-    expect(commands['swiper-search-forward']).toBeDefined();
-    expect(commands['swiper-search-backward']).toBeDefined();
+  it("registers forward and backward commands", () => {
+    expect(commands["swiper-search-forward"]).toBeDefined();
+    expect(commands["swiper-search-backward"]).toBeDefined();
   });
 
-  it('starts a new session if none is active', () => {
+  it("starts a new session if none is active", () => {
     const mockEditor = {
       cm: {
         state: {
@@ -66,8 +54,8 @@ describe('SwiperSearchPlugin Hotkey Routing', () => {
           doc: {
             toString: () => "test text",
             lines: 1,
-            line: (i: number) => ({ text: "test text", from: 0, to: 9, length: 9 }),
-          }
+            line: (_i: number) => ({ text: "test text", from: 0, to: 9, length: 9 }),
+          },
         },
         dispatch: (args: any) => {
           dispatches.push(args);
@@ -75,26 +63,26 @@ describe('SwiperSearchPlugin Hotkey Routing', () => {
             currentSession = args.effects.value;
           }
         },
-        dom: { parentElement: mockElement() }
-      }
+        dom: { parentElement: document.createElement("div") },
+      },
     };
 
     // Trigger forward search
-    commands['swiper-search-forward'].editorCallback(mockEditor);
-    
+    commands["swiper-search-forward"].editorCallback(mockEditor);
+
     // It should have dispatched a setSession effect with a new session
     expect(dispatches.length).toBeGreaterThan(0);
     expect(currentSession).not.toBeNull();
-    expect(currentSession.direction).toBe('forward');
+    expect(currentSession.direction).toBe("forward");
   });
 
-  it('advances the session if one is already active', () => {
+  it("advances the session if one is already active with query", () => {
     currentSession = {
       query: "test",
       direction: "forward",
       matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
       activeIndex: 0,
-      originSelection: { anchor: 0, head: 0 }
+      originSelection: { anchor: 0, head: 0 },
     };
 
     const mockEditor = {
@@ -109,25 +97,63 @@ describe('SwiperSearchPlugin Hotkey Routing', () => {
             currentSession = args.effects.value;
           }
         },
-        dom: { parentElement: mockElement() }
-      }
+        dom: { parentElement: document.createElement("div") },
+      },
     };
 
     // Trigger forward search again (like pressing Ctrl+S a second time)
-    commands['swiper-search-forward'].editorCallback(mockEditor);
-    
+    commands["swiper-search-forward"].editorCallback(mockEditor);
+
     // It should just advance, not reset the query
     expect(currentSession.query).toBe("test");
     expect(currentSession.activeIndex).toBe(1); // advanced to next match
   });
 
-  it('advances backward if reverse command is invoked', () => {
+  it("recalls lastQuery when active session query is empty (double-tap recall)", () => {
+    plugin.settings.lastQuery = "previous search";
+
+    currentSession = {
+      query: "",
+      direction: "forward",
+      matches: [],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    const mockEditor = {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 0 } },
+          field: () => currentSession,
+          doc: {
+            lines: 1,
+            line: (_i: number) => ({ text: "here is a previous search match", from: 0, to: 31, length: 31 }),
+          },
+        },
+        dispatch: (args: any) => {
+          dispatches.push(args);
+          if (args.effects && args.effects.value !== undefined && args.effects.value.query !== undefined) {
+            currentSession = args.effects.value;
+          }
+        },
+        dom: { parentElement: document.createElement("div") },
+      },
+    };
+
+    // Trigger backward search on empty active session -> recalls lastQuery in backward direction
+    commands["swiper-search-backward"].editorCallback(mockEditor);
+
+    expect(currentSession.query).toBe("previous search");
+    expect(currentSession.direction).toBe("backward");
+  });
+
+  it("advances backward if reverse command is invoked during active search", () => {
     currentSession = {
       query: "test",
       direction: "forward", // initially forward
       matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
       activeIndex: 0,
-      originSelection: { anchor: 0, head: 0 }
+      originSelection: { anchor: 0, head: 0 },
     };
 
     const mockEditor = {
@@ -142,14 +168,60 @@ describe('SwiperSearchPlugin Hotkey Routing', () => {
             currentSession = args.effects.value;
           }
         },
-        dom: { parentElement: mockElement() }
-      }
+        dom: { parentElement: document.createElement("div") },
+      },
     };
 
     // Trigger backward search (like pressing Ctrl+R)
-    commands['swiper-search-backward'].editorCallback(mockEditor);
-    
+    commands["swiper-search-backward"].editorCallback(mockEditor);
+
     expect(currentSession.direction).toBe("backward"); // switches direction
     expect(currentSession.activeIndex).toBe(1); // wrapped around from 0 to 1
   });
+
+  it("handles onunload lifecycle cleanly", () => {
+    expect(() => plugin.onunload()).not.toThrow();
+    expect(getActiveWidget()).toBeNull();
+  });
+
+  it("opens SwiperSuggestModal when usePopupModal is enabled", () => {
+    plugin.settings.usePopupModal = true;
+
+    const mockEditor = {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 0 } },
+          field: () => currentSession,
+          doc: {
+            lines: 1,
+            line: () => ({ text: "test text", from: 0, to: 9, length: 9 }),
+          },
+        },
+        dispatch: (args: any) => {
+          dispatches.push(args);
+          if (args.effects && args.effects.value && args.effects.value.query !== undefined) {
+            currentSession = args.effects.value;
+          }
+        },
+        dom: { parentElement: document.createElement("div") },
+      },
+    };
+
+    expect(() => {
+      commands["swiper-search-forward"].editorCallback(mockEditor);
+    }).not.toThrow();
+  });
+
+  it("renders and updates settings tab correctly", async () => {
+    let settingTabInstance: any = null;
+    plugin.addSettingTab = (tab: any) => {
+      settingTabInstance = tab;
+    };
+    await plugin.onload();
+
+    expect(settingTabInstance).not.toBeNull();
+    settingTabInstance.containerEl = document.createElement("div");
+    expect(() => settingTabInstance.display()).not.toThrow();
+  });
 });
+

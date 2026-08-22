@@ -1,0 +1,61 @@
+/* Match Highlighting */
+.swiper-match {
+  background-color: var(--text-highlight-bg, rgba(255, 255, 0, 0.35));
+  border-radius: 2px;
+}
+
+.swiper-match-current {
+  background-color: var(--text-selection, rgba(255, 140, 0, 0.6));
+  outline: 1px solid orange;
+  border-radius: 2px;
+}
+
+.swiper-match-span {
+  background-color: var(--background-modifier-hover, rgba(128, 128, 128, 0.15));
+  border-radius: 2px;
+}
+
+.swiper-match-span-current {
+  background-color: rgba(255, 140, 0, 0.15);
+  border-radius: 2px;
+}
+
+/* Floating Search Widget */
+.swiper-search-widget {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 50;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  box-shadow: var(--shadow-s);
+}
+
+.swiper-search-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 220px;
+  color: var(--text-normal);
+}
+
+.swiper-search-counter {
+  color: var(--text-muted);
+  min-width: 48px;
+  text-align: right;
+}
+
+.swiper-search-dir {
+  color: var(--text-muted);
+}
+
+.swiper-line-number {
+  color: var(--text-muted);
+  margin-right: 8px;
+}

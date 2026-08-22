@@ -101,3 +101,30 @@ export class Component {
 	unload(): void {}
 	onunload(): void {}
 }
+
+// Polyfill Obsidian HTMLElement extensions in test environment
+if (typeof window !== "undefined" && typeof HTMLElement !== "undefined") {
+  if (!(HTMLElement.prototype as any).createSpan) {
+    (HTMLElement.prototype as any).createSpan = function (options?: any) {
+      const span = document.createElement("span");
+      if (options?.cls) span.className = options.cls;
+      if (options?.text) span.textContent = options.text;
+      this.appendChild(span);
+      return span;
+    };
+  }
+  if (!(HTMLElement.prototype as any).empty) {
+    (HTMLElement.prototype as any).empty = function () {
+      this.innerHTML = "";
+    };
+  }
+  if (!(HTMLElement.prototype as any).createDiv) {
+    (HTMLElement.prototype as any).createDiv = function (options?: any) {
+      const div = document.createElement("div");
+      if (options?.cls) div.className = options.cls;
+      if (options?.text) div.textContent = options.text;
+      this.appendChild(div);
+      return div;
+    };
+  }
+}

@@ -11,13 +11,12 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'node',
+    environment: 'jsdom',
     pool: 'vmThreads', // Vitest 4.x: only vm* pools properly collect tests
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/main.ts'], // main.ts is too coupled to Obsidian API to unit test
     },
   },
 });
