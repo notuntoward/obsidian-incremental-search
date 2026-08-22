@@ -1,80 +1,94 @@
-# Obsidian Plugin Template
+# Obsidian Incremental Search
 
-[![Build](https://github.com/notuntoward/obsidian-plugin-template/actions/workflows/build.yml/badge.svg)](https://github.com/notuntoward/obsidian-plugin-template/actions/workflows/build.yml)
-[![CodeQL](https://github.com/notuntoward/obsidian-plugin-template/actions/workflows/codeql.yml/badge.svg)](https://github.com/notuntoward/obsidian-plugin-template/actions/workflows/codeql.yml)
-[![OpenSSF Scorecard](https://github.com/notuntoward/obsidian-plugin-template/actions/workflows/scorecard.yml/badge.svg)](https://github.com/notuntoward/obsidian-plugin-template/actions/workflows/scorecard.yml)
+[![Build](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/build.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/build.yml)
+[![CodeQL](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml)
 
-A starting point for a new Obsidian plugin that ships with the same automated
-code-quality checks as a mature plugin: ESLint, Prettier, TypeScript type
-checking, unit tests (Vitest), browser tests (Playwright), CodeQL static
-analysis, OpenSSF Scorecard, Dependabot, and a release workflow.
+A fast, keyboard-centric incremental search plugin for Obsidian.
 
-This template contains **no plugin logic** — only the tooling and a minimal
-`src/main.ts` skeleton. Replace it with your own code.
+Users who keep their hands on the home row will appreciate this keyboard-driven search workflow—especially those who also use GNU Emacs or modal editors. Search results highlight instantly in the active note as you type, and subsequent search keypresses immediately cycle through matches in either direction without ever reaching for the mouse.
 
-## Use this template
+---
 
-1. Click **Use this template → Create a new repository** on GitHub.
-2. Update the per-plugin placeholders (account-level values are already filled in):
-   - `manifest.json`: `id`, `name`, `description` (`author`/`authorUrl` are pre-filled with your account).
-   - `package.json`: `name`, `description` (`author` is pre-filled).
-   - `README.md` / `SECURITY.md`: update the repo name in the URLs (the account is pre-filled).
-   - `.github/enable-branch-protection.{ps1,sh}`: `$REPO` (and `$OWNER` only if different) — see below.
-3. Install dependencies: `npm install`
-4. Start developing: `npm run dev`
+## Features
 
-## What's checked
+- **Instant In-Document Highlighting:** Matches highlight directly in your document viewport with active match selection and full fuzzy-span background shading that automatically adapts to both light and dark themes.
+- **Directional Incremental Navigation:** Search starts from your current cursor position. Triggering the search command again advances to the next or previous match in real time.
+- **Smart Space-as-Wildcard Matching:** Type search terms separated by spaces to match words across lines or paragraphs. Type extra spaces to match exact literal spaces.
+- **Search Memory & Double-Tap Recall:** Pressing a search hotkey twice in a row (without typing anything in between) immediately recalls and resumes your previous search query in the direction of the second keypress.
+- **Clean Keyboard Dismissal:**
+  - `Enter`: Commits the match and places the cursor at the end of the match.
+  - `Escape`: Cancels search and restores your cursor to where you began.
+  - Search widget disappears immediately upon exit.
+- **Center-Screen Popup Modal (Optional):** Toggle between the inline floating widget and a centered suggest modal in settings.
 
-| Check | How | Runs on |
-| --- | --- | --- |
-| Lint (ESLint + obsidianmd rules) | `npm run lint` | every push/PR |
-| Type check (tsc) + bundle (esbuild) | `npm run build` | every push/PR |
-| Unit tests (Vitest) | `npm run test:run` | your CI / local |
-| Browser tests (Playwright) | `npm run test:browser` | local (after `npx playwright install chromium`) |
-| CodeQL (SAST) | `codeql.yml` | push/PR + weekly |
-| OpenSSF Scorecard | `scorecard.yml` | push/PR + weekly |
-| Dependency updates | Dependabot | weekly |
-| Release build | `release.yml` | on version tags |
+---
 
-## Branch protection (Scorecard)
+## Commands & Recommended Keybindings
 
-Scorecard's "Branch-Protection" check requires the default branch to block
-force-pushes/deletion and to require a passing status check before merge.
-Branch protection is a repository **setting**, not a file, so it is **not**
-copied when you create a repo from this template — you must enable it in each
-new repo after creation.
+The plugin registers two commands in Obsidian's Command Palette. **Commands are not mapped to default hotkeys out of the box** so they do not conflict with your existing keymap.
 
-Set `$REPO` (and `$OWNER` only if different) at the top of the script for your
-platform, then run it (requires `gh` authenticated via `gh auth login`):
+| Command Name | Command ID | Description | Recommended Keybinding |
+| :--- | :--- | :--- | :--- |
+| **Incremental Search: Forward** | `forward` | Starts/advances forward search from cursor | `Ctrl+S` (Windows/Linux) or `⌃S` / `⌥S` (macOS) |
+| **Incremental Search: Backward** | `backward` | Starts/advances backward search from cursor | `Ctrl+R` (Windows/Linux) or `⌃R` / `⌥R` (macOS) |
 
-- **Windows (PowerShell):**
+To configure these hotkeys in Obsidian:
+1. Open **Settings → Hotkeys**.
+2. Search for `Incremental Search`.
+3. Assign your preferred shortcuts to **Forward** and **Backward**.
 
-  ```powershell
-  pwsh .github/enable-branch-protection.ps1
-  ```
+---
 
-- **macOS / Linux (bash):**
+## Space-as-Wildcard Matching Rules
 
-  ```bash
-  bash .github/enable-branch-protection.sh
-  ```
+When fuzzy matching is enabled (default), spaces between words act as flexible wildcards or literal space matchers according to the following rules:
 
-Both scripts require write access to the repo. Admins are not restricted, so
-you can still direct-push or force-push when needed. Re-running is idempotent.
+| Spaces typed | Wildcard behavior | Literal spaces required in document | Example |
+| :--- | :--- | :--- | :--- |
+| **1 space** | `.*` (unbounded gap) | 0 | `the KAN` matches `the original KAN` |
+| **2 spaces** | Suppressed (exact) | 1 literal space | `the  KAN` matches only `the KAN` |
+| **3 spaces** | Suppressed (exact) | 2 literal spaces | `the   KAN` matches only `the  KAN` |
+| **N spaces** | Suppressed (exact) | N − 1 literal spaces | Matches exactly N − 1 spaces |
 
-## Scripts
+---
 
-- `npm run dev` — watch and rebuild `main.js` with esbuild.
-- `npm run lint` — ESLint with zero-warning policy.
-- `npm run build` — lint + type-check + production bundle.
-- `npm run format` — Prettier write over `src`.
-- `npm run test:run` — Vitest unit/integration suite.
-- `npm run test:browser` — Playwright browser regression suite.
+## Settings
+
+- **Fuzzy matching:** Toggle between space-as-wildcard fuzzy matching and exact literal substring search.
+- **Double-tap window (ms):** The timeout window (default `600ms`) during which consecutive search hotkey presses recall the last search query.
+- **Use popup modal interface:** Option to use a center-screen modal picker with line numbers instead of the inline floating widget.
+
+---
+
+## Development & Testing
+
+```bash
+# Install dependencies
+npm install
+
+# Build & verification
+npm run build      # Lint, type-check, and bundle main.js
+npm run lint       # ESLint with obsidianmd rules (zero-warning policy)
+npm run format     # Format TypeScript files with Prettier
+
+# Automated Tests
+npm run test:run      # Run Vitest unit & integration test suite
+npm run test:coverage # Run tests with v8 code coverage
+npm run test:browser  # Run Playwright browser tests
+```
+
+---
 
 ## Releasing
 
-1. Bump the version: `npm version patch` (or `minor`/`major`). This updates
-   `manifest.json` and `versions.json` via `version-bump.mjs`.
-2. Push the tag: `git push && git push --tags`. The `release.yml` workflow
-   builds the plugin and drafts a GitHub release containing `main.js`,
-   `manifest.json`, and `styles.css`.
+1. Bump the version: `npm version patch` (or `minor`/`major`).
+2. Push the tag: `git push && git push --tags`.
+3. The automated GitHub workflow builds the release bundle containing `main.js`, `manifest.json`, and `styles.css`.
+
+---
+
+## Acknowledgements
+
+- [**GNU Emacs**](https://cgit.git.savannah.gnu.org/cgit/emacs.git) — for pioneering incremental search (`isearch`) and space-as-wildcard navigation.
+- [**Ivy / Swiper**](https://github.com/abo-abo/swiper) — for inspiring line-based incremental completion and regex/fuzzy search workflows.
