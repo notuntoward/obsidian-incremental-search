@@ -6,7 +6,6 @@ import {
 	commitMatch,
 	cancelSession,
 	closeSession,
-	advance,
 } from "./session";
 
 let activeWidgetEl: HTMLDivElement | null = null;
@@ -117,14 +116,6 @@ export function renderWidget(
 			evt.preventDefault();
 			evt.stopPropagation();
 			cancelSession(view, plugin);
-		} else if (evt.ctrlKey && evt.key.toLowerCase() === "s") {
-			evt.preventDefault();
-			advance(view, "forward");
-			updateCounter();
-		} else if (evt.ctrlKey && evt.key.toLowerCase() === "r") {
-			evt.preventDefault();
-			advance(view, "backward");
-			updateCounter();
 		}
 	});
 

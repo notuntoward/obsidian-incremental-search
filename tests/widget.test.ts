@@ -134,20 +134,6 @@ describe("widget: counter & lifecycle", () => {
     expect(getActiveWidget()).toBeNull();
   });
 
-  it("handles Ctrl+S and Ctrl+R keydown to advance search", () => {
-    renderWidget(mockView, mockPlugin, "word", "forward");
-    const widget = getActiveWidget();
-    const input = widget?.querySelector(".swiper-search-input") as HTMLInputElement;
-
-    const ctrlS = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
-    input.dispatchEvent(ctrlS);
-    expect(sessionState?.activeIndex).toBe(1);
-
-    const ctrlR = new KeyboardEvent("keydown", { key: "r", ctrlKey: true, bubbles: true, cancelable: true });
-    input.dispatchEvent(ctrlR);
-    expect(sessionState?.activeIndex).toBe(0);
-  });
-
   it("removes active widget cleanly", () => {
     renderWidget(mockView, mockPlugin, "", "forward");
     expect(getActiveWidget()).not.toBeNull();
