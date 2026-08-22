@@ -111,57 +111,69 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 	onClose() {
 		super.onClose();
+		console.log(`[incsearch] onClose called. chosen=${this.chosen}`);
 		if (this.observer) {
 			this.observer.disconnect();
 			this.observer = null;
 		}
 
-		if (!this.chosen) {
+		// Defer the teardown so that if onChooseSuggestion is firing in the same event loop
+		// (e.g. mouse click after blur, or specific Obsidian ENTER handlers), it can set this.chosen = true
+		window.setTimeout(() => {
+			if (this.chosen) {
+				console.log(
+					`[incsearch] onClose deferred - chosen became true, skipping ESC restore.`
+				);
+				return;
+			}
+
 			const session = this.cm.state.field(searchSessionField, false);
 			if (session) {
 				saveSessionQuery(session, this.plugin);
-				const originHead = session.originSelection.head;
 				const originAnchor = session.originSelection.anchor;
+				const originHead = session.originSelection.head;
 
-				const restoreOrigin = () => {
-					this.cm.dispatch({
-						selection: EditorSelection.range(originAnchor, originHead),
-						effects: [
-							setSession.of(null),
-							EditorView.scrollIntoView(
-								EditorSelection.range(originAnchor, originHead),
-								{ y: "center", x: "nearest" }
-							),
-						],
-					});
+				console.log(
+					`[incsearch] onClose deferred (ESC path) - Reverting to origin: anchor=${originAnchor}, head=${originHead}`
+				);
 
-					if (this.editor) {
-						const anchorPos = this.editor.offsetToPos(originAnchor);
-						const headPos = this.editor.offsetToPos(originHead);
-						if (originAnchor === originHead) {
-							this.editor.setCursor(headPos);
-						} else {
-							this.editor.setSelection(anchorPos, headPos);
-						}
-						this.editor.scrollIntoView({ from: anchorPos, to: headPos }, true);
-						this.editor.focus();
+				this.cm.dispatch({
+					selection: EditorSelection.range(originAnchor, originHead),
+					effects: [
+						setSession.of(null),
+						EditorView.scrollIntoView(EditorSelection.range(originAnchor, originHead), {
+							y: "center",
+							x: "nearest",
+						}),
+					],
+				});
+
+				if (this.editor) {
+					const anchorPos = this.editor.offsetToPos(originAnchor);
+					const headPos = this.editor.offsetToPos(originHead);
+					if (originAnchor === originHead) {
+						this.editor.setCursor(headPos);
 					} else {
-						this.cm.focus();
+						this.editor.setSelection(anchorPos, headPos);
 					}
-				};
-
-				restoreOrigin();
+					this.editor.scrollIntoView({ from: anchorPos, to: headPos }, true);
+					this.editor.focus();
+				} else {
+					this.cm.focus();
+				}
 			} else {
 				this.cm.dispatch({ effects: setSession.of(null) });
 			}
-		}
+		}, 10);
 	}
 
 	onChooseSuggestion(index: number, _evt: MouseEvent | KeyboardEvent) {
+		console.log(`[incsearch] onChooseSuggestion called with index=${index}`);
 		this.chosen = true;
 		const session = this.cm.state.field(searchSessionField, false);
 		if (session && session.matches[index]) {
 			const match = session.matches[index];
+			console.log(`[incsearch] onChooseSuggestion - match found: ${JSON.stringify(match)}`);
 			this.selectedMatch = match;
 			saveSessionQuery(session, this.plugin);
 
