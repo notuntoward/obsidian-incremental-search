@@ -1,13 +1,13 @@
 import { App, SuggestModal } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { SearchDirection, IncrementalSearchSettings } from "./types";
+import { EditorSelection } from "@codemirror/state";
+import { SearchDirection, IncrementalSearchSettings, MatchRange } from "./types";
 import {
 	searchSessionField,
 	recomputeQuery,
 	setActiveIndex,
-	commitMatch,
-	cancelSession,
 	saveSessionQuery,
+	setSession,
 } from "./session";
 
 export class IncrementalSearchSuggestModal extends SuggestModal<number> {
@@ -16,6 +16,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	direction: SearchDirection;
 	observer: MutationObserver | null = null;
 	chosen: boolean = false;
+	selectedMatch: MatchRange | null = null;
 
 	constructor(
 		app: App,
@@ -111,16 +112,58 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			this.observer.disconnect();
 			this.observer = null;
 		}
-		if (!this.chosen) {
-			cancelSession(this.cm, this.plugin);
+
+		const session = this.cm.state.field(searchSessionField, false);
+
+		if (this.chosen && this.selectedMatch) {
+			const match = this.selectedMatch;
+			// Enter / Choose: Move cursor to end of matched string and scroll into view
+			window.setTimeout(() => {
+				this.cm.dispatch({
+					selection: EditorSelection.cursor(match.to),
+					effects: [
+						setSession.of(null),
+						EditorView.scrollIntoView(EditorSelection.range(match.from, match.to), {
+							y: "center",
+							x: "nearest",
+						}),
+					],
+				});
+				this.cm.focus();
+			}, 0);
+		} else {
+			// Escape / Cancel: Restore original cursor position without moving
+			window.setTimeout(() => {
+				if (session) {
+					saveSessionQuery(session, this.plugin);
+					this.cm.dispatch({
+						selection: EditorSelection.range(
+							session.originSelection.anchor,
+							session.originSelection.head
+						),
+						effects: [
+							setSession.of(null),
+							EditorView.scrollIntoView(
+								EditorSelection.range(
+									session.originSelection.anchor,
+									session.originSelection.head
+								),
+								{ y: "center", x: "nearest" }
+							),
+						],
+					});
+				}
+				this.cm.focus();
+			}, 0);
 		}
 	}
 
 	onChooseSuggestion(index: number, _evt: MouseEvent | KeyboardEvent) {
 		this.chosen = true;
 		const session = this.cm.state.field(searchSessionField, false);
-		saveSessionQuery(session, this.plugin);
-		setActiveIndex(this.cm, index);
-		commitMatch(this.cm, this.plugin);
+		if (session && session.matches[index]) {
+			this.selectedMatch = session.matches[index];
+			saveSessionQuery(session, this.plugin);
+		}
 	}
 }

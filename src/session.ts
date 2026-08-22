@@ -235,7 +235,13 @@ export function commitMatch(
 
 		view.dispatch({
 			selection: EditorSelection.cursor(m.to),
-			effects: setSession.of(null),
+			effects: [
+				setSession.of(null),
+				EditorView.scrollIntoView(EditorSelection.range(m.from, m.to), {
+					y: "center",
+					x: "nearest",
+				}),
+			],
 		});
 		removeWidget(view);
 		view.focus();
@@ -262,7 +268,16 @@ export function cancelSession(
 					session.originSelection.anchor,
 					session.originSelection.head
 				),
-				effects: setSession.of(null),
+				effects: [
+					setSession.of(null),
+					EditorView.scrollIntoView(
+						EditorSelection.range(
+							session.originSelection.anchor,
+							session.originSelection.head
+						),
+						{ y: "center", x: "nearest" }
+					),
+				],
 			});
 		}
 		removeWidget(view);

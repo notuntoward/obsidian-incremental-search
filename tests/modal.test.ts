@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { IncrementalSearchSuggestModal } from "../src/modal";
 import { searchSessionField } from "../src/session";
@@ -9,14 +9,17 @@ describe("modal: IncrementalSearchSuggestModal", () => {
   let mockApp: any;
   let mockPlugin: any;
   let mockView: any;
+  let dispatches: any[] = [];
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    dispatches = [];
     sessionState = {
       query: "",
       direction: "forward",
       matches: [],
       activeIndex: 0,
-      originSelection: { anchor: 0, head: 0 },
+      originSelection: { anchor: 2, head: 2 },
     };
 
     mockApp = {};
@@ -38,6 +41,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
         field: () => sessionState,
       },
       dispatch: (tr: any) => {
+        dispatches.push(tr);
         if (tr.effects) {
           const effects = Array.isArray(tr.effects) ? tr.effects : [tr.effects];
           for (const eff of effects) {
@@ -49,6 +53,10 @@ describe("modal: IncrementalSearchSuggestModal", () => {
       },
       focus: () => {},
     };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("getSuggestions computes matches and returns indices", () => {
@@ -81,24 +89,36 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     expect(matchSpans.length).toBeGreaterThan(0);
   });
 
-  it("onChooseSuggestion commits the selected match", () => {
+  it("onChooseSuggestion and onClose move cursor to match end on ENTER", () => {
     const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     modal.getSuggestions("match");
 
     modal.onChooseSuggestion(1, new MouseEvent("click"));
-
     expect(modal.chosen).toBe(true);
     expect(mockPlugin.settings.lastQuery).toBe("match");
+
+    modal.onClose();
+    vi.runAllTimers();
+
+    expect(sessionState).toBeNull();
+    const lastDispatch = dispatches[dispatches.length - 1];
+    expect(lastDispatch.selection).toBeDefined();
+    // Match index 1 in "first line with match\nsecond line with match" ends at index 44
+    expect(lastDispatch.selection.head).toBe(44);
   });
 
-  it("onClose cancels session if suggestion was not chosen", () => {
+  it("onClose restores original cursor on ESC without moving", () => {
     const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     modal.getSuggestions("match");
     modal.chosen = false;
 
     modal.onClose();
+    vi.runAllTimers();
 
     // Session is cancelled and cleared
     expect(sessionState).toBeNull();
+    const lastDispatch = dispatches[dispatches.length - 1];
+    expect(lastDispatch.selection.anchor).toBe(2);
+    expect(lastDispatch.selection.head).toBe(2);
   });
 });
