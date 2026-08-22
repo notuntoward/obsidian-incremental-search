@@ -111,7 +111,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 	onClose() {
 		super.onClose();
-		console.log(`[incsearch] onClose called. chosen=${this.chosen}`);
 		if (this.observer) {
 			this.observer.disconnect();
 			this.observer = null;
@@ -121,9 +120,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 		// (e.g. mouse click after blur, or specific Obsidian ENTER handlers), it can set this.chosen = true
 		window.setTimeout(() => {
 			if (this.chosen) {
-				console.log(
-					`[incsearch] onClose deferred - chosen became true, skipping ESC restore.`
-				);
 				return;
 			}
 
@@ -132,10 +128,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				saveSessionQuery(session, this.plugin);
 				const originAnchor = session.originSelection.anchor;
 				const originHead = session.originSelection.head;
-
-				console.log(
-					`[incsearch] onClose deferred (ESC path) - Reverting to origin: anchor=${originAnchor}, head=${originHead}`
-				);
 
 				this.cm.dispatch({
 					selection: EditorSelection.range(originAnchor, originHead),
@@ -168,12 +160,10 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	}
 
 	onChooseSuggestion(index: number, _evt: MouseEvent | KeyboardEvent) {
-		console.log(`[incsearch] onChooseSuggestion called with index=${index}`);
 		this.chosen = true;
 		const session = this.cm.state.field(searchSessionField, false);
 		if (session && session.matches[index]) {
 			const match = session.matches[index];
-			console.log(`[incsearch] onChooseSuggestion - match found: ${JSON.stringify(match)}`);
 			this.selectedMatch = match;
 			saveSessionQuery(session, this.plugin);
 
@@ -182,27 +172,8 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 					const pos = this.editor.offsetToPos(match.to);
 					const fromPos = this.editor.offsetToPos(match.from);
 
-					console.log(
-						`[incsearch] applyMatch - Match bounds: from=${match.from}, to=${match.to}`
-					);
-					console.log(
-						`[incsearch] applyMatch - Calculated pos: line=${pos.line}, ch=${pos.ch}`
-					);
-					console.log(
-						`[incsearch] applyMatch - Editor cursor BEFORE setCursor: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
-					);
-
 					this.editor.setCursor(pos);
 					this.editor.scrollIntoView({ from: fromPos, to: pos }, true);
-
-					console.log(
-						`[incsearch] applyMatch - Editor cursor AFTER setCursor: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
-					);
-
-					// Also log CM6 state
-					console.log(
-						`[incsearch] applyMatch - CM6 state BEFORE dispatch: anchor=${this.cm.state.selection.main.anchor}, head=${this.cm.state.selection.main.head}`
-					);
 				}
 
 				this.cm.dispatch({
@@ -217,12 +188,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				});
 
 				if (this.editor) {
-					console.log(
-						`[incsearch] applyMatch - Editor cursor AFTER CM6 dispatch: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
-					);
-					console.log(
-						`[incsearch] applyMatch - CM6 state AFTER dispatch: anchor=${this.cm.state.selection.main.anchor}, head=${this.cm.state.selection.main.head}`
-					);
 					this.editor.focus();
 				} else {
 					this.cm.focus();
@@ -230,15 +195,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			};
 
 			applyMatch();
-
-			// Diagnostics: trace cursor after a short delay to see if Obsidian clobbered it
-			window.setTimeout(() => {
-				if (this.editor) {
-					console.log(
-						`[incsearch] applyMatch (50ms delay) - Editor cursor: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
-					);
-				}
-			}, 50);
 		}
 	}
 }
