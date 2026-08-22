@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { IncrementalSearchSuggestModal } from "../src/modal";
-import { searchSessionField } from "../src/session";
+import { searchSessionField, setActiveIndex } from "../src/session";
 import { SearchSessionState } from "../src/types";
 
 describe("modal: IncrementalSearchSuggestModal", () => {
@@ -12,10 +12,14 @@ describe("modal: IncrementalSearchSuggestModal", () => {
   let mockView: any;
   let dispatches: any[] = [];
   let editorCursor: any = null;
+  let scrollCalls: any[] = [];
+  let focusCalls: number = 0;
 
   beforeEach(() => {
     vi.useFakeTimers();
     dispatches = [];
+    scrollCalls = [];
+    focusCalls = 0;
     editorCursor = null;
     sessionState = {
       query: "",
@@ -36,11 +40,15 @@ describe("modal: IncrementalSearchSuggestModal", () => {
       setCursor: (pos: any) => {
         editorCursor = pos;
       },
-      setSelection: (anchor: any, head: any) => {
+      setSelection: (_anchor: any, head: any) => {
         editorCursor = head;
       },
-      scrollIntoView: () => {},
-      focus: () => {},
+      scrollIntoView: (range: any, center?: boolean) => {
+        scrollCalls.push({ range, center });
+      },
+      focus: () => {
+        focusCalls++;
+      },
     };
 
     const state = EditorState.create({
@@ -66,7 +74,9 @@ describe("modal: IncrementalSearchSuggestModal", () => {
           }
         }
       },
-      focus: () => {},
+      focus: () => {
+        focusCalls++;
+      },
     };
   });
 
@@ -122,6 +132,8 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     expect(lastDispatch.selection.head).toBe(44);
     // Editor cursor was updated to line 1, ch 22
     expect(editorCursor).toEqual({ line: 1, ch: 22 });
+    expect(scrollCalls.length).toBeGreaterThan(0);
+    expect(scrollCalls[scrollCalls.length - 1].center).toBe(true);
   });
 
   it("onClose restores original cursor on ESC without moving", () => {
@@ -138,5 +150,41 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     expect(lastDispatch.selection.anchor).toBe(2);
     expect(lastDispatch.selection.head).toBe(2);
     expect(editorCursor).toEqual({ line: 0, ch: 2 });
+  });
+
+  it("regression: previewing match with navigation but exiting with ESC reverts to exact origin", () => {
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
+    modal.getSuggestions("match");
+
+    // Simulate previewing match 1 in document
+    setActiveIndex(mockView, 1);
+    expect(sessionState?.activeIndex).toBe(1);
+
+    // User hits ESC without choosing
+    modal.chosen = false;
+    modal.onClose();
+    vi.runAllTimers();
+
+    // Cursor must NOT stay on match 1, but must be restored to original cursor (2)
+    expect(editorCursor).toEqual({ line: 0, ch: 2 });
+    const lastDispatch = dispatches[dispatches.length - 1];
+    expect(lastDispatch.selection.head).toBe(2);
+  });
+
+  it("regression: deferred timer callbacks ensure final focus and cursor placement after modal close", () => {
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
+    modal.getSuggestions("match");
+
+    modal.onChooseSuggestion(0, new MouseEvent("click"));
+    modal.onClose();
+
+    // Immediate state
+    expect(editorCursor).toEqual({ line: 0, ch: 21 });
+
+    // Run timers for 0ms and 50ms deferred cycles
+    vi.advanceTimersByTime(100);
+
+    expect(editorCursor).toEqual({ line: 0, ch: 21 });
+    expect(focusCalls).toBeGreaterThanOrEqual(2);
   });
 });
