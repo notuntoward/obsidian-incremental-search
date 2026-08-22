@@ -56,6 +56,7 @@ When fuzzy matching is enabled (default), spaces between words act as flexible w
 ## Settings
 
 - **Fuzzy matching:** Toggle between space-as-wildcard fuzzy matching and exact literal substring search.
+- **Match only visible part of links:** When enabled (default), ignores hidden URLs in Markdown links (`[text](url)`) and hidden destinations in aliased wikilinks (`[[destination|alias]]`).
 - **Double-tap window (ms):** The timeout window (default `600ms`) during which consecutive search hotkey presses recall the last search query.
 - **Use popup modal interface:** Option to use a center-screen modal picker with line numbers instead of the inline floating widget.
 
