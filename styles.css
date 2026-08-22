@@ -1,7 +1,11 @@
 /* Match Highlighting */
 :root {
-  --incsearch-match-bg: var(--text-highlight-bg, rgba(255, 255, 0, 0.35));
-  --incsearch-current-outline: var(--interactive-accent, orange);
+  --incsearch-tint-ratio: 15%;
+  --incsearch-match-bg: color-mix(
+    in srgb,
+    var(--background-primary) calc(100% - var(--incsearch-tint-ratio)),
+    var(--text-selection) var(--incsearch-tint-ratio)
+  );
   --incsearch-gap-underline: var(--text-faint, rgba(128, 128, 128, 0.4));
 }
 
@@ -13,7 +17,7 @@
 }
 
 .incsearch-match-exact.is-current {
-  outline: 2px solid var(--incsearch-current-outline);
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 1px;
   font-weight: 600;
   border-radius: var(--radius-s, 4px);
@@ -21,7 +25,7 @@
 
 /* Mode C - Fuzzy Matches */
 .incsearch-match-fuzzy-span.is-current {
-  outline: 2px solid var(--incsearch-current-outline);
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 2px;
   border-radius: var(--radius-s, 4px);
   box-decoration-break: clone;

@@ -19,6 +19,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     const app = {
       workspace: {
         on: () => {},
+        onLayoutReady: (cb: any) => cb(),
       },
     };
     plugin = new IncrementalSearchPlugin(app as any, {} as any);

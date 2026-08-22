@@ -11,6 +11,8 @@ import {
 import { renderWidget, updateWidgetCounter, removeAllWidgets, getActiveWidget } from "./widget";
 import { IncrementalSearchSuggestModal } from "./modal";
 
+import { updateResolvedOutlineColor } from "./utils/colors";
+
 export * from "./types";
 export * from "./engine";
 export * from "./session";
@@ -24,6 +26,16 @@ export default class IncrementalSearchPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.registerEditorExtension([searchSessionField, searchHighlightPlugin]);
+
+		this.app.workspace.onLayoutReady(() => {
+			updateResolvedOutlineColor();
+		});
+
+		this.registerEvent(
+			this.app.workspace.on("css-change", () => {
+				updateResolvedOutlineColor();
+			})
+		);
 
 		this.addCommand({
 			id: "forward",
