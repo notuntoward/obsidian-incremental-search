@@ -1,23 +1,45 @@
 /* Match Highlighting */
-.incsearch-match {
-  background-color: var(--text-highlight-bg, rgba(255, 255, 0, 0.35));
-  border-radius: 2px;
+:root {
+  --incsearch-match-bg: var(--text-highlight-bg, rgba(255, 255, 0, 0.35));
+  --incsearch-current-outline: var(--interactive-accent, orange);
+  --incsearch-gap-underline: var(--text-faint, rgba(128, 128, 128, 0.4));
 }
 
-.incsearch-match-current {
-  background-color: var(--text-selection, rgba(255, 140, 0, 0.6));
-  outline: 1px solid orange;
-  border-radius: 2px;
+/* Mode A & B - Exact Matches */
+.incsearch-match-exact {
+  background-color: var(--incsearch-match-bg);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
-.incsearch-match-span {
-  background-color: var(--background-modifier-hover, rgba(128, 128, 128, 0.15));
-  border-radius: 2px;
+.incsearch-match-exact.is-current {
+  outline: 2px solid var(--incsearch-current-outline);
+  outline-offset: 1px;
+  font-weight: 600;
+  border-radius: var(--radius-s, 4px);
 }
 
-.incsearch-match-span-current {
-  background-color: rgba(255, 140, 0, 0.15);
-  border-radius: 2px;
+/* Mode C - Fuzzy Matches */
+.incsearch-match-fuzzy-span.is-current {
+  outline: 2px solid var(--incsearch-current-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-s, 4px);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.incsearch-match-fuzzy-word {
+  background-color: var(--incsearch-match-bg);
+  font-weight: 600;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.incsearch-match-fuzzy-gap {
+  background-color: transparent;
+  text-decoration: underline;
+  text-decoration-color: var(--incsearch-gap-underline);
+  opacity: 0.85;
 }
 
 /* Floating Search Widget */

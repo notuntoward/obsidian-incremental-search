@@ -38,10 +38,12 @@ export function buildHighlightDecorations(
 		if (!inVisible) continue;
 
 		const isCurrent = i === session.activeIndex;
-		const cls = isCurrent ? "incsearch-match-current" : "incsearch-match";
+		const exactCls = isCurrent ? "incsearch-match-exact is-current" : "incsearch-match-exact";
 
-		if (m.chars && m.chars.length > 0) {
-			const spanCls = isCurrent ? "incsearch-match-span-current" : "incsearch-match-span";
+		if (m.chars && m.chars.length > 1) {
+			const spanCls = isCurrent
+				? "incsearch-match-fuzzy-span is-current"
+				: "incsearch-match-fuzzy-span";
 
 			positions.push({
 				from: m.from,
@@ -49,18 +51,34 @@ export function buildHighlightDecorations(
 				mark: Decoration.mark({ class: spanCls }),
 			});
 
+			let currentOffset = m.from;
 			for (const c of m.chars) {
+				if (c.from > currentOffset) {
+					positions.push({
+						from: currentOffset,
+						to: c.from,
+						mark: Decoration.mark({ class: "incsearch-match-fuzzy-gap" }),
+					});
+				}
 				positions.push({
 					from: c.from,
 					to: c.to,
-					mark: Decoration.mark({ class: cls }),
+					mark: Decoration.mark({ class: "incsearch-match-fuzzy-word" }),
+				});
+				currentOffset = c.to;
+			}
+			if (currentOffset < m.to) {
+				positions.push({
+					from: currentOffset,
+					to: m.to,
+					mark: Decoration.mark({ class: "incsearch-match-fuzzy-gap" }),
 				});
 			}
 		} else {
 			positions.push({
 				from: m.from,
 				to: m.to,
-				mark: Decoration.mark({ class: cls }),
+				mark: Decoration.mark({ class: exactCls }),
 			});
 		}
 	}
