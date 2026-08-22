@@ -20,7 +20,7 @@ Users who keep their hands on the home row will appreciate this keyboard-driven 
   - `Enter`: Commits the match and places the cursor at the end of the match.
   - `Escape`: Cancels search and restores your cursor to where you began.
   - Search widget disappears immediately upon exit.
-- **Center-Screen Popup Modal (Optional):** Toggle between the inline floating widget and a centered suggest modal in settings.
+- **Alternative Popup Modal:** An optional center-screen modal interface is available in settings. It provides an interface that may be more familiar to some users, though it is more limited than the default inline widget (it is non-directional, uses a simplified matching engine, and both forward/backward commands simply open the same modal).
 
 ---
 
