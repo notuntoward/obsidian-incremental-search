@@ -82,7 +82,13 @@ export default class IncrementalSearchPlugin extends Plugin {
 		});
 
 		if (this.settings.usePopupModal) {
-			const modal = new IncrementalSearchSuggestModal(this.app, this, view, direction);
+			const modal = new IncrementalSearchSuggestModal(
+				this.app,
+				this,
+				editor,
+				view,
+				direction
+			);
 			modal.open();
 			if (startingQuery) {
 				modal.inputEl.value = startingQuery;

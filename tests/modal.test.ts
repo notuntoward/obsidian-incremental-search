@@ -8,12 +8,15 @@ describe("modal: IncrementalSearchSuggestModal", () => {
   let sessionState: SearchSessionState | null = null;
   let mockApp: any;
   let mockPlugin: any;
+  let mockEditor: any;
   let mockView: any;
   let dispatches: any[] = [];
+  let editorCursor: any = null;
 
   beforeEach(() => {
     vi.useFakeTimers();
     dispatches = [];
+    editorCursor = null;
     sessionState = {
       query: "",
       direction: "forward",
@@ -26,6 +29,18 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     mockPlugin = {
       settings: { fuzzyMode: true, lastQuery: "", usePopupModal: true, doubleTapWindowMs: 600 },
       saveSettings: async () => {},
+    };
+
+    mockEditor = {
+      offsetToPos: (offset: number) => ({ line: offset > 21 ? 1 : 0, ch: offset > 21 ? offset - 22 : offset }),
+      setCursor: (pos: any) => {
+        editorCursor = pos;
+      },
+      setSelection: (anchor: any, head: any) => {
+        editorCursor = head;
+      },
+      scrollIntoView: () => {},
+      focus: () => {},
     };
 
     const state = EditorState.create({
@@ -60,7 +75,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
   });
 
   it("getSuggestions computes matches and returns indices", () => {
-    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     const suggestions = modal.getSuggestions("match");
 
     expect(suggestions).toEqual([0, 1]);
@@ -68,14 +83,14 @@ describe("modal: IncrementalSearchSuggestModal", () => {
   });
 
   it("getSuggestions returns empty array when query has no matches", () => {
-    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     const suggestions = modal.getSuggestions("xyznonexistent");
 
     expect(suggestions).toEqual([]);
   });
 
   it("renderSuggestion renders line number and highlights for fuzzy matches", () => {
-    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     modal.getSuggestions("first match");
 
     const el = document.createElement("div");
@@ -90,7 +105,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
   });
 
   it("onChooseSuggestion and onClose move cursor to match end on ENTER", () => {
-    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     modal.getSuggestions("match");
 
     modal.onChooseSuggestion(1, new MouseEvent("click"));
@@ -105,10 +120,12 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     expect(lastDispatch.selection).toBeDefined();
     // Match index 1 in "first line with match\nsecond line with match" ends at index 44
     expect(lastDispatch.selection.head).toBe(44);
+    // Editor cursor was updated to line 1, ch 22
+    expect(editorCursor).toEqual({ line: 1, ch: 22 });
   });
 
   it("onClose restores original cursor on ESC without moving", () => {
-    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     modal.getSuggestions("match");
     modal.chosen = false;
 
@@ -120,5 +137,6 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     const lastDispatch = dispatches[dispatches.length - 1];
     expect(lastDispatch.selection.anchor).toBe(2);
     expect(lastDispatch.selection.head).toBe(2);
+    expect(editorCursor).toEqual({ line: 0, ch: 2 });
   });
 });

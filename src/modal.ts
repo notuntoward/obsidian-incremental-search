@@ -1,4 +1,4 @@
-import { App, SuggestModal } from "obsidian";
+import { App, SuggestModal, Editor } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
 import { SearchDirection, IncrementalSearchSettings, MatchRange } from "./types";
@@ -12,6 +12,7 @@ import {
 
 export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> };
+	editor: Editor | null;
 	cm: EditorView;
 	direction: SearchDirection;
 	observer: MutationObserver | null = null;
@@ -21,11 +22,13 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	constructor(
 		app: App,
 		plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
+		editor: Editor | null,
 		cm: EditorView,
 		direction: SearchDirection
 	) {
 		super(app);
 		this.plugin = plugin;
+		this.editor = editor;
 		this.cm = cm;
 		this.direction = direction;
 		this.setPlaceholder("Search...");
@@ -113,12 +116,58 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			this.observer = null;
 		}
 
-		const session = this.cm.state.field(searchSessionField, false);
+		if (!this.chosen) {
+			const session = this.cm.state.field(searchSessionField, false);
+			if (session) {
+				saveSessionQuery(session, this.plugin);
+				const originHead = session.originSelection.head;
+				const originAnchor = session.originSelection.anchor;
 
-		if (this.chosen && this.selectedMatch) {
-			const match = this.selectedMatch;
-			// Enter / Choose: Move cursor to end of matched string and scroll into view
-			window.setTimeout(() => {
+				const restoreOrigin = () => {
+					this.cm.dispatch({
+						selection: EditorSelection.range(originAnchor, originHead),
+						effects: [
+							setSession.of(null),
+							EditorView.scrollIntoView(
+								EditorSelection.range(originAnchor, originHead),
+								{ y: "center", x: "nearest" }
+							),
+						],
+					});
+
+					if (this.editor) {
+						const anchorPos = this.editor.offsetToPos(originAnchor);
+						const headPos = this.editor.offsetToPos(originHead);
+						if (originAnchor === originHead) {
+							this.editor.setCursor(headPos);
+						} else {
+							this.editor.setSelection(anchorPos, headPos);
+						}
+						this.editor.scrollIntoView({ from: anchorPos, to: headPos }, true);
+						this.editor.focus();
+					} else {
+						this.cm.focus();
+					}
+				};
+
+				restoreOrigin();
+				window.setTimeout(restoreOrigin, 0);
+				window.setTimeout(restoreOrigin, 50);
+			} else {
+				this.cm.dispatch({ effects: setSession.of(null) });
+			}
+		}
+	}
+
+	onChooseSuggestion(index: number, _evt: MouseEvent | KeyboardEvent) {
+		this.chosen = true;
+		const session = this.cm.state.field(searchSessionField, false);
+		if (session && session.matches[index]) {
+			const match = session.matches[index];
+			this.selectedMatch = match;
+			saveSessionQuery(session, this.plugin);
+
+			const applyMatch = () => {
 				this.cm.dispatch({
 					selection: EditorSelection.cursor(match.to),
 					effects: [
@@ -129,41 +178,21 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 						}),
 					],
 				});
-				this.cm.focus();
-			}, 0);
-		} else {
-			// Escape / Cancel: Restore original cursor position without moving
-			window.setTimeout(() => {
-				if (session) {
-					saveSessionQuery(session, this.plugin);
-					this.cm.dispatch({
-						selection: EditorSelection.range(
-							session.originSelection.anchor,
-							session.originSelection.head
-						),
-						effects: [
-							setSession.of(null),
-							EditorView.scrollIntoView(
-								EditorSelection.range(
-									session.originSelection.anchor,
-									session.originSelection.head
-								),
-								{ y: "center", x: "nearest" }
-							),
-						],
-					});
-				}
-				this.cm.focus();
-			}, 0);
-		}
-	}
 
-	onChooseSuggestion(index: number, _evt: MouseEvent | KeyboardEvent) {
-		this.chosen = true;
-		const session = this.cm.state.field(searchSessionField, false);
-		if (session && session.matches[index]) {
-			this.selectedMatch = session.matches[index];
-			saveSessionQuery(session, this.plugin);
+				if (this.editor) {
+					const pos = this.editor.offsetToPos(match.to);
+					this.editor.setCursor(pos);
+					const fromPos = this.editor.offsetToPos(match.from);
+					this.editor.scrollIntoView({ from: fromPos, to: pos }, true);
+					this.editor.focus();
+				} else {
+					this.cm.focus();
+				}
+			};
+
+			applyMatch();
+			window.setTimeout(applyMatch, 0);
+			window.setTimeout(applyMatch, 50);
 		}
 	}
 }
