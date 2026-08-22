@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import SwiperSearchPlugin from "../src/main";
+import IncrementalSearchPlugin from "../src/main";
 import { getActiveWidget } from "../src/widget";
 
+(global as any).Event = class {};
 
-
-describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
+describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
   let plugin: any;
   let commands: Record<string, any>;
   let dispatches: any[];
@@ -21,7 +21,7 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
         on: () => {},
       },
     };
-    plugin = new SwiperSearchPlugin(app as any, {} as any);
+    plugin = new IncrementalSearchPlugin(app as any, {} as any);
 
     // Intercept addCommand to capture the callbacks
     plugin.addCommand = (cmd: any) => {
@@ -41,8 +41,8 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
   });
 
   it("registers forward and backward commands", () => {
-    expect(commands["swiper-search-forward"]).toBeDefined();
-    expect(commands["swiper-search-backward"]).toBeDefined();
+    expect(commands["forward"]).toBeDefined();
+    expect(commands["backward"]).toBeDefined();
   });
 
   it("starts a new session if none is active", () => {
@@ -68,7 +68,7 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     // Trigger forward search
-    commands["swiper-search-forward"].editorCallback(mockEditor);
+    commands["forward"].editorCallback(mockEditor);
 
     // It should have dispatched a setSession effect with a new session
     expect(dispatches.length).toBeGreaterThan(0);
@@ -101,8 +101,8 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
       },
     };
 
-    // Trigger forward search again (like pressing Ctrl+S a second time)
-    commands["swiper-search-forward"].editorCallback(mockEditor);
+    // Trigger forward search again (like pressing search command hotkey a second time)
+    commands["forward"].editorCallback(mockEditor);
 
     // It should just advance, not reset the query
     expect(currentSession.query).toBe("test");
@@ -141,7 +141,7 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     // Trigger backward search on empty active session -> recalls lastQuery in backward direction
-    commands["swiper-search-backward"].editorCallback(mockEditor);
+    commands["backward"].editorCallback(mockEditor);
 
     expect(currentSession.query).toBe("previous search");
     expect(currentSession.direction).toBe("backward");
@@ -172,8 +172,8 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
       },
     };
 
-    // Trigger backward search (like pressing Ctrl+R)
-    commands["swiper-search-backward"].editorCallback(mockEditor);
+    // Trigger backward search
+    commands["backward"].editorCallback(mockEditor);
 
     expect(currentSession.direction).toBe("backward"); // switches direction
     expect(currentSession.activeIndex).toBe(1); // wrapped around from 0 to 1
@@ -184,7 +184,7 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(getActiveWidget()).toBeNull();
   });
 
-  it("opens SwiperSuggestModal when usePopupModal is enabled", () => {
+  it("opens IncrementalSearchSuggestModal when usePopupModal is enabled", () => {
     plugin.settings.usePopupModal = true;
 
     const mockEditor = {
@@ -208,7 +208,7 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     expect(() => {
-      commands["swiper-search-forward"].editorCallback(mockEditor);
+      commands["forward"].editorCallback(mockEditor);
     }).not.toThrow();
   });
 
@@ -224,4 +224,3 @@ describe("SwiperSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(() => settingTabInstance.display()).not.toThrow();
   });
 });
-

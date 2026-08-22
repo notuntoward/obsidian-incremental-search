@@ -1,6 +1,6 @@
 import { App, SuggestModal } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { SearchDirection, SwiperSearchSettings } from "./types";
+import { SearchDirection, IncrementalSearchSettings } from "./types";
 import {
 	searchSessionField,
 	recomputeQuery,
@@ -10,8 +10,8 @@ import {
 	saveSessionQuery,
 } from "./session";
 
-export class SwiperSuggestModal extends SuggestModal<number> {
-	plugin: { settings: SwiperSearchSettings; saveSettings: () => Promise<void> };
+export class IncrementalSearchSuggestModal extends SuggestModal<number> {
+	plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> };
 	cm: EditorView;
 	direction: SearchDirection;
 	observer: MutationObserver | null = null;
@@ -19,7 +19,7 @@ export class SwiperSuggestModal extends SuggestModal<number> {
 
 	constructor(
 		app: App,
-		plugin: { settings: SwiperSearchSettings; saveSettings: () => Promise<void> },
+		plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
 		cm: EditorView,
 		direction: SearchDirection
 	) {
@@ -27,7 +27,7 @@ export class SwiperSuggestModal extends SuggestModal<number> {
 		this.plugin = plugin;
 		this.cm = cm;
 		this.direction = direction;
-		this.setPlaceholder("Swiper search...");
+		this.setPlaceholder("Search...");
 	}
 
 	getSuggestions(query: string): number[] {
@@ -47,7 +47,7 @@ export class SwiperSuggestModal extends SuggestModal<number> {
 
 		el.setAttribute("data-index", index.toString());
 
-		const lineSpan = el.createSpan({ cls: "swiper-line-number" });
+		const lineSpan = el.createSpan({ cls: "incsearch-line-number" });
 		lineSpan.textContent = `${line.number}: `;
 
 		const textSpan = el.createSpan();
@@ -60,7 +60,7 @@ export class SwiperSuggestModal extends SuggestModal<number> {
 				textSpan.appendChild(
 					document.createTextNode(line.text.substring(last, localCharStart))
 				);
-				const hl = textSpan.createSpan({ cls: "swiper-match" });
+				const hl = textSpan.createSpan({ cls: "incsearch-match" });
 				hl.textContent = line.text.substring(localCharStart, localCharEnd);
 				last = localCharEnd;
 			}
@@ -71,7 +71,7 @@ export class SwiperSuggestModal extends SuggestModal<number> {
 
 			if (localStart >= 0 && localEnd <= line.length) {
 				textSpan.appendChild(document.createTextNode(line.text.substring(0, localStart)));
-				const hl = textSpan.createSpan({ cls: "swiper-match" });
+				const hl = textSpan.createSpan({ cls: "incsearch-match" });
 				hl.textContent = line.text.substring(localStart, localEnd);
 				textSpan.appendChild(document.createTextNode(line.text.substring(localEnd)));
 			} else {

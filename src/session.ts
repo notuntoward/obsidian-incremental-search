@@ -38,10 +38,10 @@ export function buildHighlightDecorations(
 		if (!inVisible) continue;
 
 		const isCurrent = i === session.activeIndex;
-		const cls = isCurrent ? "swiper-match-current" : "swiper-match";
+		const cls = isCurrent ? "incsearch-match-current" : "incsearch-match";
 
 		if (m.chars && m.chars.length > 0) {
-			const spanCls = isCurrent ? "swiper-match-span-current" : "swiper-match-span";
+			const spanCls = isCurrent ? "incsearch-match-span-current" : "incsearch-match-span";
 
 			positions.push({
 				from: m.from,
@@ -74,7 +74,7 @@ export function buildHighlightDecorations(
 /**
  * CodeMirror 6 ViewPlugin for rendering search highlights.
  */
-export const swiperHighlightPlugin = ViewPlugin.fromClass(
+export const searchHighlightPlugin = ViewPlugin.fromClass(
 	class {
 		decorations: DecorationSet;
 
@@ -240,7 +240,7 @@ export function commitMatch(
 		removeWidget(view);
 		view.focus();
 	} catch (e) {
-		console.error("Swiper Search: commitMatch error", e);
+		console.error("Incremental Search: commitMatch error", e);
 		removeWidget(view);
 		view.focus();
 	}
@@ -268,7 +268,7 @@ export function cancelSession(
 		removeWidget(view);
 		view.focus();
 	} catch (e) {
-		console.error("Swiper Search: cancelSession error", e);
+		console.error("Incremental Search: cancelSession error", e);
 		removeWidget(view);
 		view.focus();
 	}

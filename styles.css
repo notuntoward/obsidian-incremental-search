@@ -1,27 +1,27 @@
 /* Match Highlighting */
-.swiper-match {
+.incsearch-match {
   background-color: var(--text-highlight-bg, rgba(255, 255, 0, 0.35));
   border-radius: 2px;
 }
 
-.swiper-match-current {
+.incsearch-match-current {
   background-color: var(--text-selection, rgba(255, 140, 0, 0.6));
   outline: 1px solid orange;
   border-radius: 2px;
 }
 
-.swiper-match-span {
+.incsearch-match-span {
   background-color: var(--background-modifier-hover, rgba(128, 128, 128, 0.15));
   border-radius: 2px;
 }
 
-.swiper-match-span-current {
+.incsearch-match-span-current {
   background-color: rgba(255, 140, 0, 0.15);
   border-radius: 2px;
 }
 
 /* Floating Search Widget */
-.swiper-search-widget {
+.incsearch-widget {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -37,7 +37,7 @@
   box-shadow: var(--shadow-s);
 }
 
-.swiper-search-input {
+.incsearch-input {
   border: none;
   outline: none;
   background: transparent;
@@ -45,17 +45,17 @@
   color: var(--text-normal);
 }
 
-.swiper-search-counter {
+.incsearch-counter {
   color: var(--text-muted);
   min-width: 48px;
   text-align: right;
 }
 
-.swiper-search-dir {
+.incsearch-dir {
   color: var(--text-muted);
 }
 
-.swiper-line-number {
+.incsearch-line-number {
   color: var(--text-muted);
   margin-right: 8px;
 }

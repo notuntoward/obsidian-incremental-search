@@ -1,15 +1,15 @@
 import { Plugin, PluginSettingTab, App, Setting, Editor } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { SwiperSearchSettings, DEFAULT_SETTINGS, SearchDirection } from "./types";
+import { IncrementalSearchSettings, DEFAULT_SETTINGS, SearchDirection } from "./types";
 import {
 	searchSessionField,
-	swiperHighlightPlugin,
+	searchHighlightPlugin,
 	setSession,
 	recomputeQuery,
 	advance,
 } from "./session";
 import { renderWidget, updateWidgetCounter, removeAllWidgets, getActiveWidget } from "./widget";
-import { SwiperSuggestModal } from "./modal";
+import { IncrementalSearchSuggestModal } from "./modal";
 
 export * from "./types";
 export * from "./engine";
@@ -17,27 +17,27 @@ export * from "./session";
 export * from "./widget";
 export * from "./modal";
 
-export default class SwiperSearchPlugin extends Plugin {
-	settings: SwiperSearchSettings;
+export default class IncrementalSearchPlugin extends Plugin {
+	settings: IncrementalSearchSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		this.registerEditorExtension([searchSessionField, swiperHighlightPlugin]);
+		this.registerEditorExtension([searchSessionField, searchHighlightPlugin]);
 
 		this.addCommand({
-			id: "swiper-search-forward",
-			name: "Swiper-style search (forward)",
+			id: "forward",
+			name: "Forward",
 			editorCallback: (editor: Editor) => this.invoke(editor, "forward"),
 		});
 
 		this.addCommand({
-			id: "swiper-search-backward",
-			name: "Swiper-style search (backward)",
+			id: "backward",
+			name: "Backward",
 			editorCallback: (editor: Editor) => this.invoke(editor, "backward"),
 		});
 
-		this.addSettingTab(new SwiperSearchSettingTab(this.app, this));
+		this.addSettingTab(new IncrementalSearchSettingTab(this.app, this));
 	}
 
 	onunload() {
@@ -55,7 +55,7 @@ export default class SwiperSearchPlugin extends Plugin {
 				recomputeQuery(view, this.settings.lastQuery, direction, this.settings.fuzzyMode);
 				const widget = getActiveWidget();
 				if (widget) {
-					const input = widget.querySelector(".swiper-search-input") as HTMLInputElement;
+					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
 					if (input) {
 						input.value = this.settings.lastQuery;
 						input.select();
@@ -82,7 +82,7 @@ export default class SwiperSearchPlugin extends Plugin {
 		});
 
 		if (this.settings.usePopupModal) {
-			const modal = new SwiperSuggestModal(this.app, this, view, direction);
+			const modal = new IncrementalSearchSuggestModal(this.app, this, view, direction);
 			modal.open();
 			if (startingQuery) {
 				modal.inputEl.value = startingQuery;
@@ -105,10 +105,10 @@ export default class SwiperSearchPlugin extends Plugin {
 	}
 }
 
-class SwiperSearchSettingTab extends PluginSettingTab {
-	plugin: SwiperSearchPlugin;
+class IncrementalSearchSettingTab extends PluginSettingTab {
+	plugin: IncrementalSearchPlugin;
 
-	constructor(app: App, plugin: SwiperSearchPlugin) {
+	constructor(app: App, plugin: IncrementalSearchPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -120,7 +120,7 @@ class SwiperSearchSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Fuzzy matching")
 			.setDesc(
-				"Match characters out of order (like Ivy/swiper), instead of literal substring matches."
+				"Match words separated by wildcard spaces instead of literal substring matches."
 			)
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.fuzzyMode).onChange(async (value) => {

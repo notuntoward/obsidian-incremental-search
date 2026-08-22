@@ -10,7 +10,7 @@ import {
   saveSessionQuery,
   searchSessionField,
   setSession,
-  swiperHighlightPlugin,
+  searchHighlightPlugin,
   buildHighlightDecorations,
 } from "../src/session";
 import { SearchSessionState } from "../src/types";
@@ -263,7 +263,7 @@ describe("session: termination & query persistence", () => {
   });
 });
 
-describe("session: swiperHighlightPlugin decorations", () => {
+describe("session: searchHighlightPlugin decorations", () => {
   it("builds decorations for fuzzy matches with chars and full span", () => {
     const session: SearchSessionState = {
       query: "the KAN",
@@ -304,4 +304,3 @@ describe("session: swiperHighlightPlugin decorations", () => {
     expect(decorationsEmpty.size).toBe(0);
   });
 });
-

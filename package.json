@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-incremental-search",
 	"version": "0.1.0",
-	"description": "Obsidian Swiper-Style Incremental Search",
+	"description": "Obsidian Incremental Search",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

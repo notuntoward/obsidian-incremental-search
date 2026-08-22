@@ -14,14 +14,14 @@ export interface SearchSessionState {
 	originSelection: { anchor: number; head: number };
 }
 
-export interface SwiperSearchSettings {
+export interface IncrementalSearchSettings {
 	lastQuery: string;
 	doubleTapWindowMs: number;
 	fuzzyMode: boolean;
 	usePopupModal: boolean;
 }
 
-export const DEFAULT_SETTINGS: SwiperSearchSettings = {
+export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	lastQuery: "",
 	doubleTapWindowMs: 600,
 	fuzzyMode: true,

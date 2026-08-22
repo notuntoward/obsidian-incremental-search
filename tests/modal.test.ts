@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { EditorState } from "@codemirror/state";
-import { SwiperSuggestModal } from "../src/modal";
+import { IncrementalSearchSuggestModal } from "../src/modal";
 import { searchSessionField } from "../src/session";
 import { SearchSessionState } from "../src/types";
 
-describe("modal: SwiperSuggestModal", () => {
+describe("modal: IncrementalSearchSuggestModal", () => {
   let sessionState: SearchSessionState | null = null;
   let mockApp: any;
   let mockPlugin: any;
@@ -52,7 +52,7 @@ describe("modal: SwiperSuggestModal", () => {
   });
 
   it("getSuggestions computes matches and returns indices", () => {
-    const modal = new SwiperSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     const suggestions = modal.getSuggestions("match");
 
     expect(suggestions).toEqual([0, 1]);
@@ -60,29 +60,29 @@ describe("modal: SwiperSuggestModal", () => {
   });
 
   it("getSuggestions returns empty array when query has no matches", () => {
-    const modal = new SwiperSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     const suggestions = modal.getSuggestions("xyznonexistent");
 
     expect(suggestions).toEqual([]);
   });
 
   it("renderSuggestion renders line number and highlights for fuzzy matches", () => {
-    const modal = new SwiperSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     modal.getSuggestions("first match");
 
     const el = document.createElement("div");
     modal.renderSuggestion(0, el);
 
     expect(el.getAttribute("data-index")).toBe("0");
-    const lineSpan = el.querySelector(".swiper-line-number");
+    const lineSpan = el.querySelector(".incsearch-line-number");
     expect(lineSpan?.textContent).toBe("1: ");
 
-    const matchSpans = el.querySelectorAll(".swiper-match");
+    const matchSpans = el.querySelectorAll(".incsearch-match");
     expect(matchSpans.length).toBeGreaterThan(0);
   });
 
   it("onChooseSuggestion commits the selected match", () => {
-    const modal = new SwiperSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     modal.getSuggestions("match");
 
     modal.onChooseSuggestion(1, new MouseEvent("click"));
@@ -92,7 +92,7 @@ describe("modal: SwiperSuggestModal", () => {
   });
 
   it("onClose cancels session if suggestion was not chosen", () => {
-    const modal = new SwiperSuggestModal(mockApp, mockPlugin, mockView, "forward");
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockView, "forward");
     modal.getSuggestions("match");
     modal.chosen = false;
 

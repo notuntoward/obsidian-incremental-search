@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { SearchDirection, SwiperSearchSettings } from "./types";
+import { SearchDirection, IncrementalSearchSettings } from "./types";
 import {
 	searchSessionField,
 	recomputeQuery,
@@ -19,8 +19,8 @@ export function getActiveWidget(): HTMLDivElement | null {
  */
 export function updateWidgetCounter(view: EditorView) {
 	if (!activeWidgetEl) return;
-	const counter = activeWidgetEl.querySelector(".swiper-search-counter");
-	const dirIndicator = activeWidgetEl.querySelector(".swiper-search-dir");
+	const counter = activeWidgetEl.querySelector(".incsearch-counter");
+	const dirIndicator = activeWidgetEl.querySelector(".incsearch-dir");
 	const session = view.state.field(searchSessionField, false);
 	if (!counter || !dirIndicator || !session || !session.matches) return;
 
@@ -47,7 +47,7 @@ export function removeWidget(_view?: EditorView) {
  * Sweeps all widget elements from the document (used during plugin unload/reload).
  */
 export function removeAllWidgets() {
-	document.querySelectorAll(".swiper-search-widget").forEach((w) => w.remove());
+	document.querySelectorAll(".incsearch-widget").forEach((w) => w.remove());
 	if (activeWidgetEl) {
 		activeWidgetEl = null;
 	}
@@ -58,7 +58,7 @@ export function removeAllWidgets() {
  */
 export function renderWidget(
 	view: EditorView,
-	plugin: { settings: SwiperSearchSettings; saveSettings: () => Promise<void> },
+	plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
 	initialQuery: string,
 	initialDirection: SearchDirection
 ) {
@@ -66,19 +66,19 @@ export function renderWidget(
 
 	const container = view.dom.parentElement ?? view.dom;
 	const el = document.createElement("div");
-	el.className = "swiper-search-widget";
+	el.className = "incsearch-widget";
 
 	const dirIndicator = document.createElement("span");
-	dirIndicator.className = "swiper-search-dir";
+	dirIndicator.className = "incsearch-dir";
 	dirIndicator.textContent = initialDirection === "forward" ? "▼" : "▲";
 
 	const input = document.createElement("input");
-	input.className = "swiper-search-input";
+	input.className = "incsearch-input";
 	input.type = "text";
 	input.value = initialQuery;
 
 	const counter = document.createElement("span");
-	counter.className = "swiper-search-counter";
+	counter.className = "incsearch-counter";
 
 	el.appendChild(dirIndicator);
 	el.appendChild(input);

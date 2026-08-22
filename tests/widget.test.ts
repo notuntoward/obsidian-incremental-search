@@ -73,8 +73,8 @@ describe("widget: counter & lifecycle", () => {
     const widget = getActiveWidget();
     expect(widget).not.toBeNull();
 
-    const counter = widget?.querySelector(".swiper-search-counter");
-    const dir = widget?.querySelector(".swiper-search-dir");
+    const counter = widget?.querySelector(".incsearch-counter");
+    const dir = widget?.querySelector(".incsearch-dir");
 
     expect(counter?.textContent).toBe("2/3");
     expect(dir?.textContent).toBe("▼");
@@ -93,8 +93,8 @@ describe("widget: counter & lifecycle", () => {
     const widget = getActiveWidget();
     expect(widget).not.toBeNull();
 
-    const counter = widget?.querySelector(".swiper-search-counter");
-    const dir = widget?.querySelector(".swiper-search-dir");
+    const counter = widget?.querySelector(".incsearch-counter");
+    const dir = widget?.querySelector(".incsearch-dir");
 
     expect(counter?.textContent).toBe("0/0");
     expect(dir?.textContent).toBe("▲");
@@ -103,7 +103,7 @@ describe("widget: counter & lifecycle", () => {
   it("handles input event by recomputing query and updating counter", () => {
     renderWidget(mockView, mockPlugin, "", "forward");
     const widget = getActiveWidget();
-    const input = widget?.querySelector(".swiper-search-input") as HTMLInputElement;
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
 
     input.value = "word";
     input.dispatchEvent(new Event("input"));
@@ -114,7 +114,7 @@ describe("widget: counter & lifecycle", () => {
   it("handles Enter keydown by committing the match", () => {
     renderWidget(mockView, mockPlugin, "word", "forward");
     const widget = getActiveWidget();
-    const input = widget?.querySelector(".swiper-search-input") as HTMLInputElement;
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
 
     const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     input.dispatchEvent(event);
@@ -126,7 +126,7 @@ describe("widget: counter & lifecycle", () => {
   it("handles Escape keydown by cancelling session", () => {
     renderWidget(mockView, mockPlugin, "word", "forward");
     const widget = getActiveWidget();
-    const input = widget?.querySelector(".swiper-search-input") as HTMLInputElement;
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
 
     const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     input.dispatchEvent(event);
