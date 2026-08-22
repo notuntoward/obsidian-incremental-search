@@ -48,6 +48,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
       setCursor: (pos: any) => {
         editorCursor = pos;
       },
+      getCursor: () => editorCursor || { line: 0, ch: 2 },
       setSelection: (_anchor: any, head: any) => {
         editorCursor = head;
       },
@@ -193,6 +194,6 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     vi.advanceTimersByTime(100);
 
     expect(editorCursor).toEqual({ line: 0, ch: 21 });
-    expect(focusCalls).toBeGreaterThanOrEqual(2);
+    expect(focusCalls).toBeGreaterThanOrEqual(1);
   });
 });

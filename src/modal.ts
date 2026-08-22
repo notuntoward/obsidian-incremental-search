@@ -144,16 +144,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 							this.editor.setSelection(anchorPos, headPos);
 						}
 						this.editor.scrollIntoView({ from: anchorPos, to: headPos }, true);
-
-						// Override the active leaf's ephemeral state so Obsidian's modal teardown
-						// restores to our origin position
-						const view = this.app.workspace.activeLeaf?.view;
-						if (view && typeof view.setEphemeralState === "function") {
-							view.setEphemeralState({
-								cursor: { from: anchorPos, to: headPos },
-							});
-						}
-
 						this.editor.focus();
 					} else {
 						this.cm.focus();
@@ -161,8 +151,6 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				};
 
 				restoreOrigin();
-				window.setTimeout(restoreOrigin, 50);
-				window.setTimeout(restoreOrigin, 150);
 			} else {
 				this.cm.dispatch({ effects: setSession.of(null) });
 			}
@@ -178,6 +166,33 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			saveSessionQuery(session, this.plugin);
 
 			const applyMatch = () => {
+				if (this.editor) {
+					const pos = this.editor.offsetToPos(match.to);
+					const fromPos = this.editor.offsetToPos(match.from);
+
+					console.log(
+						`[incsearch] applyMatch - Match bounds: from=${match.from}, to=${match.to}`
+					);
+					console.log(
+						`[incsearch] applyMatch - Calculated pos: line=${pos.line}, ch=${pos.ch}`
+					);
+					console.log(
+						`[incsearch] applyMatch - Editor cursor BEFORE setCursor: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
+					);
+
+					this.editor.setCursor(pos);
+					this.editor.scrollIntoView({ from: fromPos, to: pos }, true);
+
+					console.log(
+						`[incsearch] applyMatch - Editor cursor AFTER setCursor: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
+					);
+
+					// Also log CM6 state
+					console.log(
+						`[incsearch] applyMatch - CM6 state BEFORE dispatch: anchor=${this.cm.state.selection.main.anchor}, head=${this.cm.state.selection.main.head}`
+					);
+				}
+
 				this.cm.dispatch({
 					selection: EditorSelection.cursor(match.to),
 					effects: [
@@ -190,20 +205,12 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				});
 
 				if (this.editor) {
-					const pos = this.editor.offsetToPos(match.to);
-					const fromPos = this.editor.offsetToPos(match.from);
-					this.editor.setCursor(pos);
-					this.editor.scrollIntoView({ from: fromPos, to: pos }, true);
-
-					// Override the active leaf's ephemeral state so Obsidian's modal teardown
-					// restores to our NEW position instead of the original position.
-					const view = this.app.workspace.activeLeaf?.view;
-					if (view && typeof view.setEphemeralState === "function") {
-						view.setEphemeralState({
-							cursor: { from: pos, to: pos },
-						});
-					}
-
+					console.log(
+						`[incsearch] applyMatch - Editor cursor AFTER CM6 dispatch: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
+					);
+					console.log(
+						`[incsearch] applyMatch - CM6 state AFTER dispatch: anchor=${this.cm.state.selection.main.anchor}, head=${this.cm.state.selection.main.head}`
+					);
 					this.editor.focus();
 				} else {
 					this.cm.focus();
@@ -211,8 +218,15 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			};
 
 			applyMatch();
-			window.setTimeout(applyMatch, 50);
-			window.setTimeout(applyMatch, 150);
+
+			// Diagnostics: trace cursor after a short delay to see if Obsidian clobbered it
+			window.setTimeout(() => {
+				if (this.editor) {
+					console.log(
+						`[incsearch] applyMatch (50ms delay) - Editor cursor: line=${this.editor.getCursor().line}, ch=${this.editor.getCursor().ch}`
+					);
+				}
+			}, 50);
 		}
 	}
 }
