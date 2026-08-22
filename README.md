@@ -91,5 +91,5 @@ npm run test:browser  # Run Playwright browser tests
 
 ## Acknowledgements
 
-- [**GNU Emacs**](https://git.savannah.gnu.org/cgit/emacs.git) — for pioneering incremental search (`isearch`) and space-as-wildcard navigation.
+- [**GNU Emacs**](https://www.gnu.org/software/emacs/) — for pioneering incremental search (`isearch`) and space-as-wildcard navigation.
 - [**Ivy / Swiper**](https://github.com/abo-abo/swiper) — for inspiring line-based incremental completion and regex/fuzzy search workflows.
