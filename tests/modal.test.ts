@@ -29,7 +29,15 @@ describe("modal: IncrementalSearchSuggestModal", () => {
       originSelection: { anchor: 2, head: 2 },
     };
 
-    mockApp = {};
+    mockApp = {
+      workspace: {
+        activeLeaf: {
+          view: {
+            setEphemeralState: () => {},
+          },
+        },
+      },
+    };
     mockPlugin = {
       settings: { fuzzyMode: true, lastQuery: "", usePopupModal: true, doubleTapWindowMs: 600 },
       saveSettings: async () => {},

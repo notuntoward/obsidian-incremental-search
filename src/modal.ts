@@ -144,6 +144,16 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 							this.editor.setSelection(anchorPos, headPos);
 						}
 						this.editor.scrollIntoView({ from: anchorPos, to: headPos }, true);
+
+						// Override the active leaf's ephemeral state so Obsidian's modal teardown
+						// restores to our origin position
+						const view = this.app.workspace.activeLeaf?.view;
+						if (view && typeof view.setEphemeralState === "function") {
+							view.setEphemeralState({
+								cursor: { from: anchorPos, to: headPos },
+							});
+						}
+
 						this.editor.focus();
 					} else {
 						this.cm.focus();
@@ -151,8 +161,8 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				};
 
 				restoreOrigin();
-				window.setTimeout(restoreOrigin, 0);
 				window.setTimeout(restoreOrigin, 50);
+				window.setTimeout(restoreOrigin, 150);
 			} else {
 				this.cm.dispatch({ effects: setSession.of(null) });
 			}
@@ -181,9 +191,19 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 				if (this.editor) {
 					const pos = this.editor.offsetToPos(match.to);
-					this.editor.setCursor(pos);
 					const fromPos = this.editor.offsetToPos(match.from);
+					this.editor.setCursor(pos);
 					this.editor.scrollIntoView({ from: fromPos, to: pos }, true);
+
+					// Override the active leaf's ephemeral state so Obsidian's modal teardown
+					// restores to our NEW position instead of the original position.
+					const view = this.app.workspace.activeLeaf?.view;
+					if (view && typeof view.setEphemeralState === "function") {
+						view.setEphemeralState({
+							cursor: { from: pos, to: pos },
+						});
+					}
+
 					this.editor.focus();
 				} else {
 					this.cm.focus();
@@ -191,8 +211,8 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			};
 
 			applyMatch();
-			window.setTimeout(applyMatch, 0);
 			window.setTimeout(applyMatch, 50);
+			window.setTimeout(applyMatch, 150);
 		}
 	}
 }
