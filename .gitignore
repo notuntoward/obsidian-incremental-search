@@ -21,3 +21,6 @@ Thumbs.db
 
 # Obsidian (generated at runtime)
 data.json
+
+# Test coverage
+coverage/

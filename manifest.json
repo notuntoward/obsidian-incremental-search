@@ -1,9 +1,9 @@
 {
-	"id": "obsidian-plugin-template",
-	"name": "Obsidian Plugin Template",
+	"id": "obsidian-incremental-search",
+	"name": "Incremental Search",
 	"version": "0.1.0",
-	"minAppVersion": "1.9.0",
-	"description": "Replace this description with what your plugin does.",
+	"minAppVersion": "1.13.1",
+	"description": "Obsidian Swiper-Style Incremental Search",
 	"author": "Scott Otterson",
 	"authorUrl": "https://github.com/notuntoward",
 	"isDesktopOnly": false

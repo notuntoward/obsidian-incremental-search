@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-plugin-template",
+	"name": "obsidian-incremental-search",
 	"version": "0.1.0",
-	"description": "Template for an Obsidian plugin. Replace this description.",
+	"description": "Obsidian Swiper-Style Incremental Search",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -36,7 +36,7 @@
 		"fast-check": "^4.5.3",
 		"globals": "^17.6.0",
 		"jsdom": "^29.0.1",
-		"obsidian": "latest",
+		"obsidian": "^1.13.1",
 		"playwright": "^1.59.1",
 		"prettier": "^3.1.1",
 		"tslib": "^2.6.2",

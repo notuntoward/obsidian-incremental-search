@@ -17,6 +17,7 @@ export class Plugin {
 	addSettingTab(_tab: any): void {}
 	registerEvent(_event: any): void {}
 	registerDomEvent(_el: any, _type: string, _callback: any): void {}
+	registerEditorExtension(_extension: any): void {}
 	registerInterval(_id: number): number {
 		return _id;
 	}
@@ -81,6 +82,17 @@ export class Modal {
 	close(): void {}
 	onOpen(): void {}
 	onClose(): void {}
+}
+
+export class SuggestModal extends Modal {
+  inputEl: any;
+  resultContainerEl: any;
+  constructor(app: any) {
+    super(app);
+    this.inputEl = { value: "", dispatchEvent: () => {} };
+    this.resultContainerEl = { querySelector: () => null };
+  }
+  setPlaceholder(text: string): void {}
 }
 
 export class Component {
