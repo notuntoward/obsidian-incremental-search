@@ -170,7 +170,7 @@ describe("engine: computeMatches", () => {
       doc: "Line 1: first match\nLine 2: second match\nLine 3: third",
     });
 
-    const matches = computeMatches(state, "match", true);
+    const matches = computeMatches(state, "match", true, false);
     expect(matches).toHaveLength(2);
     expect(matches[0].from).toBe(14);
     expect(matches[0].to).toBe(19);
@@ -180,7 +180,42 @@ describe("engine: computeMatches", () => {
 
   it("returns empty array for empty query in computeMatches", () => {
     const state = EditorState.create({ doc: "Hello world" });
-    expect(computeMatches(state, "", true)).toEqual([]);
-    expect(computeMatches(state, "", false)).toEqual([]);
+    expect(computeMatches(state, "", true, false)).toEqual([]);
+    expect(computeMatches(state, "", false, false)).toEqual([]);
+  });
+
+  it("filters out hidden URLs in markdown links when matchOnlyVisibleLinks is true", () => {
+    const state = EditorState.create({
+      doc: "Here is a [link to match](http://match.com)",
+    });
+
+    // Both should find 'match' in the visible text
+    let matches = computeMatches(state, "match", false, true);
+    expect(matches).toHaveLength(1); // Only the visible "match"
+    expect(matches[0].from).toBe(19);
+
+    matches = computeMatches(state, "match", false, false);
+    expect(matches).toHaveLength(2); // Visible "match" and hidden URL "match"
+  });
+
+  it("filters out hidden destinations in wikilinks when matchOnlyVisibleLinks is true", () => {
+    const state = EditorState.create({
+      doc: "Check out [[hidden_match|visible alias]]",
+    });
+
+    let matches = computeMatches(state, "match", false, true);
+    expect(matches).toHaveLength(0); // The word "match" is entirely hidden
+
+    matches = computeMatches(state, "match", false, false);
+    expect(matches).toHaveLength(1); // Hidden "match" is found
+  });
+
+  it("does not filter out bare wikilinks", () => {
+    const state = EditorState.create({
+      doc: "Check out [[bare match]]",
+    });
+
+    const matches = computeMatches(state, "match", false, true);
+    expect(matches).toHaveLength(1); // Bare wikilink destination is visible
   });
 });

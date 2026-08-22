@@ -64,7 +64,13 @@ export default class IncrementalSearchPlugin extends Plugin {
 		const session = view.state.field(searchSessionField, false);
 		if (session) {
 			if (session.query === "" && this.settings.lastQuery) {
-				recomputeQuery(view, this.settings.lastQuery, direction, this.settings.fuzzyMode);
+				recomputeQuery(
+					view,
+					this.settings.lastQuery,
+					direction,
+					this.settings.fuzzyMode,
+					this.settings.matchOnlyVisibleLinks
+				);
 				const widget = getActiveWidget();
 				if (widget) {
 					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
@@ -108,7 +114,13 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}
 		} else {
 			if (startingQuery) {
-				recomputeQuery(view, startingQuery, direction, this.settings.fuzzyMode);
+				recomputeQuery(
+					view,
+					startingQuery,
+					direction,
+					this.settings.fuzzyMode,
+					this.settings.matchOnlyVisibleLinks
+				);
 			}
 			renderWidget(view, this, startingQuery, direction);
 		}
@@ -159,6 +171,18 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 							this.plugin.settings.doubleTapWindowMs = parsed;
 							await this.plugin.saveSettings();
 						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Match only visible part of links")
+			.setDesc("Ignore hidden URLs in markdown links and hidden destinations in wikilinks.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.matchOnlyVisibleLinks)
+					.onChange(async (value) => {
+						this.plugin.settings.matchOnlyVisibleLinks = value;
+						await this.plugin.saveSettings();
 					})
 			);
 

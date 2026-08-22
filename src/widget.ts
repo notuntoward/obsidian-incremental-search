@@ -93,7 +93,8 @@ export function renderWidget(
 			view,
 			input.value,
 			view.state.field(searchSessionField, false)?.direction ?? "forward",
-			plugin.settings.fuzzyMode
+			plugin.settings.fuzzyMode,
+			plugin.settings.matchOnlyVisibleLinks
 		);
 		updateCounter();
 	});

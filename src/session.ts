@@ -193,12 +193,13 @@ export function recomputeQuery(
 	view: EditorView,
 	query: string,
 	direction: SearchDirection,
-	fuzzy: boolean
+	fuzzy: boolean,
+	matchOnlyVisibleLinks: boolean
 ) {
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
 
-	const allMatches = computeMatches(view.state, query, fuzzy);
+	const allMatches = computeMatches(view.state, query, fuzzy, matchOnlyVisibleLinks);
 	const cursorPos = session.originSelection.head;
 
 	let activeIndex = 0;

@@ -19,6 +19,7 @@ export interface IncrementalSearchSettings {
 	doubleTapWindowMs: number;
 	fuzzyMode: boolean;
 	usePopupModal: boolean;
+	matchOnlyVisibleLinks: boolean;
 }
 
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
@@ -26,4 +27,5 @@ export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	doubleTapWindowMs: 600,
 	fuzzyMode: true,
 	usePopupModal: false,
+	matchOnlyVisibleLinks: true,
 };

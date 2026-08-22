@@ -35,7 +35,13 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	}
 
 	getSuggestions(query: string): number[] {
-		recomputeQuery(this.cm, query, this.direction, this.plugin.settings.fuzzyMode);
+		recomputeQuery(
+			this.cm,
+			query,
+			this.direction,
+			this.plugin.settings.fuzzyMode,
+			this.plugin.settings.matchOnlyVisibleLinks
+		);
 		const session = this.cm.state.field(searchSessionField, false);
 		if (!session || !session.matches || session.matches.length === 0) return [];
 

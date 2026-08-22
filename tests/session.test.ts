@@ -135,7 +135,7 @@ describe("session: recomputeQuery directional cursor placement", () => {
     const text = "cat ...   cat ...   cat";
     // Cursor at index 6 -> next match is at index 10 (index 1)
     const view = createEditorView(text, 6, "forward");
-    recomputeQuery(view, "cat", "forward", true);
+    recomputeQuery(view, "cat", "forward", true, true);
 
     expect(sessionState?.matches).toHaveLength(3);
     expect(sessionState?.activeIndex).toBe(1);
@@ -144,7 +144,7 @@ describe("session: recomputeQuery directional cursor placement", () => {
   it("wraps forward to index 0 if cursor is past all matches", () => {
     const text = "cat ...   cat";
     const view = createEditorView(text, 50, "forward");
-    recomputeQuery(view, "cat", "forward", true);
+    recomputeQuery(view, "cat", "forward", true, true);
 
     expect(sessionState?.activeIndex).toBe(0);
   });
@@ -153,7 +153,7 @@ describe("session: recomputeQuery directional cursor placement", () => {
     const text = "cat ...   cat ...   cat";
     // Cursor at index 15 -> previous match is at index 10 (index 1)
     const view = createEditorView(text, 15, "backward");
-    recomputeQuery(view, "cat", "backward", true);
+    recomputeQuery(view, "cat", "backward", true, true);
 
     expect(sessionState?.matches).toHaveLength(3);
     expect(sessionState?.activeIndex).toBe(1);
@@ -162,7 +162,7 @@ describe("session: recomputeQuery directional cursor placement", () => {
   it("wraps backward to the last match if cursor is before all matches", () => {
     const text = "   cat ...   cat";
     const view = createEditorView(text, 0, "backward");
-    recomputeQuery(view, "cat", "backward", true);
+    recomputeQuery(view, "cat", "backward", true, true);
 
     expect(sessionState?.matches).toHaveLength(2);
     expect(sessionState?.activeIndex).toBe(1);

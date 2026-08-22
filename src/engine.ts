@@ -48,6 +48,52 @@ export function parseFuzzyQuery(query: string, caseSensitive: boolean): string[]
 }
 
 /**
+ * Extracts ranges of text that are hidden in typical link rendering.
+ * - Markdown links: the `(url)` part
+ * - Wikilinks with alias: the `[[destination|` part
+ */
+function getHiddenLinkRanges(text: string, offset: number): { from: number; to: number }[] {
+	const ranges: { from: number; to: number }[] = [];
+
+	// Markdown links: [visible](hidden)
+	const mdRegex = /\[[^\]]*\]\(([^)]+)\)/g;
+	let match;
+	while ((match = mdRegex.exec(text)) !== null) {
+		const urlStart = offset + match.index + match[0].indexOf("(");
+		const urlEnd = offset + match.index + match[0].length;
+		ranges.push({ from: urlStart, to: urlEnd });
+	}
+
+	// Wikilinks with alias: [[hidden|visible]]
+	const wikiRegex = /\[\[([^\]|]+)\|([^\]]+)\]\]/g;
+	while ((match = wikiRegex.exec(text)) !== null) {
+		const hiddenStart = offset + match.index;
+		const hiddenEnd = offset + match.index + match[0].indexOf("|") + 1;
+		ranges.push({ from: hiddenStart, to: hiddenEnd });
+	}
+
+	return ranges;
+}
+
+function isMatchHidden(m: MatchRange, hiddenRanges: { from: number; to: number }[]): boolean {
+	const checkOverlap = (start: number, end: number) => {
+		for (const hr of hiddenRanges) {
+			if (start < hr.to && end > hr.from) return true;
+		}
+		return false;
+	};
+
+	if (m.chars && m.chars.length > 0) {
+		for (const c of m.chars) {
+			if (checkOverlap(c.from, c.to)) return true;
+		}
+		return false;
+	}
+
+	return checkOverlap(m.from, m.to);
+}
+
+/**
  * Finds all fuzzy matches in a single line of text.
  * Sequential tokens are searched in order with wildcards in between.
  */
@@ -131,7 +177,12 @@ export function findLiteralMatches(
 /**
  * Computes all matches across all lines of an EditorState document.
  */
-export function computeMatches(state: EditorState, query: string, fuzzy: boolean): MatchRange[] {
+export function computeMatches(
+	state: EditorState,
+	query: string,
+	fuzzy: boolean,
+	matchOnlyVisibleLinks: boolean
+): MatchRange[] {
 	if (!query) return [];
 	const caseSensitive = isCaseSensitive(query);
 	const results: MatchRange[] = [];
@@ -139,11 +190,19 @@ export function computeMatches(state: EditorState, query: string, fuzzy: boolean
 	const doc = state.doc;
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
+		let lineMatches: MatchRange[] = [];
 		if (fuzzy) {
-			results.push(...findFuzzyMatches(line.text, query, line.from, caseSensitive));
+			lineMatches = findFuzzyMatches(line.text, query, line.from, caseSensitive);
 		} else {
-			results.push(...findLiteralMatches(line.text, query, line.from, caseSensitive));
+			lineMatches = findLiteralMatches(line.text, query, line.from, caseSensitive);
 		}
+
+		if (matchOnlyVisibleLinks && lineMatches.length > 0) {
+			const hiddenRanges = getHiddenLinkRanges(line.text, line.from);
+			lineMatches = lineMatches.filter((m) => !isMatchHidden(m, hiddenRanges));
+		}
+
+		results.push(...lineMatches);
 	}
 	return results;
 }
