@@ -14,12 +14,15 @@
 /* Mode A & B - Exact Matches */
 .incsearch-match-exact {
   background-color: var(--incsearch-match-bg);
+  color: #000000 !important;
+  border-radius: var(--radius-s, 2px);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
 .incsearch-match-exact.is-current {
   background-color: var(--text-selection, #80b3ff) !important;
+  color: var(--text-normal, inherit) !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
   box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 1px;
@@ -36,20 +39,25 @@
 .incsearch-cell-has-match {
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
   outline-offset: -2px !important;
-  background-color: var(--incsearch-match-bg) !important;
 }
 
 .incsearch-table-cell-match {
   background-color: var(--incsearch-match-bg) !important;
-  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
-  outline-offset: 1px !important;
+  color: #000000 !important;
   border-radius: var(--radius-s, 2px) !important;
   font-weight: 600 !important;
 }
 
+.incsearch-table-cell-match.is-current {
+  background-color: var(--text-selection, #80b3ff) !important;
+  color: var(--text-normal, inherit) !important;
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  outline-offset: 1px !important;
+}
+
 .incsearch-callout-match {
   background-color: var(--text-highlight-bg, #ffe066) !important;
-  color: var(--text-normal, #111) !important;
+  color: #000000 !important;
   border-radius: var(--radius-s, 2px) !important;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
@@ -122,6 +130,7 @@
 
 .incsearch-match-fuzzy-word {
   background-color: var(--incsearch-match-bg);
+  color: #000000 !important;
   font-weight: 600;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
