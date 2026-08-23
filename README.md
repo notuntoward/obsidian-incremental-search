@@ -53,8 +53,20 @@ When fuzzy matching is enabled (default), spaces between words act as flexible w
 
 ---
 
+## Case Sensitivity (Smart Case)
+
+Incremental Search uses **smart-case** matching:
+
+- **All lowercase query:** Search is completely **case-insensitive** (e.g. `resist` matches `resist`, `Resist`, `RESIST`).
+- **Contains capital letters:** Typing one or more uppercase letters automatically turns on **case-sensitive** matching (e.g. `Resist` matches only `Resist`, and `KAN` matches only `KAN`).
+
+This smart-case behavior applies across all search modes, including exact literal search and space-as-wildcard fuzzy search.
+
+---
+
 ## Settings
 
+- **Highlight all matches:** When enabled (default), highlights all matching occurrences throughout the note and within callouts. When disabled, only the single active match is highlighted.
 - **Fuzzy matching:** Toggle between space-as-wildcard fuzzy matching and exact literal substring search.
 - **Match only visible part of links:** When enabled (default), ignores hidden URLs in Markdown links (`[text](url)`) and hidden destinations in aliased wikilinks (`[[destination|alias]]`).
 - **Double-tap window (ms):** The timeout window (default `600ms`) during which consecutive search hotkey presses recall the last search query.
