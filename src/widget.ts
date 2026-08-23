@@ -161,11 +161,12 @@ export function renderWidget(
 
 	input.addEventListener("blur", () => {
 		window.setTimeout(() => {
+			if (document.activeElement === input) return;
 			const session = view.state.field(searchSessionField, false);
 			if (session) {
 				closeSession(view, plugin);
 			}
-		}, 0);
+		}, 100);
 	});
 
 	input.addEventListener("keydown", (evt: KeyboardEvent) => {

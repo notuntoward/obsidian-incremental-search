@@ -84,6 +84,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 				}
 			} else {
 				advance(view, direction);
+				const widget = getActiveWidget();
+				if (widget) {
+					const input = widget.querySelector<HTMLInputElement>(".incsearch-input");
+					input?.focus();
+				}
 			}
 			updateWidgetCounter(view);
 			return;

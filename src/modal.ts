@@ -8,6 +8,7 @@ import {
 	setActiveIndex,
 	saveSessionQuery,
 	setSession,
+	restoreAutoUnfoldedStructures,
 } from "./session";
 
 export class IncrementalSearchSuggestModal extends SuggestModal<number> {
@@ -162,8 +163,10 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				} else {
 					this.cm.focus();
 				}
+				restoreAutoUnfoldedStructures(this.cm);
 			} else {
 				this.cm.dispatch({ effects: setSession.of(null) });
+				restoreAutoUnfoldedStructures(this.cm);
 			}
 		}, 10);
 	}
@@ -195,6 +198,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 						}),
 					],
 				});
+				restoreAutoUnfoldedStructures(this.cm, match.from);
 
 				if (this.editor) {
 					this.editor.focus();

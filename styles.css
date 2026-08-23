@@ -49,6 +49,25 @@
   font-weight: 600 !important;
 }
 
+.incsearch-callout-match {
+  background-color: var(--text-highlight-bg, #ffe066) !important;
+  color: var(--text-normal, #111) !important;
+  border-radius: var(--radius-s, 2px) !important;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  display: inline;
+}
+
+.incsearch-callout-match.is-current {
+  background-color: var(--text-selection, #80b3ff) !important;
+  color: var(--text-normal, #000) !important;
+  outline: 2px solid var(--interactive-accent, #705dcf) !important;
+  box-shadow: 0 0 0 2px var(--interactive-accent, #705dcf) !important;
+  outline-offset: 1px !important;
+  font-weight: 700 !important;
+  display: inline;
+}
+
 .incsearch-table-toast {
   position: absolute;
   top: calc(100% + 4px);
