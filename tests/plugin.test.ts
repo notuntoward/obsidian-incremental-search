@@ -20,6 +20,10 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
       workspace: {
         on: () => {},
         onLayoutReady: (cb: any) => cb(),
+        getActiveFile: () => null,
+      },
+      metadataCache: {
+        getFileCache: () => null,
       },
     };
     plugin = new IncrementalSearchPlugin(app as any, {} as any);

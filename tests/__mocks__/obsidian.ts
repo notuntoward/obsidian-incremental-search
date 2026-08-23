@@ -128,3 +128,49 @@ if (typeof window !== "undefined" && typeof HTMLElement !== "undefined") {
     };
   }
 }
+
+export interface Loc {
+  line: number;
+  col: number;
+  offset: number;
+}
+export interface Pos {
+  start: Loc;
+  end: Loc;
+}
+export interface CacheItem {
+  position: Pos;
+}
+export interface ReferenceCache extends CacheItem {
+  link: string;
+  original: string;
+  displayText?: string;
+}
+export interface LinkCache extends ReferenceCache {}
+export interface EmbedCache extends ReferenceCache {}
+export interface FrontmatterLinkCache extends ReferenceCache {
+  key: string;
+}
+export interface SectionCache {
+  type: string;
+  position: Pos;
+}
+export interface FrontMatterCache {
+  [key: string]: any;
+  position?: Pos;
+}
+export interface CachedMetadataMock {
+  links?: LinkCache[];
+  embeds?: EmbedCache[];
+  frontmatter?: FrontMatterCache;
+  frontmatterPosition?: Pos;
+  sections?: SectionCache[];
+}
+
+export function mockFileCache(overrides: Partial<CachedMetadataMock> = {}): CachedMetadataMock {
+  return {
+    links: [],
+    embeds: [],
+    ...overrides,
+  };
+}

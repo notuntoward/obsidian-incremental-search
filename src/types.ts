@@ -4,6 +4,15 @@ export interface MatchRange {
 	from: number;
 	to: number;
 	chars?: { from: number; to: number }[];
+	inTable?: boolean;
+	tableMatchData?: {
+		sectionStart: number;
+		cellText: string;
+		matchStartInCell: number;
+		matchEndInCell: number;
+		rowIndex?: number;
+		colIndex?: number;
+	};
 }
 
 export interface SearchSessionState {

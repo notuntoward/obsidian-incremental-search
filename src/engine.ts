@@ -1,4 +1,5 @@
 import { EditorState } from "@codemirror/state";
+import { CachedMetadata, ReferenceCache } from "obsidian";
 import { MatchRange } from "./types";
 
 /**
@@ -48,28 +49,74 @@ export function parseFuzzyQuery(query: string, caseSensitive: boolean): string[]
 }
 
 /**
- * Extracts ranges of text that are hidden in typical link rendering.
- * - Markdown links: the `(url)` part
- * - Wikilinks with alias: the `[[destination|` part
+ * This function delegates link-syntax and frontmatter parsing to Obsidian's MetadataCache.
+ * Frontmatter is always non-visible metadata and is always excluded.
+ * Link destinations/URLs are excluded when filterHiddenLinks is true.
  */
-function getHiddenLinkRanges(text: string, offset: number): { from: number; to: number }[] {
+function getHiddenRangesFromCache(cache: CachedMetadata, filterHiddenLinks: boolean): { from: number; to: number }[] {
 	const ranges: { from: number; to: number }[] = [];
 
-	// Markdown links: [visible](hidden)
-	const mdRegex = /\[[^\]]*\]\(([^)]+)\)/g;
-	let match;
-	while ((match = mdRegex.exec(text)) !== null) {
-		const urlStart = offset + match.index + match[0].indexOf("(");
-		const urlEnd = offset + match.index + match[0].length;
-		ranges.push({ from: urlStart, to: urlEnd });
+	// 1. Frontmatter Position / YAML sections (Always hidden)
+	if (cache.frontmatterPosition) {
+		ranges.push({
+			from: cache.frontmatterPosition.start.offset,
+			to: cache.frontmatterPosition.end.offset,
+		});
+	}
+	if (cache.frontmatter && (cache.frontmatter as any).position) {
+		const pos = (cache.frontmatter as any).position;
+		if (!ranges.some((r) => r.from === pos.start.offset && r.to === pos.end.offset)) {
+			ranges.push({ from: pos.start.offset, to: pos.end.offset });
+		}
+	}
+	if (cache.sections) {
+		for (const sec of cache.sections) {
+			if (sec.type === "yaml") {
+				const from = sec.position.start.offset;
+				const to = sec.position.end.offset;
+				if (!ranges.some((r) => r.from === from && r.to === to)) {
+					ranges.push({ from, to });
+				}
+			}
+		}
 	}
 
-	// Wikilinks with alias: [[hidden|visible]]
-	const wikiRegex = /\[\[([^\]|]+)\|([^\]]+)\]\]/g;
-	while ((match = wikiRegex.exec(text)) !== null) {
-		const hiddenStart = offset + match.index;
-		const hiddenEnd = offset + match.index + match[0].indexOf("|") + 1;
-		ranges.push({ from: hiddenStart, to: hiddenEnd });
+	// 2. Hidden Links / Destinations (Filtered when filterHiddenLinks is true)
+	if (filterHiddenLinks) {
+		const allLinks: ReferenceCache[] = [
+			...(cache.links || []),
+			...(cache.embeds || []),
+		];
+		for (const link of allLinks) {
+			const start = link.position.start.offset;
+			const end = link.position.end.offset;
+			const original = link.original;
+			const displayText = link.displayText;
+
+			if (!displayText || displayText === original) continue;
+
+			if (original.startsWith("![[") || original.startsWith("[[")) {
+				const lastPipeIndex = original.lastIndexOf("|");
+				if (lastPipeIndex !== -1 && lastPipeIndex > 0) {
+					ranges.push({ from: start, to: start + lastPipeIndex + 1 });
+					if (original.endsWith("]]")) {
+						ranges.push({ from: end - 2, to: end });
+					}
+				}
+			} else if (original.startsWith("[")) {
+				const aliasEndIndex = original.indexOf("](");
+				if (aliasEndIndex !== -1) {
+					ranges.push({ from: start, to: start + 1 });
+					ranges.push({ from: start + aliasEndIndex, to: end });
+				} else {
+					const refEndIndex = original.indexOf("][");
+					if (refEndIndex !== -1) {
+						ranges.push({ from: start, to: start + 1 });
+						ranges.push({ from: start + refEndIndex, to: end });
+					}
+				}
+			}
+		}
 	}
 
 	return ranges;
@@ -174,6 +221,31 @@ export function findLiteralMatches(
 	return results;
 }
 
+function findCellBoundaries(lineText: string, matchStart: number, matchEnd: number) {
+	let cellStart = 0;
+	let colIndex = 0;
+	for (let i = 0; i <= matchStart; i++) {
+		if (lineText[i] === '|' && (i === 0 || lineText[i - 1] !== '\\')) {
+			cellStart = i + 1;
+			colIndex++;
+		}
+	}
+	const normalizedColIndex = Math.max(0, colIndex - 1);
+
+	let cellEnd = lineText.length;
+	for (let i = matchEnd; i < lineText.length; i++) {
+		if (lineText[i] === '|' && (i === 0 || lineText[i - 1] !== '\\')) {
+			cellEnd = i;
+			break;
+		}
+	}
+	return {
+		cellText: lineText.substring(cellStart, cellEnd),
+		cellStartOffset: cellStart,
+		colIndex: normalizedColIndex,
+	};
+}
+
 /**
  * Computes all matches across all lines of an EditorState document.
  */
@@ -181,11 +253,25 @@ export function computeMatches(
 	state: EditorState,
 	query: string,
 	fuzzy: boolean,
-	matchOnlyVisibleLinks: boolean
+	matchOnlyVisibleLinks: boolean,
+	linkCache?: CachedMetadata
 ): MatchRange[] {
 	if (!query) return [];
 	const caseSensitive = isCaseSensitive(query);
 	const results: MatchRange[] = [];
+
+	const hiddenRanges = linkCache 
+		? getHiddenRangesFromCache(linkCache, matchOnlyVisibleLinks) 
+		: [];
+
+	const tableRanges: { from: number; to: number }[] = [];
+	if (linkCache && (linkCache as any).sections) {
+		for (const sec of (linkCache as any).sections) {
+			if (sec.type === "table") {
+				tableRanges.push({ from: sec.position.start.offset, to: sec.position.end.offset });
+			}
+		}
+	}
 
 	const doc = state.doc;
 	for (let i = 1; i <= doc.lines; i++) {
@@ -197,9 +283,29 @@ export function computeMatches(
 			lineMatches = findLiteralMatches(line.text, query, line.from, caseSensitive);
 		}
 
-		if (matchOnlyVisibleLinks && lineMatches.length > 0) {
-			const hiddenRanges = getHiddenLinkRanges(line.text, line.from);
+		if (lineMatches.length > 0 && hiddenRanges.length > 0) {
 			lineMatches = lineMatches.filter((m) => !isMatchHidden(m, hiddenRanges));
+		}
+
+		if (lineMatches.length > 0 && tableRanges.length > 0) {
+			for (const m of lineMatches) {
+				const tableRange = tableRanges.find((r) => m.from < r.to && m.to > r.from);
+				if (tableRange) {
+					m.inTable = true;
+					const { cellText, cellStartOffset, colIndex } = findCellBoundaries(line.text, m.from - line.from, m.to - line.from);
+					const tableStartLine = doc.lineAt(tableRange.from).number;
+					const lineOffsetInTable = line.number - tableStartLine;
+					const rowIndex = lineOffsetInTable === 0 ? 0 : Math.max(0, lineOffsetInTable - 1);
+					m.tableMatchData = {
+						sectionStart: tableRange.from,
+						cellText,
+						matchStartInCell: m.from - line.from - cellStartOffset,
+						matchEndInCell: m.to - line.from - cellStartOffset,
+						rowIndex,
+						colIndex,
+					};
+				}
+			}
 		}
 
 		results.push(...lineMatches);

@@ -47,8 +47,16 @@ describe("widget: counter & lifecycle", () => {
     };
 
     mockPlugin = {
-      settings: { fuzzyMode: true, lastQuery: "", usePopupModal: false, doubleTapWindowMs: 600 },
+      settings: { fuzzyMode: true, lastQuery: "", usePopupModal: false, doubleTapWindowMs: 600, matchOnlyVisibleLinks: true },
       saveSettings: async () => {},
+      app: {
+        workspace: {
+          getActiveFile: () => null,
+        },
+        metadataCache: {
+          getFileCache: () => null,
+        },
+      }
     };
   });
 
@@ -80,6 +88,35 @@ describe("widget: counter & lifecycle", () => {
     expect(dir?.textContent).toBe("▼");
   });
 
+  it("shows table icon when match is in table and hides it when not in table", () => {
+    sessionState = {
+      query: "word",
+      direction: "forward",
+      matches: [
+        { from: 0, to: 4, inTable: true },
+        { from: 10, to: 14, inTable: false }
+      ],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget();
+    expect(widget).not.toBeNull();
+
+    const counter = widget?.querySelector(".incsearch-counter");
+    const tableIcon = widget?.querySelector(".incsearch-table-icon") as HTMLElement;
+
+    expect(counter?.textContent).toBe("1/2");
+    expect(tableIcon?.style.display).toBe("inline-flex");
+
+    // Move to match not in table
+    sessionState.activeIndex = 1;
+    updateWidgetCounter(mockView);
+    expect(counter?.textContent).toBe("2/2");
+    expect(tableIcon?.style.display).toBe("none");
+  });
+
   it("updates counter to 0/0 when there are no matches", () => {
     sessionState = {
       query: "nomatch",
@@ -95,9 +132,11 @@ describe("widget: counter & lifecycle", () => {
 
     const counter = widget?.querySelector(".incsearch-counter");
     const dir = widget?.querySelector(".incsearch-dir");
+    const tableIcon = widget?.querySelector(".incsearch-table-icon") as HTMLElement;
 
     expect(counter?.textContent).toBe("0/0");
     expect(dir?.textContent).toBe("▲");
+    expect(tableIcon?.style.display).toBe("none");
   });
 
   it("handles input event by recomputing query and updating counter", () => {

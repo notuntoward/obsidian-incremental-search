@@ -1,8 +1,9 @@
 import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection } from "@codemirror/state";
+import { CachedMetadata } from "obsidian";
 import { MatchRange, SearchDirection, SearchSessionState } from "./types";
 import { computeMatches } from "./engine";
-import { removeWidget } from "./widget";
+import { removeWidget, showWidgetTableToast, hideWidgetTableToast } from "./widget";
 
 export const setSession = StateEffect.define<SearchSessionState | null>();
 
@@ -127,16 +128,98 @@ export function saveSessionQuery(
 	}
 }
 
-/**
- * Scrolls a match range into view centered vertically and nearest horizontally.
- */
-export function scrollToMatch(view: EditorView, match: MatchRange) {
+export function scrollToMatch(view: EditorView, match: MatchRange, isTyping = false) {
 	view.dispatch({
 		effects: EditorView.scrollIntoView(EditorSelection.range(match.from, match.to), {
 			y: "center",
 			x: "nearest",
 		}),
 	});
+
+	clearAllTableHighlights(view);
+	hideWidgetTableToast();
+
+	if (match.inTable && match.tableMatchData) {
+		highlightTableWidget(view, match.tableMatchData);
+		showWidgetTableToast(match.tableMatchData);
+	}
+}
+
+function clearAllTableHighlights(view: EditorView) {
+	if (view.dom && typeof view.dom.querySelectorAll === "function") {
+		Array.from(view.dom.querySelectorAll(".incsearch-table-cell-match")).forEach((span) => {
+			const parent = span.parentNode;
+			if (parent) {
+				parent.replaceChild(document.createTextNode(span.textContent || ""), span);
+				parent.normalize();
+			}
+		});
+		Array.from(view.dom.querySelectorAll(".incsearch-table-has-match, .incsearch-cell-has-match")).forEach((el) => {
+			el.classList.remove("incsearch-table-has-match");
+			el.classList.remove("incsearch-cell-has-match");
+		});
+	}
+}
+
+function getTableWidgetElement(view: EditorView, tableSectionStart: number): HTMLTableElement | null {
+	const result = view.domAtPos(tableSectionStart);
+	if (!result) return null;
+	let node: Node | null = result.node;
+	if (node.nodeType === Node.TEXT_NODE) {
+		node = node.parentElement;
+	}
+	const el = node instanceof HTMLElement ? node : null;
+	if (!el) return null;
+	
+	if (el.matches("table")) return el as HTMLTableElement;
+	const innerTable = el.querySelector("table");
+	if (innerTable) return innerTable as HTMLTableElement;
+	return el.closest("table") as HTMLTableElement | null;
+}
+
+function highlightMatchedSubstringInCell(cell: HTMLElement, matchText: string) {
+	if (!matchText) return;
+	const wrapper = cell.querySelector(".table-cell-wrapper") ?? cell;
+	for (const child of Array.from(wrapper.childNodes)) {
+		if (child.nodeType === Node.TEXT_NODE && child.textContent) {
+			const text = child.textContent;
+			const idx = text.toLowerCase().indexOf(matchText.toLowerCase());
+			if (idx !== -1) {
+				const before = text.slice(0, idx);
+				const matched = text.slice(idx, idx + matchText.length);
+				const after = text.slice(idx + matchText.length);
+
+				const fragment = document.createDocumentFragment();
+				if (before) fragment.appendChild(document.createTextNode(before));
+				const mark = document.createElement("span");
+				mark.className = "incsearch-table-cell-match incsearch-match-exact is-current";
+				mark.textContent = matched;
+				fragment.appendChild(mark);
+				if (after) fragment.appendChild(document.createTextNode(after));
+
+				wrapper.replaceChild(fragment, child);
+				break;
+			}
+		}
+	}
+}
+
+function highlightTableWidget(view: EditorView, data: NonNullable<MatchRange["tableMatchData"]>) {
+	const table = getTableWidgetElement(view, data.sectionStart);
+	if (!table) return;
+	table.classList.add("incsearch-table-has-match");
+
+	if (typeof data.rowIndex === "number" && typeof data.colIndex === "number") {
+		const row = table.rows?.[data.rowIndex];
+		const cell = row?.cells?.[data.colIndex];
+		if (cell) {
+			cell.classList.add("incsearch-cell-has-match");
+			const matchedString = data.cellText.slice(data.matchStartInCell, data.matchEndInCell).trim();
+			if (matchedString) {
+				highlightMatchedSubstringInCell(cell, matchedString);
+			}
+		}
+	}
 }
 
 /**
@@ -194,12 +277,14 @@ export function recomputeQuery(
 	query: string,
 	direction: SearchDirection,
 	fuzzy: boolean,
-	matchOnlyVisibleLinks: boolean
+	matchOnlyVisibleLinks: boolean,
+	linkCache?: CachedMetadata,
+	isTyping = false
 ) {
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
 
-	const allMatches = computeMatches(view.state, query, fuzzy, matchOnlyVisibleLinks);
+	const allMatches = computeMatches(view.state, query, fuzzy, matchOnlyVisibleLinks, linkCache);
 	const cursorPos = session.originSelection.head;
 
 	let activeIndex = 0;
@@ -230,7 +315,7 @@ export function recomputeQuery(
 	});
 
 	if (allMatches.length > 0) {
-		scrollToMatch(view, allMatches[activeIndex]);
+		scrollToMatch(view, allMatches[activeIndex], isTyping);
 	}
 }
 
@@ -262,6 +347,7 @@ export function commitMatch(
 				}),
 			],
 		});
+		clearAllTableHighlights(view);
 		removeWidget(view);
 		view.focus();
 	} catch (e) {
@@ -300,10 +386,12 @@ export function cancelSession(
 			});
 		}
 		removeWidget(view);
+		clearAllTableHighlights(view);
 		view.focus();
 	} catch (e) {
 		console.error("Incremental Search: cancelSession error", e);
 		removeWidget(view);
+		clearAllTableHighlights(view);
 		view.focus();
 	}
 }
@@ -320,5 +408,6 @@ export function closeSession(
 
 	view.dispatch({ effects: setSession.of(null) });
 	removeWidget(view);
+	clearAllTableHighlights(view);
 	view.focus();
 }

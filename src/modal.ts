@@ -35,12 +35,15 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	}
 
 	getSuggestions(query: string): number[] {
+		const activeFile = this.app.workspace.getActiveFile();
+		const linkCache = activeFile ? this.app.metadataCache.getFileCache(activeFile) ?? undefined : undefined;
 		recomputeQuery(
 			this.cm,
 			query,
 			this.direction,
 			this.plugin.settings.fuzzyMode,
-			this.plugin.settings.matchOnlyVisibleLinks
+			this.plugin.settings.matchOnlyVisibleLinks,
+			linkCache
 		);
 		const session = this.cm.state.field(searchSessionField, false);
 		if (!session || !session.matches || session.matches.length === 0) return [];

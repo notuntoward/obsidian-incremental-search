@@ -64,12 +64,15 @@ export default class IncrementalSearchPlugin extends Plugin {
 		const session = view.state.field(searchSessionField, false);
 		if (session) {
 			if (session.query === "" && this.settings.lastQuery) {
+				const activeFile = this.app.workspace.getActiveFile();
+				const linkCache = activeFile ? this.app.metadataCache.getFileCache(activeFile) ?? undefined : undefined;
 				recomputeQuery(
 					view,
 					this.settings.lastQuery,
 					direction,
 					this.settings.fuzzyMode,
-					this.settings.matchOnlyVisibleLinks
+					this.settings.matchOnlyVisibleLinks,
+					linkCache
 				);
 				const widget = getActiveWidget();
 				if (widget) {

@@ -1,10 +1,16 @@
 /* Match Highlighting */
 :root {
   --incsearch-tint-ratio: 15%;
+  --incsearch-gap-tint-ratio: 6%;
   --incsearch-match-bg: color-mix(
     in srgb,
     var(--background-primary) calc(100% - var(--incsearch-tint-ratio)),
     var(--text-selection) var(--incsearch-tint-ratio)
+  );
+  --incsearch-gap-bg: color-mix(
+    in srgb,
+    var(--background-primary) calc(100% - var(--incsearch-gap-tint-ratio)),
+    var(--text-selection) var(--incsearch-gap-tint-ratio)
   );
   --incsearch-gap-underline: var(--text-faint, rgba(128, 128, 128, 0.4));
 }
@@ -21,6 +27,71 @@
   outline-offset: 1px;
   font-weight: 600;
   border-radius: var(--radius-s, 4px);
+}
+
+.incsearch-table-has-match {
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  outline-offset: 2px !important;
+  border-radius: var(--radius-s, 4px) !important;
+}
+
+.incsearch-cell-has-match {
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  outline-offset: -2px !important;
+  background-color: var(--incsearch-match-bg) !important;
+}
+
+.incsearch-table-cell-match {
+  background-color: var(--incsearch-match-bg) !important;
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  outline-offset: 1px !important;
+  border-radius: var(--radius-s, 2px) !important;
+  font-weight: 600 !important;
+}
+
+.incsearch-table-toast {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 100%;
+  max-width: 480px;
+  width: max-content;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  padding: var(--size-4-1, 4px) var(--size-4-2, 8px);
+  border-radius: var(--radius-s, 4px);
+  font-family: var(--font-text);
+  font-size: var(--font-text-size, 13px);
+  line-height: var(--line-height-normal, 1.5);
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  z-index: 100;
+  box-shadow: var(--shadow-s);
+  display: none;
+  box-sizing: border-box;
+}
+
+.incsearch-table-toast-mark {
+  font-weight: 600;
+  text-decoration: underline;
+  color: var(--text-accent, var(--interactive-accent));
+}
+
+.incsearch-table-icon {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-accent, var(--interactive-accent));
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.incsearch-table-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 /* Mode C - Fuzzy Matches */
@@ -40,7 +111,7 @@
 }
 
 .incsearch-match-fuzzy-gap {
-  background-color: transparent;
+  background-color: var(--incsearch-gap-bg);
   text-decoration: underline;
   text-decoration-color: var(--incsearch-gap-underline);
   opacity: 0.85;
@@ -54,31 +125,47 @@
   z-index: 50;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
+  border-radius: var(--radius-m, 6px);
   padding: 4px 8px;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--font-ui-smaller, 13px);
   box-shadow: var(--shadow-s);
 }
 
-.incsearch-input {
-  border: none;
-  outline: none;
-  background: transparent;
-  width: 220px;
+.incsearch-widget .incsearch-input {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 2px !important;
+  height: auto !important;
+  min-width: 140px;
+  max-width: 480px;
+  width: auto;
+  field-sizing: content;
   color: var(--text-normal);
+}
+
+.incsearch-widget .incsearch-input:focus {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .incsearch-counter {
   color: var(--text-muted);
-  min-width: 48px;
-  text-align: right;
+  font-size: var(--font-ui-smaller, 12px);
+  white-space: nowrap;
+  user-select: none;
+  padding-left: 2px;
 }
 
 .incsearch-dir {
   color: var(--text-muted);
+  user-select: none;
+  font-size: 11px;
 }
 
 .incsearch-line-number {

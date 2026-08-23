@@ -36,6 +36,10 @@ describe("modal: IncrementalSearchSuggestModal", () => {
             setEphemeralState: () => {},
           },
         },
+        getActiveFile: () => null,
+      },
+      metadataCache: {
+        getFileCache: () => null,
       },
     };
     mockPlugin = {
