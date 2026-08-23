@@ -305,6 +305,30 @@ describe("session: searchHighlightPlugin decorations", () => {
     }, [{ from: 0, to: 100 }]);
     expect(decorationsEmpty.size).toBe(0);
   });
+
+  it("decorates all matches when highlightAllMatches is true, and only active match when false", () => {
+    const session: SearchSessionState = {
+      query: "cat",
+      direction: "forward",
+      matches: [
+        { from: 10, to: 13 },
+        { from: 30, to: 33 },
+        { from: 50, to: 53 },
+      ],
+      activeIndex: 1,
+      originSelection: { anchor: 0, head: 0 },
+      highlightAllMatches: true,
+    };
+
+    const decoAll = buildHighlightDecorations(session, [{ from: 0, to: 100 }]);
+    expect(decoAll.size).toBe(3);
+
+    const decoActiveOnly = buildHighlightDecorations(
+      { ...session, highlightAllMatches: false },
+      [{ from: 0, to: 100 }]
+    );
+    expect(decoActiveOnly.size).toBe(1);
+  });
 });
 
 describe("session: callout and fold auto-expansion and restoration", () => {

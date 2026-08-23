@@ -154,7 +154,8 @@ export function renderWidget(
 			plugin.settings.fuzzyMode,
 			plugin.settings.matchOnlyVisibleLinks,
 			linkCache,
-			true // isTyping
+			true, // isTyping
+			plugin.settings.highlightAllMatches
 		);
 		updateCounter();
 	});

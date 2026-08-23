@@ -72,7 +72,9 @@ export default class IncrementalSearchPlugin extends Plugin {
 					direction,
 					this.settings.fuzzyMode,
 					this.settings.matchOnlyVisibleLinks,
-					linkCache
+					linkCache,
+					false,
+					this.settings.highlightAllMatches
 				);
 				const widget = getActiveWidget();
 				if (widget) {
@@ -104,6 +106,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 				matches: [],
 				activeIndex: 0,
 				originSelection: { anchor: sel.anchor, head: sel.head },
+				highlightAllMatches: this.settings.highlightAllMatches,
 			}),
 		});
 
@@ -127,7 +130,10 @@ export default class IncrementalSearchPlugin extends Plugin {
 					startingQuery,
 					direction,
 					this.settings.fuzzyMode,
-					this.settings.matchOnlyVisibleLinks
+					this.settings.matchOnlyVisibleLinks,
+					undefined,
+					false,
+					this.settings.highlightAllMatches
 				);
 			}
 			renderWidget(view, this, startingQuery, direction);
@@ -154,6 +160,18 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName("Highlight all matches")
+			.setDesc("Highlight all matches across the note, not just the active match.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.highlightAllMatches)
+					.onChange(async (value) => {
+						this.plugin.settings.highlightAllMatches = value;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		new Setting(containerEl)
 			.setName("Fuzzy matching")

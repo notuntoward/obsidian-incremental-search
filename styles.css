@@ -2,11 +2,7 @@
 :root {
   --incsearch-tint-ratio: 15%;
   --incsearch-gap-tint-ratio: 6%;
-  --incsearch-match-bg: color-mix(
-    in srgb,
-    var(--background-primary) calc(100% - var(--incsearch-tint-ratio)),
-    var(--text-selection) var(--incsearch-tint-ratio)
-  );
+  --incsearch-match-bg: var(--text-highlight-bg, #ffe066);
   --incsearch-gap-bg: color-mix(
     in srgb,
     var(--background-primary) calc(100% - var(--incsearch-gap-tint-ratio)),
@@ -23,7 +19,9 @@
 }
 
 .incsearch-match-exact.is-current {
+  background-color: var(--text-selection, #80b3ff) !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
+  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 1px;
   font-weight: 600;
   border-radius: var(--radius-s, 4px);

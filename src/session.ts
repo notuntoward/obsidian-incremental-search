@@ -50,12 +50,17 @@ export function buildHighlightDecorations(
 	}
 
 	const positions: { from: number; to: number; mark: Decoration }[] = [];
+	const highlightAll = session.highlightAllMatches !== false;
 
 	for (const [i, m] of session.matches.entries()) {
+		const isCurrent = i === session.activeIndex;
+		if (!highlightAll && !isCurrent) {
+			continue;
+		}
+
 		const inVisible = visibleRanges.some((r) => r.from <= m.to && r.to >= m.from);
 		if (!inVisible) continue;
 
-		const isCurrent = i === session.activeIndex;
 		const exactCls = isCurrent ? "incsearch-match-exact is-current" : "incsearch-match-exact";
 
 		if (m.chars && m.chars.length > 1) {
@@ -357,7 +362,8 @@ function highlightMatchedTextInCallout(
 	view: EditorView,
 	callout: HTMLElement,
 	matchText: string,
-	activeIndexInCallout = 0
+	activeIndexInCallout = 0,
+	highlightAll = true
 ) {
 	if (!matchText) return;
 	const container = callout.querySelector(".callout-content") ?? callout;
@@ -377,16 +383,20 @@ function highlightMatchedTextInCallout(
 					const before = text.slice(lastPos, idx);
 					if (before) frag.appendChild(document.createTextNode(before));
 					const matched = text.slice(idx, idx + matchText.length);
-					const mark = document.createElement("span");
 					const isCurrent = currentOccur === activeIndexInCallout;
-					mark.className = isCurrent
-						? "incsearch-callout-match incsearch-match-exact is-current"
-						: "incsearch-callout-match incsearch-match-exact";
-					mark.textContent = matched;
-					if (isCurrent) {
-						activeRef.span = mark;
+					if (highlightAll || isCurrent) {
+						const mark = document.createElement("span");
+						mark.className = isCurrent
+							? "incsearch-callout-match incsearch-match-exact is-current"
+							: "incsearch-callout-match incsearch-match-exact";
+						mark.textContent = matched;
+						if (isCurrent) {
+							activeRef.span = mark;
+						}
+						frag.appendChild(mark);
+					} else {
+						frag.appendChild(document.createTextNode(matched));
 					}
-					frag.appendChild(mark);
 					currentOccur++;
 					matchCount++;
 					lastPos = idx + matchText.length;
@@ -502,6 +512,9 @@ function applyLivePreviewHighlights(view: EditorView, match: MatchRange) {
 	clearAllTableHighlights(view);
 	hideWidgetTableToast();
 
+	const session = view.state.field(searchSessionField, false);
+	const highlightAll = session?.highlightAllMatches !== false;
+
 	const calloutRange = getCalloutRangeAtPos(view, match.from);
 	const currentCallout = getCalloutAtPos(view, match.from);
 
@@ -536,7 +549,7 @@ function applyLivePreviewHighlights(view: EditorView, match: MatchRange) {
 		const matchText = rawText.replace(/^>\s*/, "").trim();
 		if (matchText) {
 			const activeIdx = getCalloutMatchIndex(view, calloutRange, match.from, matchText);
-			highlightMatchedTextInCallout(view, currentCallout, matchText, activeIdx);
+			highlightMatchedTextInCallout(view, currentCallout, matchText, activeIdx, highlightAll);
 		}
 	}
 
@@ -742,7 +755,8 @@ export function recomputeQuery(
 	fuzzy: boolean,
 	matchOnlyVisibleLinks: boolean,
 	linkCache?: CachedMetadata,
-	isTyping = false
+	isTyping = false,
+	highlightAllMatches = true
 ) {
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
@@ -774,6 +788,7 @@ export function recomputeQuery(
 			direction,
 			matches: allMatches,
 			activeIndex,
+			highlightAllMatches,
 		}),
 	});
 

@@ -21,6 +21,7 @@ export interface SearchSessionState {
 	matches: MatchRange[];
 	activeIndex: number;
 	originSelection: { anchor: number; head: number };
+	highlightAllMatches?: boolean;
 }
 
 export interface IncrementalSearchSettings {
@@ -29,6 +30,7 @@ export interface IncrementalSearchSettings {
 	fuzzyMode: boolean;
 	usePopupModal: boolean;
 	matchOnlyVisibleLinks: boolean;
+	highlightAllMatches: boolean;
 }
 
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
@@ -37,4 +39,5 @@ export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	fuzzyMode: true,
 	usePopupModal: false,
 	matchOnlyVisibleLinks: true,
+	highlightAllMatches: true,
 };

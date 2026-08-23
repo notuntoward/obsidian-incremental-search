@@ -44,7 +44,9 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			this.direction,
 			this.plugin.settings.fuzzyMode,
 			this.plugin.settings.matchOnlyVisibleLinks,
-			linkCache
+			linkCache,
+			false,
+			this.plugin.settings.highlightAllMatches
 		);
 		const session = this.cm.state.field(searchSessionField, false);
 		if (!session || !session.matches || session.matches.length === 0) return [];
