@@ -73,7 +73,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     // Trigger forward search
-    commands["forward"].editorCallback(mockEditor);
+    plugin.handleCommand(false, "forward", mockEditor as any);
 
     // It should have dispatched a setSession effect with a new session
     expect(dispatches.length).toBeGreaterThan(0);
@@ -107,7 +107,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     // Trigger forward search again (like pressing search command hotkey a second time)
-    commands["forward"].editorCallback(mockEditor);
+    plugin.handleCommand(false, "forward", mockEditor as any);
 
     // It should just advance, not reset the query
     expect(currentSession.query).toBe("test");
@@ -146,7 +146,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     // Trigger backward search on empty active session -> recalls lastQuery in backward direction
-    commands["backward"].editorCallback(mockEditor);
+    plugin.handleCommand(false, "backward", mockEditor as any);
 
     expect(currentSession.query).toBe("previous search");
     expect(currentSession.direction).toBe("backward");
@@ -178,7 +178,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     // Trigger backward search
-    commands["backward"].editorCallback(mockEditor);
+    plugin.handleCommand(false, "backward", mockEditor as any);
 
     expect(currentSession.direction).toBe("backward"); // switches direction
     expect(currentSession.activeIndex).toBe(1); // wrapped around from 0 to 1
@@ -213,7 +213,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     };
 
     expect(() => {
-      commands["forward"].editorCallback(mockEditor);
+      plugin.handleCommand(false, "forward", mockEditor as any);
     }).not.toThrow();
   });
 
@@ -228,4 +228,96 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     settingTabInstance.containerEl = document.createElement("div");
     expect(() => settingTabInstance.display()).not.toThrow();
   });
+
+  it("handles PDF view commands via checkCallback", () => {
+    const mockDoc = {
+      numPages: 1,
+      getPage: async () => ({
+        pageNumber: 1,
+        getTextContent: async () => ({ items: [{ str: "Sample text" }] }),
+        getViewport: () => ({ width: 600, height: 800 }),
+      }),
+    };
+
+    const containerEl = document.createElement("div");
+    const mockPdfView = {
+      getViewType: () => "pdf",
+      contentEl: containerEl,
+      viewer: {
+        child: {
+          pdfViewer: {
+            pdfViewer: {
+              pdfDocument: mockDoc,
+              pagesCount: 1,
+            },
+          },
+        },
+      },
+    };
+
+    plugin.app.workspace.getActiveViewOfType = () => mockPdfView;
+
+    // Check checking = true
+    const canSearch = commands["forward"].checkCallback(true);
+    expect(canSearch).toBe(true);
+
+    // Execute command checking = false
+    commands["forward"].checkCallback(false);
+    expect(plugin.pdfController).not.toBeNull();
+    expect(getActiveWidget()).not.toBeNull();
+  });
+
+  it("routes search correctly when PDF and Markdown note are open side-by-side", () => {
+    const mockPdfView = {
+      getViewType: () => "pdf",
+      contentEl: document.createElement("div"),
+      viewer: {
+        child: {
+          pdfViewer: {
+            pdfViewer: {
+              pdfDocument: { numPages: 1 },
+              pagesCount: 1,
+            },
+          },
+        },
+      },
+    };
+
+    const mockMarkdownEditor = {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 0 } },
+          field: () => currentSession,
+          doc: {
+            lines: 1,
+            line: () => ({ text: "markdown text", from: 0, to: 13, length: 13 }),
+          },
+        },
+        dispatch: (args: any) => {
+          dispatches.push(args);
+          if (args.effects?.value?.query !== undefined) {
+            currentSession = args.effects.value;
+          }
+        },
+        dom: { parentElement: document.createElement("div") },
+      },
+    };
+
+    const mockMarkdownView = {
+      getViewType: () => "markdown",
+      editor: mockMarkdownEditor,
+    };
+
+    // When the active leaf is the Markdown note side
+    plugin.app.workspace.activeLeaf = { view: mockMarkdownView };
+    plugin.app.workspace.activeEditor = { editor: mockMarkdownEditor };
+
+    commands["forward"].checkCallback(false);
+
+    // It should invoke markdown search session, NOT pdfController
+    expect(plugin.pdfController).toBeNull();
+    expect(currentSession).not.toBeNull();
+    expect(currentSession.direction).toBe("forward");
+  });
 });
+

@@ -6,7 +6,9 @@ import {
 	commitMatch,
 	cancelSession,
 	closeSession,
+	advance,
 } from "./session";
+import { PdfMatchController } from "./pdf/pdf-match-controller";
 
 let activeWidgetEl: HTMLDivElement | null = null;
 
@@ -15,7 +17,7 @@ export function getActiveWidget(): HTMLDivElement | null {
 }
 
 /**
- * Updates the match counter ("X/Y") and direction indicator ("▲"/"▼") in the widget.
+ * Updates the match counter ("X/Y") and direction indicator ("▲"/"▼") in the widget for Markdown.
  */
 export function updateWidgetCounter(view: EditorView) {
 	if (!activeWidgetEl) return;
@@ -38,6 +40,28 @@ export function updateWidgetCounter(view: EditorView) {
 	if (tableIcon) {
 		tableIcon.style.display = inTable ? "inline-flex" : "none";
 	}
+}
+
+/**
+ * Updates the match counter ("X/Y") and direction indicator ("▲"/"▼") in the widget for PDF.
+ */
+export function updatePdfWidgetCounter(controller: PdfMatchController) {
+	if (!activeWidgetEl) return;
+	const counter = activeWidgetEl.querySelector(".incsearch-counter");
+	const dirIndicator = activeWidgetEl.querySelector(".incsearch-dir");
+	const tableIcon = activeWidgetEl.querySelector(".incsearch-table-icon") as HTMLSpanElement | null;
+	if (!counter || !dirIndicator) return;
+
+	if (tableIcon) tableIcon.style.display = "none";
+
+	const { matches, activeIndex, direction, isScanning, query } = controller.state;
+
+	if (matches.length === 0) {
+		counter.textContent = isScanning && query.length > 0 ? "..." : "0/0";
+	} else {
+		counter.textContent = `${activeIndex + 1}/${matches.length}`;
+	}
+	dirIndicator.textContent = direction === "backward" ? "▲" : "▼";
 }
 
 export function showWidgetTableToast(data: NonNullable<import("./types").MatchRange["tableMatchData"]>) {
@@ -163,6 +187,7 @@ export function renderWidget(
 	input.addEventListener("blur", () => {
 		window.setTimeout(() => {
 			if (document.activeElement === input) return;
+			if (el.contains(document.activeElement)) return;
 			const session = view.state.field(searchSessionField, false);
 			if (session) {
 				closeSession(view, plugin);
@@ -171,6 +196,34 @@ export function renderWidget(
 	});
 
 	input.addEventListener("keydown", (evt: KeyboardEvent) => {
+		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+		const keyLower = evt.key.toLowerCase();
+
+		if (isCtrlOrMeta && (keyLower === "s" || keyLower === "r")) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			const dir: SearchDirection = keyLower === "s" ? "forward" : "backward";
+			advance(view, dir);
+			updateCounter();
+			return;
+		}
+
+		if (evt.key === "F3") {
+			evt.preventDefault();
+			evt.stopPropagation();
+			const dir: SearchDirection = evt.shiftKey ? "backward" : "forward";
+			advance(view, dir);
+			updateCounter();
+			return;
+		}
+
+		if (isCtrlOrMeta && keyLower === "g") {
+			evt.preventDefault();
+			evt.stopPropagation();
+			cancelSession(view, plugin);
+			return;
+		}
+
 		if (evt.key === "Enter") {
 			evt.preventDefault();
 			evt.stopPropagation();
@@ -179,6 +232,137 @@ export function renderWidget(
 			evt.preventDefault();
 			evt.stopPropagation();
 			cancelSession(view, plugin);
+		}
+	});
+
+	input.focus();
+	input.select();
+	updateCounter();
+}
+
+/**
+ * Renders the floating search widget over an active PDF view.
+ */
+export function renderPdfWidget(
+	controller: PdfMatchController,
+	plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
+	initialQuery: string,
+	initialDirection: SearchDirection,
+	onClose: () => void
+) {
+	removeWidget();
+
+	const container = controller.adapter.containerEl;
+	const el = document.createElement("div");
+	el.className = "incsearch-widget";
+
+	const dirIndicator = document.createElement("span");
+	dirIndicator.className = "incsearch-dir";
+	dirIndicator.textContent = initialDirection === "forward" ? "▼" : "▲";
+
+	const tableIcon = document.createElement("span");
+	tableIcon.className = "incsearch-table-icon";
+	tableIcon.style.display = "none";
+
+	const input = document.createElement("input");
+	input.className = "incsearch-input";
+	input.type = "text";
+	input.value = initialQuery;
+
+	const counter = document.createElement("span");
+	counter.className = "incsearch-counter";
+
+	el.appendChild(dirIndicator);
+	el.appendChild(tableIcon);
+	el.appendChild(input);
+	el.appendChild(counter);
+	container.appendChild(el);
+	activeWidgetEl = el;
+
+	const adjustInputSize = () => {
+		input.size = Math.max(12, input.value.length + 1);
+	};
+	adjustInputSize();
+
+	const updateCounter = () => updatePdfWidgetCounter(controller);
+
+	controller.onStateChange = () => {
+		updateCounter();
+	};
+
+	input.addEventListener("input", () => {
+		adjustInputSize();
+		void controller.search(input.value, controller.state.direction);
+		updateCounter();
+	});
+
+	input.addEventListener("blur", () => {
+		window.setTimeout(() => {
+			if (document.activeElement === input) return;
+			if (el.contains(document.activeElement)) return;
+			if (input.value) {
+				plugin.settings.lastQuery = input.value;
+				void plugin.saveSettings();
+			}
+			onClose();
+		}, 100);
+	});
+
+	input.addEventListener("keydown", (evt: KeyboardEvent) => {
+		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+		const keyLower = evt.key.toLowerCase();
+
+		if (isCtrlOrMeta && (keyLower === "s" || keyLower === "r")) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			const dir: SearchDirection = keyLower === "s" ? "forward" : "backward";
+			controller.advance(dir);
+			updateCounter();
+			return;
+		}
+
+		if (evt.key === "F3") {
+			evt.preventDefault();
+			evt.stopPropagation();
+			const dir: SearchDirection = evt.shiftKey ? "backward" : "forward";
+			controller.advance(dir);
+			updateCounter();
+			return;
+		}
+
+		if (isCtrlOrMeta && keyLower === "g") {
+			evt.preventDefault();
+			evt.stopPropagation();
+			if (input.value) {
+				plugin.settings.lastQuery = input.value;
+				void plugin.saveSettings();
+			}
+			onClose();
+			return;
+		}
+
+		if (evt.key === "Enter") {
+			evt.preventDefault();
+			evt.stopPropagation();
+			if (evt.shiftKey) {
+				controller.advance("backward");
+			} else {
+				if (controller.state.matches.length > 0) {
+					controller.advance("forward");
+				}
+			}
+			if (input.value) {
+				plugin.settings.lastQuery = input.value;
+				void plugin.saveSettings();
+			}
+		} else if (evt.key === "Escape") {
+			evt.preventDefault();
+			evt.stopPropagation();
+			if (input.value) {
+				plugin.settings.lastQuery = input.value;
+				void plugin.saveSettings();
+			}
+			onClose();
 		}
 	});
 

@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, Editor } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Editor, View } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { IncrementalSearchSettings, DEFAULT_SETTINGS, SearchDirection } from "./types";
 import {
@@ -8,19 +8,37 @@ import {
 	recomputeQuery,
 	advance,
 } from "./session";
-import { renderWidget, updateWidgetCounter, removeAllWidgets, getActiveWidget } from "./widget";
+import {
+	renderWidget,
+	renderPdfWidget,
+	updateWidgetCounter,
+	updatePdfWidgetCounter,
+	removeAllWidgets,
+	removeWidget,
+	getActiveWidget,
+} from "./widget";
 import { IncrementalSearchSuggestModal } from "./modal";
-
 import { updateResolvedOutlineColor } from "./utils/colors";
+import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
+import { PdfMatchController } from "./pdf/pdf-match-controller";
 
 export * from "./types";
 export * from "./engine";
 export * from "./session";
 export * from "./widget";
 export * from "./modal";
+export * from "./pdf/types";
+export * from "./pdf/text-model";
+export * from "./pdf/pattern-matcher";
+export * from "./pdf/match-geometry";
+export * from "./pdf/highlight-layer";
+export * from "./pdf/pdf-view-adapter";
+export * from "./pdf/pdf-match-controller";
 
 export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;
+	pdfController: PdfMatchController | null = null;
+	activePdfView: any = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -37,26 +55,170 @@ export default class IncrementalSearchPlugin extends Plugin {
 			})
 		);
 
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (this.pdfController && leaf?.view !== this.activePdfView) {
+					this.pdfController.destroy();
+					this.pdfController = null;
+					this.activePdfView = null;
+					removeWidget();
+				}
+			})
+		);
+
 		this.addCommand({
 			id: "forward",
 			name: "Forward",
-			editorCallback: (editor: Editor) => this.invoke(editor, "forward"),
+			checkCallback: (checking: boolean) => this.handleCommand(checking, "forward"),
 		});
 
 		this.addCommand({
 			id: "backward",
 			name: "Backward",
-			editorCallback: (editor: Editor) => this.invoke(editor, "backward"),
+			checkCallback: (checking: boolean) => this.handleCommand(checking, "backward"),
 		});
 
 		this.addSettingTab(new IncrementalSearchSettingTab(this.app, this));
 	}
 
 	onunload() {
+		if (this.pdfController) {
+			this.pdfController.destroy();
+			this.pdfController = null;
+			this.activePdfView = null;
+		}
 		removeAllWidgets();
 	}
 
-	private invoke(editor: Editor, direction: SearchDirection) {
+	private getActiveTarget(): { type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
+		const activeLeaf = (this.app.workspace as any).activeLeaf ||
+			(this.app.workspace as any).getMostRecentLeaf?.();
+		const activeView = activeLeaf?.view;
+
+		// 1. If active view is a PDF view
+		if (activeView && isPdfView(activeView)) {
+			return { type: "pdf", view: activeView };
+		}
+
+		// 2. If active view or workspace has an active editor
+		const editor = (this.app.workspace as any).activeEditor?.editor ||
+			(activeView as any)?.editor;
+
+		if (editor) {
+			return { type: "editor", editor };
+		}
+
+		// 3. Fallback check for activeView of type View
+		const fallbackView = (this.app.workspace as any).getActiveViewOfType?.(View);
+		if (fallbackView && isPdfView(fallbackView)) {
+			return { type: "pdf", view: fallbackView };
+		}
+		if ((fallbackView as any)?.editor) {
+			return { type: "editor", editor: (fallbackView as any).editor };
+		}
+
+		return null;
+	}
+
+	handleCommand(checking: boolean, direction: SearchDirection, explicitEditor?: Editor): boolean {
+		if (explicitEditor) {
+			if (!checking) {
+				this.invoke(explicitEditor, direction);
+			}
+			return true;
+		}
+
+		if (this.pdfController && this.activePdfView) {
+			if (!checking) {
+				this.invokePdf(this.activePdfView, direction);
+			}
+			return true;
+		}
+
+		const target = this.getActiveTarget();
+		if (!target) return false;
+
+		if (target.type === "pdf") {
+			if (!checking) {
+				this.invokePdf(target.view, direction);
+			}
+			return true;
+		}
+
+		if (target.type === "editor") {
+			if (!checking) {
+				this.invoke(target.editor, direction);
+			}
+			return true;
+		}
+
+		return false;
+	}
+
+	invokePdf(view: any, direction: SearchDirection) {
+		this.activePdfView = view;
+
+		if (this.pdfController) {
+			if (this.pdfController.state.query === "" && this.settings.lastQuery) {
+				void this.pdfController.search(this.settings.lastQuery, direction);
+				const widget = getActiveWidget();
+				if (widget) {
+					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
+					if (input) {
+						input.value = this.settings.lastQuery;
+						input.select();
+					}
+				}
+			} else {
+				this.pdfController.advance(direction);
+				const widget = getActiveWidget();
+				if (widget) {
+					const input = widget.querySelector<HTMLInputElement>(".incsearch-input");
+					input?.focus();
+				}
+			}
+			updatePdfWidgetCounter(this.pdfController);
+			return;
+		}
+
+		const adapter = createPdfViewAdapter(view);
+		if (!adapter) return;
+
+		this.pdfController = new PdfMatchController(
+			adapter,
+			this.settings,
+			direction,
+			() => {
+				if (this.pdfController) {
+					updatePdfWidgetCounter(this.pdfController);
+				}
+			}
+		);
+
+		const startingQuery = "";
+		renderPdfWidget(
+			this.pdfController,
+			this,
+			startingQuery,
+			direction,
+			() => {
+				this.pdfController?.destroy();
+				this.pdfController = null;
+				this.activePdfView = null;
+				removeWidget();
+			}
+		);
+	}
+
+	invoke(editor: Editor, direction: SearchDirection) {
+		// If switching to markdown while a PDF search was active, clean up PDF controller
+		if (this.pdfController) {
+			this.pdfController.destroy();
+			this.pdfController = null;
+			this.activePdfView = null;
+			removeWidget();
+		}
+
 		// @ts-expect-error CodeMirror view is attached to editor.cm in Obsidian runtime
 		const view: EditorView | undefined = editor.cm;
 		if (!view) return;
@@ -163,7 +325,7 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Highlight all matches")
-			.setDesc("Highlight all matches across the note, not just the active match.")
+			.setDesc("Highlight all matches across the note or PDF, not just the active match.")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.highlightAllMatches)

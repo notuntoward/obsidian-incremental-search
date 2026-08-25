@@ -5,6 +5,7 @@ import {
   removeAllWidgets,
   getActiveWidget,
   renderWidget,
+  renderPdfWidget,
 } from "../src/widget";
 import { SearchSessionState } from "../src/types";
 
@@ -179,5 +180,39 @@ describe("widget: counter & lifecycle", () => {
 
     removeWidget(mockView);
     expect(getActiveWidget()).toBeNull();
+  });
+
+  it("handles Ctrl+S and Ctrl+R in renderPdfWidget without blurring or closing", () => {
+    let advancedDir: string | null = null;
+    const mockController: any = {
+      adapter: { containerEl: document.createElement("div") },
+      state: { matches: [{ id: "m1" }, { id: "m2" }], activeIndex: 0, direction: "forward", isScanning: false, query: "test" },
+      advance: (dir: string) => {
+        advancedDir = dir;
+      },
+      search: async () => {},
+    };
+
+    let closed = false;
+    renderPdfWidget(mockController, mockPlugin, "test", "forward", () => {
+      closed = true;
+    });
+
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    // Press Ctrl+S -> should advance forward
+    const ctrlSEvent = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlSEvent);
+    expect(advancedDir).toBe("forward");
+    expect(ctrlSEvent.defaultPrevented).toBe(true);
+    expect(closed).toBe(false);
+
+    // Press Ctrl+R -> should advance backward
+    const ctrlREvent = new KeyboardEvent("keydown", { key: "r", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlREvent);
+    expect(advancedDir).toBe("backward");
+    expect(ctrlREvent.defaultPrevented).toBe(true);
+    expect(closed).toBe(false);
   });
 });

@@ -198,3 +198,42 @@
   color: var(--text-muted);
   margin-right: 8px;
 }
+
+/* PDF Search Overlay & Matches */
+.incsearch-pdf-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.incsearch-pdf-match {
+  background-color: var(--incsearch-match-bg);
+  opacity: 0.55;
+  border-radius: var(--radius-s, 2px);
+  position: absolute;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.theme-dark .incsearch-pdf-match {
+  mix-blend-mode: screen;
+  opacity: 0.45;
+}
+
+.incsearch-pdf-match.is-current {
+  background-color: var(--text-selection, #80b3ff) !important;
+  opacity: 0.85 !important;
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  border-radius: var(--radius-s, 2px) !important;
+  position: absolute;
+  pointer-events: none;
+  z-index: 3 !important;
+  mix-blend-mode: normal !important;
+}
+
