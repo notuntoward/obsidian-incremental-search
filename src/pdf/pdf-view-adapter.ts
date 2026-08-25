@@ -17,6 +17,13 @@ export interface PdfViewAdapter {
 	on(event: string, handler: (...args: any[]) => void): () => void;
 	scrollToRect(pageNumber: number, rect?: MatchRect): void;
 	scrollPageIntoView(pageNumber: number): void;
+	executeNativeFind?(command: {
+		query: string;
+		type?: string;
+		findPrevious?: boolean;
+		highlightAll?: boolean;
+		caseSensitive?: boolean;
+	}): boolean;
 }
 
 /**
@@ -364,6 +371,59 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			} else {
 				pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
 			}
+		},
+
+		executeNativeFind(command: {
+			query: string;
+			type?: string;
+			findPrevious?: boolean;
+			highlightAll?: boolean;
+			caseSensitive?: boolean;
+		}): boolean {
+			const { query, type = "", findPrevious = false, highlightAll = true, caseSensitive = false } = command;
+			const child = (view as any)?.viewer?.child || (view as any)?.child;
+			const findController =
+				pdfViewer?.findController ||
+				child?.findController ||
+				child?.pdfViewer?.findController ||
+				(view as any)?.viewer?.findController ||
+				(view as any)?.findController;
+
+			if (eventBus && typeof eventBus.dispatch === "function") {
+				try {
+					eventBus.dispatch("find", {
+						type,
+						query,
+						phraseSearch: true,
+						caseSensitive,
+						entireWord: false,
+						highlightAll,
+						findPrevious,
+					});
+					return true;
+				} catch (e) {
+					console.error("Incremental Search: error dispatching to eventBus", e);
+				}
+			}
+
+			if (findController && typeof findController.executeCommand === "function") {
+				try {
+					const cmd = type === "again" ? "findagain" : "find";
+					findController.executeCommand(cmd, {
+						query,
+						phraseSearch: true,
+						caseSensitive,
+						entireWord: false,
+						highlightAll,
+						findPrevious,
+					});
+					return true;
+				} catch (e) {
+					console.error("Incremental Search: error executing command on findController", e);
+				}
+			}
+
+			return false;
 		},
 	};
 }

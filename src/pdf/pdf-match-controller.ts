@@ -77,6 +77,25 @@ export class PdfMatchController {
 			this.refreshAllVisibleHighlights();
 		});
 		this.unsubscribers.push(unsubScroll);
+
+		// Listen to PDF.js native find controller match events
+		const unsubFindCount = this.adapter.on("updatefindmatchescount", (evt: any) => {
+			if (evt?.matchesCount) {
+				const { current, total } = evt.matchesCount;
+				this.state.activeIndex = Math.max(0, current - 1);
+				this.notifyStateChange();
+			}
+		});
+		this.unsubscribers.push(unsubFindCount);
+
+		const unsubFindState = this.adapter.on("updatefindcontrolstate", (evt: any) => {
+			if (evt?.matchesCount) {
+				const { current, total } = evt.matchesCount;
+				this.state.activeIndex = Math.max(0, current - 1);
+				this.notifyStateChange();
+			}
+		});
+		this.unsubscribers.push(unsubFindState);
 	}
 
 	/**
@@ -116,6 +135,20 @@ export class PdfMatchController {
 
 		clearAllPdfHighlights(this.adapter.containerEl);
 		this.notifyStateChange();
+
+		if (this.adapter.executeNativeFind) {
+			const handled = this.adapter.executeNativeFind({
+				query,
+				type: "",
+				findPrevious: direction === "backward",
+				highlightAll: this.state.highlightAllMatches,
+			});
+			if (handled) {
+				this.state.isScanning = false;
+				this.notifyStateChange();
+				return;
+			}
+		}
 
 		if (query.length === 0) {
 			this.state.isScanning = false;
@@ -252,6 +285,19 @@ export class PdfMatchController {
 	}
 
 	advance(direction: SearchDirection) {
+		if (this.adapter.executeNativeFind && this.state.query) {
+			const handled = this.adapter.executeNativeFind({
+				query: this.state.query,
+				type: "again",
+				findPrevious: direction === "backward",
+				highlightAll: this.state.highlightAllMatches,
+			});
+			if (handled) {
+				this.state.direction = direction;
+				return;
+			}
+		}
+
 		const matches = this.state.matches;
 		if (matches.length === 0) return;
 
@@ -308,6 +354,13 @@ export class PdfMatchController {
 
 	destroy() {
 		this.scanGeneration++;
+		if (this.adapter.executeNativeFind) {
+			this.adapter.executeNativeFind({
+				query: "",
+				type: "",
+				highlightAll: false,
+			});
+		}
 		clearAllPdfHighlights(this.adapter.containerEl);
 		for (const unsub of this.unsubscribers) {
 			unsub();

@@ -179,8 +179,8 @@ describe("PDF Match Controller", () => {
 		}
 
 		// Highlights should now be refreshed for Page 2
-		const page2Overlay = pageElements.get(2)!.querySelector(".incsearch-pdf-overlay");
-		expect(page2Overlay).not.toBeNull();
+		const page2Highlight = pageElements.get(2)!.querySelector(".incsearch-pdf-match");
+		expect(page2Highlight).not.toBeNull();
 	});
 
 	it("deduplicates identical text items at the same coordinates so forward search never requires double-stepping", async () => {

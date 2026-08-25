@@ -70,7 +70,7 @@ export function renderPageHighlights(
 }
 
 /**
- * Removes the highlight overlay from a single page element.
+ * Removes all highlight overlays from a single page element.
  */
 export function clearPageHighlights(pageElement: HTMLElement) {
 	const overlay = pageElement.querySelector(`.${OVERLAY_CLASS}`);

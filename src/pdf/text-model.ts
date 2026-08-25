@@ -127,14 +127,21 @@ export function sortItemsReadingOrder(rawItems: PdfTextItem[]): PdfTextItem[] {
 		return [];
 	}
 
-	const nonDuplicates = deduplicateRawItems(rawItems);
-	let currentDomIndex = 0;
-	const indexedItems: PdfTextItem[] = nonDuplicates.map((item) => ({
-		...item,
-		domIndex: item.domIndex ?? currentDomIndex++,
-	}));
+	// Assign true 1:1 DOM indices matching PDF.js textLayer span element creation
+	let rawDomIndex = 0;
+	const indexedRaw: PdfTextItem[] = [];
+	for (let i = 0; i < rawItems.length; i++) {
+		const it = rawItems[i];
+		if (!it.str || it.str.length === 0) continue;
+		indexedRaw.push({
+			...it,
+			domIndex: it.domIndex ?? rawDomIndex++,
+		});
+	}
 
-	indexedItems.sort((a, b) => {
+	const nonDuplicates = deduplicateRawItems(indexedRaw);
+
+	nonDuplicates.sort((a, b) => {
 		const tfA = a.transform || [1, 0, 0, 1, 0, 0];
 		const tfB = b.transform || [1, 0, 0, 1, 0, 0];
 		const xA = tfA[4] || 0;
@@ -160,7 +167,7 @@ export function sortItemsReadingOrder(rawItems: PdfTextItem[]): PdfTextItem[] {
 		return yDiff;
 	});
 
-	return indexedItems;
+	return nonDuplicates;
 }
 
 /**
