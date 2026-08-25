@@ -88,11 +88,55 @@ function normalizeCharacter(ch: string): string {
 }
 
 /**
+ * Sorts PDF text items into visual reading order (top-to-bottom, left-to-right)
+ * while preserving the original DOM index for exact textLayer element lookup.
+ */
+export function sortItemsReadingOrder(rawItems: PdfTextItem[]): PdfTextItem[] {
+	if (!rawItems || rawItems.length <= 1) {
+		return rawItems ? rawItems.map((it, idx) => ({ ...it, domIndex: it.domIndex ?? idx })) : [];
+	}
+
+	const indexedItems: PdfTextItem[] = rawItems.map((item, originalIndex) => ({
+		...item,
+		domIndex: item.domIndex ?? originalIndex,
+	}));
+
+	indexedItems.sort((a, b) => {
+		const tfA = a.transform || [1, 0, 0, 1, 0, 0];
+		const tfB = b.transform || [1, 0, 0, 1, 0, 0];
+		const xA = tfA[4] || 0;
+		const yA = tfA[5] || 0;
+		const xB = tfB[4] || 0;
+		const yB = tfB[5] || 0;
+
+		const hA = a.height || Math.abs(tfA[3]) || Math.abs(tfA[0]) || 10;
+		const hB = b.height || Math.abs(tfB[3]) || Math.abs(tfB[0]) || 10;
+
+		// In PDF coordinates, higher y is closer to top of page.
+		// For top-to-bottom order, higher y comes first (descending y: yB - yA > 0).
+		const yDiff = yB - yA;
+		const lineHeight = Math.max(hA, hB, 8);
+		const lineTolerance = lineHeight * 0.45;
+
+		if (Math.abs(yDiff) <= lineTolerance) {
+			// On the same visual line: sort left-to-right (lower x comes first)
+			return xA - xB;
+		}
+
+		// On different lines: sort top-to-bottom (higher y first)
+		return yDiff;
+	});
+
+	return indexedItems;
+}
+
+/**
  * Builds a searchable PageTextModel from PDF.js TextContent items,
  * maintaining a reversible source map from normalized character index
  * to original TextItem and local character offset.
  */
-export function buildPageTextModel(pageNumber: number, items: PdfTextItem[]): PageTextModel {
+export function buildPageTextModel(pageNumber: number, rawItems: PdfTextItem[]): PageTextModel {
+	const items = sortItemsReadingOrder(rawItems);
 	const normalizedChars: string[] = [];
 	const charMapping: (CharSourceMapping | null)[] = [];
 

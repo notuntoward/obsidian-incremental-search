@@ -8,6 +8,7 @@ export interface PdfTextItem {
 	transform?: number[];
 	fontName?: string;
 	hasEOL?: boolean;
+	domIndex?: number;
 }
 
 export interface CharSourceMapping {

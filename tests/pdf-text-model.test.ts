@@ -89,4 +89,31 @@ describe("PDF Text Model & Normalization", () => {
 
 		expect(model.normalizedText).toBe("First line Second line ");
 	});
+
+	it("sorts items into visual reading order top-to-bottom and left-to-right", () => {
+		// Out-of-order items: Body text at y=400, Header at y=750, Title at y=600, Footer at y=50
+		const rawItems: PdfTextItem[] = [
+			{ str: "Body paragraph", transform: [1, 0, 0, 1, 50, 400], height: 12, width: 100 },
+			{ str: "Title banner", transform: [1, 0, 0, 1, 50, 600], height: 24, width: 150 },
+			{ str: "Top header", transform: [1, 0, 0, 1, 50, 750], height: 10, width: 80 },
+			{ str: "Bottom footer", transform: [1, 0, 0, 1, 50, 50], height: 10, width: 80 },
+		];
+
+		const model = buildPageTextModel(1, rawItems);
+
+		// Visual order should be: Top header (y=750) -> Title banner (y=600) -> Body paragraph (y=400) -> Bottom footer (y=50)
+		expect(model.items[0].str).toBe("Top header");
+		expect(model.items[0].domIndex).toBe(2);
+
+		expect(model.items[1].str).toBe("Title banner");
+		expect(model.items[1].domIndex).toBe(1);
+
+		expect(model.items[2].str).toBe("Body paragraph");
+		expect(model.items[2].domIndex).toBe(0);
+
+		expect(model.items[3].str).toBe("Bottom footer");
+		expect(model.items[3].domIndex).toBe(3);
+
+		expect(model.normalizedText).toBe("Top header Title banner Body paragraph Bottom footer");
+	});
 });

@@ -38,6 +38,7 @@
 		"globals": "^17.6.0",
 		"jsdom": "^29.0.1",
 		"obsidian": "^1.13.1",
+		"pdfjs-dist": "^6.2.108",
 		"playwright": "^1.59.1",
 		"prettier": "^3.1.1",
 		"tslib": "^2.6.2",

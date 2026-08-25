@@ -56,12 +56,11 @@ function computeDomRangeGeometry(
 		const item = pageModel.items[span.itemIndex];
 		if (!item) continue;
 
-		// Map itemIndex to DOM element
+		// Map itemIndex to DOM element using item.domIndex
+		const targetDomIndex = item.domIndex ?? span.itemIndex;
 		let targetEl: HTMLElement | null = null;
-		if (domChildren.length === pageModel.items.length) {
-			targetEl = domChildren[span.itemIndex];
-		} else if (span.itemIndex < domChildren.length) {
-			targetEl = domChildren[span.itemIndex];
+		if (targetDomIndex < domChildren.length) {
+			targetEl = domChildren[targetDomIndex];
 		}
 
 		if (!targetEl) continue;
