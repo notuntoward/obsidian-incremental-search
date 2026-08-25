@@ -229,15 +229,32 @@ describe("session: termination & query persistence", () => {
     expect(dispatches.length).toBeGreaterThan(0);
     const lastDispatch = dispatches[0];
     expect(lastDispatch.selection.head).toBe(15);
+    // Origin is not restored
+    expect(lastDispatch.selection.anchor).toBe(15);
   });
 
-  it("cancelSession restores original cursor, saves query, and clears session", () => {
+  it("commitMatch with no matches closes session without throwing or restoring origin", () => {
+    const view = createView({
+      query: "nomatch",
+      direction: "forward",
+      matches: [],
+      activeIndex: 0,
+      originSelection: { anchor: 2, head: 5 },
+    });
+
+    expect(() => commitMatch(view, mockPlugin)).not.toThrow();
+    expect(currentSession).toBeNull();
+    // Dispatch has no selection alteration
+    expect(dispatches[0].selection).toBeUndefined();
+  });
+
+  it("cancelSession restores original selection range, saves query, and clears session", () => {
     const view = createView({
       query: "abandoned",
       direction: "forward",
       matches: [{ from: 10, to: 15 }],
       activeIndex: 0,
-      originSelection: { anchor: 2, head: 5 },
+      originSelection: { anchor: 2, head: 8 },
     });
 
     cancelSession(view, mockPlugin);
@@ -245,7 +262,7 @@ describe("session: termination & query persistence", () => {
     expect(mockPlugin.settings.lastQuery).toBe("abandoned");
     const lastDispatch = dispatches[0];
     expect(lastDispatch.selection.anchor).toBe(2);
-    expect(lastDispatch.selection.head).toBe(5);
+    expect(lastDispatch.selection.head).toBe(8);
   });
 
   it("closeSession clears session without modifying selection", () => {

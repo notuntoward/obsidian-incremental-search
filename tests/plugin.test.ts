@@ -45,9 +45,60 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     await plugin.onload();
   });
 
-  it("registers forward and backward commands", () => {
+  it("registers forward, backward, and accept-match commands", () => {
     expect(commands["forward"]).toBeDefined();
     expect(commands["backward"]).toBeDefined();
+    expect(commands["accept-match"]).toBeDefined();
+    expect(plugin.settings.searchExitBehavior).toBe("emacs");
+  });
+
+  it("checks that accept-match is unavailable when no search is active", () => {
+    currentSession = null;
+    const canAccept = commands["accept-match"].checkCallback(true);
+    expect(canAccept).toBe(false);
+  });
+
+  it("handles accept-match command when editor search is active", () => {
+    currentSession = {
+      query: "test",
+      direction: "forward",
+      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    const mockEditor = {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 0 } },
+          field: () => currentSession,
+          doc: {
+            lineAt: () => ({ number: 1, text: "test", from: 0, to: 4 }),
+          },
+        },
+        dispatch: (args: any) => {
+          dispatches.push(args);
+          if (args.effects) {
+            const effects = Array.isArray(args.effects) ? args.effects : [args.effects];
+            for (const eff of effects) {
+              if (eff?.value === null) {
+                currentSession = null;
+              }
+            }
+          }
+        },
+        dom: { parentElement: document.createElement("div") },
+        focus: () => {},
+      },
+    };
+
+    plugin.app.workspace.activeLeaf = { view: { getViewType: () => "markdown", editor: mockEditor } };
+
+    const canAccept = commands["accept-match"].checkCallback(true);
+    expect(canAccept).toBe(true);
+
+    commands["accept-match"].checkCallback(false);
+    expect(currentSession).toBeNull();
   });
 
   it("starts a new session if none is active", () => {

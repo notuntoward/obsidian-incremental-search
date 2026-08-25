@@ -227,11 +227,25 @@ export function renderWidget(
 		if (evt.key === "Enter") {
 			evt.preventDefault();
 			evt.stopPropagation();
-			commitMatch(view, plugin);
+			if (plugin.settings.searchExitBehavior === "obsidian") {
+				const session = view.state.field(searchSessionField, false);
+				const currentDir = session?.direction ?? "forward";
+				const dir: SearchDirection = evt.shiftKey
+					? (currentDir === "forward" ? "backward" : "forward")
+					: currentDir;
+				advance(view, dir);
+				updateCounter();
+			} else {
+				commitMatch(view, plugin);
+			}
 		} else if (evt.key === "Escape") {
 			evt.preventDefault();
 			evt.stopPropagation();
-			cancelSession(view, plugin);
+			if (plugin.settings.searchExitBehavior === "obsidian") {
+				commitMatch(view, plugin);
+			} else {
+				cancelSession(view, plugin);
+			}
 		}
 	});
 
@@ -337,6 +351,7 @@ export function renderPdfWidget(
 				plugin.settings.lastQuery = input.value;
 				void plugin.saveSettings();
 			}
+			controller.cancel();
 			onClose();
 			return;
 		}
@@ -344,16 +359,20 @@ export function renderPdfWidget(
 		if (evt.key === "Enter") {
 			evt.preventDefault();
 			evt.stopPropagation();
-			if (evt.shiftKey) {
-				controller.advance("backward");
+			if (plugin.settings.searchExitBehavior === "obsidian") {
+				const currentDir = controller.state.direction || "forward";
+				const dir: SearchDirection = evt.shiftKey
+					? (currentDir === "forward" ? "backward" : "forward")
+					: currentDir;
+				controller.advance(dir);
+				updateCounter();
 			} else {
-				if (controller.state.matches.length > 0) {
-					controller.advance("forward");
+				if (input.value) {
+					plugin.settings.lastQuery = input.value;
+					void plugin.saveSettings();
 				}
-			}
-			if (input.value) {
-				plugin.settings.lastQuery = input.value;
-				void plugin.saveSettings();
+				controller.accept();
+				onClose();
 			}
 		} else if (evt.key === "Escape") {
 			evt.preventDefault();
@@ -361,6 +380,11 @@ export function renderPdfWidget(
 			if (input.value) {
 				plugin.settings.lastQuery = input.value;
 				void plugin.saveSettings();
+			}
+			if (plugin.settings.searchExitBehavior === "obsidian") {
+				controller.accept();
+			} else {
+				controller.cancel();
 			}
 			onClose();
 		}

@@ -7,6 +7,7 @@ import {
 	setSession,
 	recomputeQuery,
 	advance,
+	commitMatch,
 } from "./session";
 import {
 	renderWidget,
@@ -121,6 +122,12 @@ export default class IncrementalSearchPlugin extends Plugin {
 			checkCallback: (checking: boolean) => this.handleCommand(checking, "backward"),
 		});
 
+		this.addCommand({
+			id: "accept-match",
+			name: "Accept current incremental-search match",
+			checkCallback: (checking: boolean) => this.handleAcceptCommand(checking),
+		});
+
 		this.addSettingTab(new IncrementalSearchSettingTab(this.app, this));
 	}
 
@@ -206,6 +213,41 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 
 		return null;
+	}
+
+	handleAcceptCommand(checking: boolean): boolean {
+		if (this.pdfController) {
+			if (!checking) {
+				const widget = getActiveWidget();
+				const input = widget?.querySelector<HTMLInputElement>(".incsearch-input");
+				if (input?.value) {
+					this.settings.lastQuery = input.value;
+					void this.saveSettings();
+				}
+				this.pdfController.accept();
+				this.pdfController = null;
+				this.activePdfView = null;
+				removeWidget();
+			}
+			return true;
+		}
+
+		const target = this.getActiveTarget();
+		if (target?.type === "editor") {
+			// @ts-expect-error CodeMirror view is attached to editor.cm in Obsidian runtime
+			const view: EditorView | undefined = target.editor.cm;
+			if (view) {
+				const session = view.state.field(searchSessionField, false);
+				if (session) {
+					if (!checking) {
+						commitMatch(view, this);
+					}
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	handleCommand(checking: boolean, direction: SearchDirection, explicitEditor?: Editor): boolean {
@@ -405,6 +447,22 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName("Search exit behavior")
+			.setDesc(
+				"Determines how Enter and Escape end an active incremental search session."
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("emacs", "Emacs-style (Enter accepts, Escape cancels)")
+					.addOption("obsidian", "Obsidian-style (Enter finds next, Escape accepts)")
+					.setValue(this.plugin.settings.searchExitBehavior)
+					.onChange(async (value) => {
+						this.plugin.settings.searchExitBehavior = value as any;
+						await this.plugin.saveSettings();
+					})
+			);
 
 		new Setting(containerEl)
 			.setName("Highlight all matches")

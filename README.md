@@ -16,9 +16,8 @@ Users who keep their hands on the home row will appreciate this keyboard-driven 
 - **Directional Incremental Navigation:** Search starts from your current cursor position. Triggering the search command again advances to the next or previous match in real time.
 - **Smart Space-as-Wildcard Matching:** Type search terms separated by spaces to match words across lines or paragraphs. Type extra spaces to match exact literal spaces.
 - **Search Memory & Double-Tap Recall:** Pressing a search hotkey twice in a row (without typing anything in between) immediately recalls and resumes your previous search query in the direction of the second keypress.
-- **Clean Keyboard Dismissal:**
-  - `Enter`: Commits the match and places the cursor at the end of the match.
-  - `Escape`: Cancels search and restores your cursor to where you began.
+- **Clean Keyboard Dismissal & Search Exit Policy:**
+  - `Enter` and `Escape` behavior is configurable via the **Search exit behavior** setting to suit both Emacs and Obsidian workflows.
   - Search widget disappears immediately upon exit.
 - **Alternative Popup Modal:** An optional center-screen modal interface is available in settings. It provides an interface that may be more familiar to some users, though it is more limited than the default inline widget (it is non-directional, uses a simplified matching engine, and both forward/backward commands simply open the same modal).
 
@@ -26,17 +25,38 @@ Users who keep their hands on the home row will appreciate this keyboard-driven 
 
 ## Commands & Recommended Keybindings
 
-The plugin registers two commands in Obsidian's Command Palette. **Commands are not mapped to default hotkeys out of the box** so they do not conflict with your existing keymap.
+The plugin registers three commands in Obsidian's Command Palette. **Commands are not mapped to default hotkeys out of the box** so they do not conflict with your existing keymap.
 
 | Command Name | Command ID | Description | Recommended Keybinding |
 | :--- | :--- | :--- | :--- |
 | **Incremental Search: Forward** | `forward` | Starts/advances forward search from cursor | `Ctrl+S` (Windows/Linux) or `⌃S` / `⌥S` (macOS) |
 | **Incremental Search: Backward** | `backward` | Starts/advances backward search from cursor | `Ctrl+R` (Windows/Linux) or `⌃R` / `⌥R` (macOS) |
+| **Incremental Search: Accept current incremental-search match** | `accept-match` | Accepts current match and closes search (useful when Enter is set to find-next) | `Alt+Enter` or `Ctrl+Enter` |
 
 To configure these hotkeys in Obsidian:
 1. Open **Settings → Hotkeys**.
 2. Search for `Incremental Search`.
-3. Assign your preferred shortcuts to **Forward** and **Backward**.
+3. Assign your preferred shortcuts to **Forward**, **Backward**, and **Accept current incremental-search match**.
+
+---
+
+### Completing or cancelling a search
+
+An incremental-search session can end in one of two ways:
+
+- **Accept** ends search at the current match.
+- **Cancel** returns to the selection and viewport that were active before search began.
+
+The **Search exit behavior** setting controls the meaning of `Enter` and `Esc` while incremental search is active:
+
+| Behavior | `Enter` | `Esc` |
+| :--- | :--- | :--- |
+| **Emacs-style** (default) | Accept the current match and end search | Cancel search and restore the original selection and viewport |
+| **Obsidian-style** | Find the next match in the current direction | Accept the current match and end search |
+
+In either mode, `Ctrl+S` searches forward and `Ctrl+R` searches backward. In Obsidian-style mode, `Shift+Enter` searches backward.
+
+The command **Accept current incremental-search match** always ends the active search at its current match, independent of the selected behavior. It has no default hotkey; assign one in **Settings → Hotkeys** if desired.
 
 ---
 
@@ -66,7 +86,8 @@ This smart-case behavior applies across all search modes, including exact litera
 
 ## Settings
 
-- **Highlight all matches:** When enabled (default), highlights all matching occurrences throughout the note and within callouts. When disabled, only the single active match is highlighted.
+- **Search exit behavior:** Choose between **Emacs-style** (`Enter` accepts, `Esc` cancels) and **Obsidian-style** (`Enter` finds next, `Esc` accepts).
+- **Highlight all matches:** When enabled (default), highlights all matching occurrences throughout the note, callouts, or PDF. When disabled, only the single active match is highlighted.
 - **Fuzzy matching:** Toggle between space-as-wildcard fuzzy matching and exact literal substring search.
 - **Match only visible part of links:** When enabled (default), ignores hidden URLs in Markdown links (`[text](url)`) and hidden destinations in aliased wikilinks (`[[destination|alias]]`).
 - **Double-tap window (ms):** The timeout window (default `600ms`) during which consecutive search hotkey presses recall the last search query.

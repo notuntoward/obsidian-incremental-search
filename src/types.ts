@@ -24,6 +24,8 @@ export interface SearchSessionState {
 	highlightAllMatches?: boolean;
 }
 
+export type SearchExitBehavior = "emacs" | "obsidian";
+
 export interface IncrementalSearchSettings {
 	lastQuery: string;
 	doubleTapWindowMs: number;
@@ -31,6 +33,7 @@ export interface IncrementalSearchSettings {
 	usePopupModal: boolean;
 	matchOnlyVisibleLinks: boolean;
 	highlightAllMatches: boolean;
+	searchExitBehavior: SearchExitBehavior;
 }
 
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
@@ -40,4 +43,5 @@ export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	usePopupModal: false,
 	matchOnlyVisibleLinks: true,
 	highlightAllMatches: true,
+	searchExitBehavior: "emacs",
 };

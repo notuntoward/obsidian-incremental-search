@@ -60,6 +60,21 @@ export class Setting {
 	addButton(_cb: (button: any) => any): this {
 		return this;
 	}
+	addDropdown(_cb: (dropdown: any) => any): this {
+		const mockDropdown = {
+			addOption: function () {
+				return this;
+			},
+			setValue: function () {
+				return this;
+			},
+			onChange: function () {
+				return this;
+			},
+		};
+		_cb(mockDropdown);
+		return this;
+	}
 }
 
 export class Notice {

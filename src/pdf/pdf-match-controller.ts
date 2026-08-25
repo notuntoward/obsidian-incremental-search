@@ -12,6 +12,7 @@ export class PdfMatchController {
 	cache: Map<number, PageTextModel> = new Map();
 	state: PdfSessionState;
 	scanGeneration = 0;
+	originPageNumber: number;
 	unsubscribers: (() => void)[] = [];
 	onStateChange?: (state: PdfSessionState) => void;
 
@@ -24,6 +25,9 @@ export class PdfMatchController {
 		this.adapter = adapter;
 		this.settings = settings;
 		this.onStateChange = onStateChange;
+
+		const visible = adapter.getVisiblePageNumbers();
+		this.originPageNumber = visible.length > 0 ? visible[0] : 1;
 
 		this.state = {
 			query: "",
@@ -350,6 +354,17 @@ export class PdfMatchController {
 		if (this.onStateChange) {
 			this.onStateChange({ ...this.state });
 		}
+	}
+
+	accept() {
+		this.destroy();
+	}
+
+	cancel() {
+		if (this.originPageNumber) {
+			this.adapter.scrollPageIntoView(this.originPageNumber);
+		}
+		this.destroy();
 	}
 
 	destroy() {

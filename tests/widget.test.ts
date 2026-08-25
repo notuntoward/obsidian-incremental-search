@@ -215,4 +215,99 @@ describe("widget: counter & lifecycle", () => {
     expect(ctrlREvent.defaultPrevented).toBe(true);
     expect(closed).toBe(false);
   });
+
+  it("handles Enter and Escape in Emacs mode (default) in editor widget", () => {
+    mockPlugin.settings.searchExitBehavior = "emacs";
+    sessionState = {
+      query: "word",
+      direction: "forward",
+      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    // Press Escape -> should cancel session and close widget
+    const escEvent = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    input.dispatchEvent(escEvent);
+    expect(getActiveWidget()).toBeNull();
+  });
+
+  it("handles Enter, Shift+Enter, and Escape in Obsidian mode in editor widget", () => {
+    mockPlugin.settings.searchExitBehavior = "obsidian";
+    sessionState = {
+      query: "word",
+      direction: "forward",
+      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    // Press Enter -> should advance forward to next match and stay open
+    const enterEvent = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(enterEvent);
+    expect(sessionState?.activeIndex).toBe(1);
+    expect(getActiveWidget()).not.toBeNull();
+
+    // Press Shift+Enter -> should advance backward (reverse direction) and stay open
+    const shiftEnterEvent = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(shiftEnterEvent);
+    expect(sessionState?.activeIndex).toBe(0);
+    expect(getActiveWidget()).not.toBeNull();
+
+    // Press Escape -> should accept current match and close widget
+    const escEvent = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    input.dispatchEvent(escEvent);
+    expect(mockPlugin.settings.lastQuery).toBe("word");
+    expect(getActiveWidget()).toBeNull();
+  });
+
+  it("handles Enter and Escape in Obsidian mode in PDF widget", () => {
+    mockPlugin.settings.searchExitBehavior = "obsidian";
+    let advancedDir: string | null = null;
+    let accepted = false;
+    let cancelled = false;
+    const mockController: any = {
+      adapter: { containerEl: document.createElement("div") },
+      state: { matches: [{ id: "m1" }, { id: "m2" }], activeIndex: 0, direction: "forward", isScanning: false, query: "test" },
+      advance: (dir: string) => {
+        advancedDir = dir;
+      },
+      search: async () => {},
+      accept: () => {
+        accepted = true;
+      },
+      cancel: () => {
+        cancelled = true;
+      },
+    };
+
+    let closed = false;
+    renderPdfWidget(mockController, mockPlugin, "test", "forward", () => {
+      closed = true;
+    });
+
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    // Press Enter -> should advance forward and remain open
+    const enterEvent = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(enterEvent);
+    expect(advancedDir).toBe("forward");
+    expect(closed).toBe(false);
+
+    // Press Escape -> should accept and close
+    const escEvent = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    input.dispatchEvent(escEvent);
+    expect(accepted).toBe(true);
+    expect(cancelled).toBe(false);
+    expect(closed).toBe(true);
+  });
 });

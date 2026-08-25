@@ -224,4 +224,23 @@ describe("PDF Match Controller", () => {
 		controller.destroy();
 		expect(containerEl.querySelectorAll(".incsearch-pdf-overlay").length).toBe(0);
 	});
+
+	it("restores origin page on cancel() and preserves current page on accept()", async () => {
+		let scrolledPage: number | null = null;
+		mockAdapter.scrollPageIntoView = (pageNumber: number) => {
+			scrolledPage = pageNumber;
+		};
+		mockAdapter.getVisiblePageNumbers = () => [1];
+
+		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+		expect(controller.originPageNumber).toBe(1);
+
+		// Advance to page 2 match
+		await controller.search("algorithm");
+		controller.advance("forward");
+
+		// Cancel should scroll back to origin page 1
+		controller.cancel();
+		expect(scrolledPage).toBe(1);
+	});
 });
