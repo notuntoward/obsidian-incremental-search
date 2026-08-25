@@ -215,11 +215,17 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			try {
 				const pageView =
 					pdfViewer.getPageView?.(pageNumber - 1) ||
-					pdfViewer._pages?.[pageNumber - 1];
-				return pageView?.viewport;
+					pdfViewer._pages?.[pageNumber - 1] ||
+					pdfViewer.pages?.[pageNumber - 1];
+				if (pageView?.viewport) return pageView.viewport;
+				const scale = pdfViewer.currentScale || pdfViewer._currentScale || 1.0;
+				if (pageView?.pdfPage?.getViewport) {
+					return pageView.pdfPage.getViewport({ scale });
+				}
 			} catch {
 				return null;
 			}
+			return null;
 		},
 
 		getVisiblePageNumbers(): number[] {
@@ -260,10 +266,11 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		},
 
 		on(event: string, handler: (...args: any[]) => void): () => void {
+			const unsubs: (() => void)[] = [];
 			if (eventBus && typeof eventBus.on === "function") {
 				try {
 					eventBus.on(event, handler);
-					return () => {
+					unsubs.push(() => {
 						try {
 							if (typeof eventBus.off === "function") {
 								eventBus.off(event, handler);
@@ -271,7 +278,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 						} catch {
 							// Ignore
 						}
-					};
+					});
 				} catch {
 					// Fallback to DOM events
 				}
@@ -279,7 +286,11 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 
 			const domListener = (evt: any) => handler(evt.detail || evt);
 			containerEl.addEventListener(event, domListener);
-			return () => containerEl.removeEventListener(event, domListener);
+			unsubs.push(() => containerEl.removeEventListener(event, domListener));
+
+			return () => {
+				for (const u of unsubs) u();
+			};
 		},
 
 		scrollPageIntoView(pageNumber: number) {

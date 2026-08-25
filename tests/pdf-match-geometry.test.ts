@@ -27,7 +27,7 @@ describe("PDF Match Geometry", () => {
 		pageEl.appendChild(textLayerEl);
 	});
 
-	it("computes exact DOM Range geometry when textLayer is rendered", () => {
+	it("computes exact DOM Range geometry when textLayer is fully rendered", () => {
 		const span1 = document.createElement("span");
 		span1.textContent = "Hello World";
 		textLayerEl.appendChild(span1);
@@ -63,7 +63,6 @@ describe("PDF Match Geometry", () => {
 			model
 		);
 
-		expect(result.isFallback).toBe(false);
 		expect(result.rects).toHaveLength(1);
 		// Translated relative to pageEl (left: 120 - 100 = 20, top: 150 - 100 = 50)
 		expect(result.rects[0]).toEqual({
@@ -76,7 +75,7 @@ describe("PDF Match Geometry", () => {
 		document.createRange = originalCreateRange;
 	});
 
-	it("falls back to PDF transform matrix projection when textLayer is absent", () => {
+	it("uses transform matrix convertToViewportPoint when textLayer is absent or incomplete", () => {
 		const items: PdfTextItem[] = [
 			{
 				str: "Hello World",
@@ -84,31 +83,67 @@ describe("PDF Match Geometry", () => {
 				width: 200,
 				height: 14,
 			},
+			{
+				str: "Second Item",
+				transform: [1, 0, 0, 1, 50, 200],
+				width: 200,
+				height: 14,
+			},
 		];
 		const model = buildPageTextModel(1, items);
 
+		// Partial textLayer with only 1 child out of 2
+		const span1 = document.createElement("span");
+		span1.textContent = "Hello World";
+		textLayerEl.appendChild(span1);
+
 		const mockViewport = {
-			convertToViewportRectangle: (pdfRect: number[]) => [
-				pdfRect[0] * 1.5,
-				pdfRect[1] * 1.5,
-				pdfRect[2] * 1.5,
-				pdfRect[3] * 1.5,
-			],
+			convertToViewportPoint: (x: number, y: number) => [x * 1.5, 800 - y * 1.5],
 			width: 600,
 			height: 800,
 		};
 
 		const result = computeMatchGeometry(
 			pageEl,
-			null, // no textLayer
+			textLayerEl, // incomplete text layer (1 child < 2 items)
 			[{ itemIndex: 0, startOffset: 0, endOffset: 5 }],
 			model,
 			mockViewport
 		);
 
-		expect(result.isFallback).toBe(true);
 		expect(result.rects).toHaveLength(1);
+		expect(result.rects[0].left).toBe(75); // 50 * 1.5
 		expect(result.rects[0].width).toBeGreaterThan(0);
 		expect(result.rects[0].height).toBeGreaterThan(0);
+	});
+
+	it("uses viewport.transform matrix when convertToViewportPoint is absent", () => {
+		const items: PdfTextItem[] = [
+			{
+				str: "Better Reading",
+				transform: [1, 0, 0, 1, 80, 300],
+				width: 150,
+				height: 12,
+			},
+		];
+		const model = buildPageTextModel(1, items);
+
+		const mockViewport = {
+			transform: [1.2, 0, 0, -1.2, 0, 800],
+			width: 600,
+			height: 800,
+		};
+
+		const result = computeMatchGeometry(
+			pageEl,
+			null,
+			[{ itemIndex: 0, startOffset: 0, endOffset: 6 }],
+			model,
+			mockViewport
+		);
+
+		expect(result.rects).toHaveLength(1);
+		expect(result.rects[0].left).toBeCloseTo(80 * 1.2, 1);
+		expect(result.rects[0].width).toBeGreaterThan(0);
 	});
 });

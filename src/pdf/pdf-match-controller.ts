@@ -40,6 +40,15 @@ export class PdfMatchController {
 	}
 
 	private setupEventListeners() {
+		// Listen to PDF.js text layer rendering events (when DOM spans are mounted)
+		const unsubTextLayerRendered = this.adapter.on("textlayerrendered", (evt: any) => {
+			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
+			if (typeof pageNumber === "number") {
+				this.refreshPageHighlights(pageNumber);
+			}
+		});
+		this.unsubscribers.push(unsubTextLayerRendered);
+
 		// Listen to PDF.js page rendering and zoom events
 		const unsubPageRendered = this.adapter.on("pagerendered", (evt: any) => {
 			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
@@ -48,6 +57,11 @@ export class PdfMatchController {
 			}
 		});
 		this.unsubscribers.push(unsubPageRendered);
+
+		const unsubPagesLoaded = this.adapter.on("pagesloaded", () => {
+			this.refreshAllVisibleHighlights();
+		});
+		this.unsubscribers.push(unsubPagesLoaded);
 
 		const unsubScale = this.adapter.on("scalechanging", () => {
 			this.refreshAllVisibleHighlights();
@@ -58,6 +72,11 @@ export class PdfMatchController {
 			this.refreshAllVisibleHighlights();
 		});
 		this.unsubscribers.push(unsubRotation);
+
+		const unsubScroll = this.adapter.on("scroll", () => {
+			this.refreshAllVisibleHighlights();
+		});
+		this.unsubscribers.push(unsubScroll);
 	}
 
 	/**
