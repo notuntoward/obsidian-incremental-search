@@ -518,4 +518,29 @@ describe("session: callout and fold auto-expansion and restoration", () => {
     scrollToMatch(mockView, { from: 80, to: 85 });
     expect(refolded).toBe(true);
   });
+
+  it("does not call view.focus() when closeSession is called with shouldFocus = false (e.g. on blur)", () => {
+    let focused = false;
+    const mockPlugin = {
+      settings: { lastQuery: "" },
+      saveSettings: async () => {},
+    };
+
+    const mockView = {
+      dom: document.createElement("div"),
+      state: {
+        field: () => ({ query: "test", matches: [], activeIndex: 0, originSelection: { anchor: 0, head: 0 } }),
+      },
+      dispatch: () => {},
+      focus: () => {
+        focused = true;
+      },
+    } as any;
+
+    closeSession(mockView, mockPlugin, false);
+    expect(focused).toBe(false);
+
+    closeSession(mockView, mockPlugin, true);
+    expect(focused).toBe(true);
+  });
 });

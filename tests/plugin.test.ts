@@ -319,5 +319,70 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(currentSession).not.toBeNull();
     expect(currentSession.direction).toBe("forward");
   });
+
+  it("switches immediately from markdown search to PDF search on first trigger when PDF leaf is active", () => {
+    // 1. First open markdown search
+    const mockMarkdownEditor = {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 0 } },
+          field: () => currentSession,
+          doc: {
+            lines: 1,
+            line: () => ({ text: "markdown text", from: 0, to: 13, length: 13 }),
+          },
+        },
+        dispatch: (args: any) => {
+          if (args.effects?.value?.query !== undefined) {
+            currentSession = args.effects.value;
+          }
+        },
+        dom: { parentElement: document.createElement("div") },
+      },
+    };
+    const markdownLeaf = {
+      view: { getViewType: () => "markdown", editor: mockMarkdownEditor },
+      containerEl: document.createElement("div"),
+    };
+    plugin.app.workspace.activeLeaf = markdownLeaf;
+    commands["forward"].checkCallback(false);
+    expect(currentSession).not.toBeNull();
+
+    // 2. Now user clicks/activates PDF leaf
+    const mockPdfView = {
+      getViewType: () => "pdf",
+      contentEl: document.createElement("div"),
+      viewer: {
+        child: {
+          pdfViewer: {
+            pdfViewer: {
+              pdfDocument: {
+                numPages: 1,
+                getPage: async () => ({
+                  pageNumber: 1,
+                  getTextContent: async () => ({ items: [] }),
+                  getViewport: () => ({ width: 600, height: 800 }),
+                }),
+              },
+              pagesCount: 1,
+            },
+          },
+        },
+      },
+    };
+    const pdfLeaf = {
+      view: mockPdfView,
+      containerEl: document.createElement("div"),
+    };
+    pdfLeaf.containerEl.classList.add("mod-active");
+    plugin.app.workspace.activeLeaf = pdfLeaf;
+
+    // Trigger forward search
+    commands["forward"].checkCallback(false);
+
+    // Should immediately initialize PDF controller and dismiss markdown search
+    expect(plugin.pdfController).not.toBeNull();
+    expect(plugin.activePdfView).toBe(mockPdfView);
+  });
 });
 

@@ -152,6 +152,14 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 	const { pdfViewer, pdfDocument, eventBus, containerEl } = components;
 	const numPages = pdfDocument.numPages || pdfViewer.pagesCount || 0;
 
+	// Ensure PDF container is focusable so clicking it shifts focus away from inputs
+	if (containerEl && typeof containerEl.setAttribute === "function") {
+		containerEl.setAttribute("tabindex", "-1");
+	}
+	if (view.contentEl && typeof view.contentEl.setAttribute === "function") {
+		view.contentEl.setAttribute("tabindex", "-1");
+	}
+
 	return {
 		numPages,
 		containerEl,

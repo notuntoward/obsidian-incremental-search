@@ -39,6 +39,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;
 	pdfController: PdfMatchController | null = null;
 	activePdfView: any = null;
+	lastInteractedLeaf: any = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -55,12 +56,54 @@ export default class IncrementalSearchPlugin extends Plugin {
 			})
 		);
 
+		const handleLeafInteraction = (evt: MouseEvent | PointerEvent) => {
+			const target = evt.target as HTMLElement | null;
+			if (!target) return;
+
+			const activeWidget = getActiveWidget();
+			if (activeWidget && activeWidget.contains(target)) {
+				return;
+			}
+
+			const leafEl = target.closest(".workspace-leaf") as HTMLElement | null;
+			if (!leafEl) return;
+
+			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
+				if (leaf.containerEl === leafEl) {
+					this.lastInteractedLeaf = leaf;
+					if (this.app.workspace.activeLeaf !== leaf) {
+						this.app.workspace.setActiveLeaf(leaf, { focus: true });
+					}
+					if (activeWidget && !leafEl.contains(activeWidget)) {
+						const input = activeWidget.querySelector("input");
+						if (input) {
+							input.blur();
+						}
+						removeWidget();
+					}
+					if (isPdfView(leaf.view)) {
+						leafEl.setAttribute("tabindex", "-1");
+						leafEl.focus();
+					}
+				}
+			});
+		};
+
+		this.registerDomEvent(document, "pointerdown", handleLeafInteraction, { capture: true } as any);
+		this.registerDomEvent(document, "mousedown", handleLeafInteraction, { capture: true } as any);
+
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (leaf) {
+					this.lastInteractedLeaf = leaf;
+				}
 				if (this.pdfController && leaf?.view !== this.activePdfView) {
 					this.pdfController.destroy();
 					this.pdfController = null;
 					this.activePdfView = null;
+					removeWidget();
+				}
+				if (leaf?.view && isPdfView(leaf.view)) {
 					removeWidget();
 				}
 			})
@@ -87,28 +130,73 @@ export default class IncrementalSearchPlugin extends Plugin {
 			this.pdfController = null;
 			this.activePdfView = null;
 		}
+		this.lastInteractedLeaf = null;
 		removeAllWidgets();
 	}
 
 	private getActiveTarget(): { type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
+		const activeEl = document.activeElement;
+
+		// 1. If document.activeElement is inside a specific workspace leaf, use that leaf
+		if (activeEl && activeEl !== document.body) {
+			let focusedLeaf: any = null;
+			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
+				if (leaf.containerEl?.contains(activeEl)) {
+					focusedLeaf = leaf;
+				}
+			});
+			if (focusedLeaf?.view) {
+				if (isPdfView(focusedLeaf.view)) {
+					return { type: "pdf", view: focusedLeaf.view };
+				}
+				if (focusedLeaf.view.editor) {
+					return { type: "editor", editor: focusedLeaf.view.editor };
+				}
+			}
+		}
+
+		// 2. If the user recently clicked/interacted with a specific leaf
+		if (this.lastInteractedLeaf?.view) {
+			if (isPdfView(this.lastInteractedLeaf.view)) {
+				return { type: "pdf", view: this.lastInteractedLeaf.view };
+			}
+			if (this.lastInteractedLeaf.view.editor) {
+				return { type: "editor", editor: this.lastInteractedLeaf.view.editor };
+			}
+		}
+
+		// 3. Check leaf with .mod-active in DOM
+		const modActiveLeafEl = document.querySelector(".workspace-leaf.mod-active");
+		if (modActiveLeafEl) {
+			let activeLeafObj: any = null;
+			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
+				if (leaf.containerEl === modActiveLeafEl) {
+					activeLeafObj = leaf;
+				}
+			});
+			if (activeLeafObj?.view) {
+				if (isPdfView(activeLeafObj.view)) {
+					return { type: "pdf", view: activeLeafObj.view };
+				}
+				if (activeLeafObj.view.editor) {
+					return { type: "editor", editor: activeLeafObj.view.editor };
+				}
+			}
+		}
+
+		// 4. Check workspace.activeLeaf
 		const activeLeaf = (this.app.workspace as any).activeLeaf ||
 			(this.app.workspace as any).getMostRecentLeaf?.();
 		const activeView = activeLeaf?.view;
 
-		// 1. If active view is a PDF view
 		if (activeView && isPdfView(activeView)) {
 			return { type: "pdf", view: activeView };
 		}
-
-		// 2. If active view or workspace has an active editor
-		const editor = (this.app.workspace as any).activeEditor?.editor ||
-			(activeView as any)?.editor;
-
-		if (editor) {
-			return { type: "editor", editor };
+		if (activeView?.editor) {
+			return { type: "editor", editor: activeView.editor };
 		}
 
-		// 3. Fallback check for activeView of type View
+		// 5. Fallback check for activeView of type View
 		const fallbackView = (this.app.workspace as any).getActiveViewOfType?.(View);
 		if (fallbackView && isPdfView(fallbackView)) {
 			return { type: "pdf", view: fallbackView };
@@ -124,13 +212,6 @@ export default class IncrementalSearchPlugin extends Plugin {
 		if (explicitEditor) {
 			if (!checking) {
 				this.invoke(explicitEditor, direction);
-			}
-			return true;
-		}
-
-		if (this.pdfController && this.activePdfView) {
-			if (!checking) {
-				this.invokePdf(this.activePdfView, direction);
 			}
 			return true;
 		}
@@ -180,6 +261,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 			updatePdfWidgetCounter(this.pdfController);
 			return;
 		}
+
+		removeWidget();
 
 		const adapter = createPdfViewAdapter(view);
 		if (!adapter) return;

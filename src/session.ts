@@ -883,7 +883,8 @@ export function cancelSession(
  */
 export function closeSession(
 	view: EditorView,
-	plugin: { settings: { lastQuery: string }; saveSettings: () => Promise<void> }
+	plugin: { settings: { lastQuery: string }; saveSettings: () => Promise<void> },
+	shouldFocus = false
 ) {
 	const session = view.state.field(searchSessionField, false);
 	saveSessionQuery(session, plugin);
@@ -892,5 +893,7 @@ export function closeSession(
 	restoreAutoUnfoldedStructures(view);
 	removeWidget(view);
 	clearAllTableHighlights(view);
-	view.focus();
+	if (shouldFocus) {
+		view.focus();
+	}
 }
