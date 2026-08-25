@@ -15,7 +15,7 @@ import {
   buildHighlightDecorations,
   scrollToMatch,
 } from "../src/session";
-import { SearchSessionState } from "../src/types";
+import { SearchSessionState, MatchRange } from "../src/types";
 
 describe("session: advance & setActiveIndex", () => {
   let sessionState: SearchSessionState | null = null;
@@ -559,5 +559,83 @@ describe("session: callout and fold auto-expansion and restoration", () => {
 
     closeSession(mockView, mockPlugin, true);
     expect(focused).toBe(true);
+  });
+
+  it("highlights all matches in tables, marking current with is-current and non-current without it", () => {
+    const tableEl = document.createElement("table");
+    const row = tableEl.insertRow();
+    const cell1 = row.insertCell();
+    cell1.textContent = "apple pie";
+    const cell2 = row.insertCell();
+    cell2.textContent = "apple juice";
+    document.body.appendChild(tableEl);
+
+    const matches: MatchRange[] = [
+      {
+        from: 10,
+        to: 15,
+        inTable: true,
+        tableMatchData: {
+          sectionStart: 0,
+          cellText: "apple pie",
+          matchStartInCell: 0,
+          matchEndInCell: 5,
+          rowIndex: 0,
+          colIndex: 0,
+        },
+      },
+      {
+        from: 25,
+        to: 30,
+        inTable: true,
+        tableMatchData: {
+          sectionStart: 0,
+          cellText: "apple juice",
+          matchStartInCell: 0,
+          matchEndInCell: 5,
+          rowIndex: 0,
+          colIndex: 1,
+        },
+      },
+    ];
+
+    const sessionState = {
+      query: "apple",
+      direction: "forward",
+      matches,
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+      highlightAllMatches: true,
+    };
+
+    const mockView = {
+      dom: document.body,
+      state: {
+        field: () => sessionState,
+      },
+      domAtPos: () => ({ node: tableEl, offset: 0 }),
+      dispatch: () => {},
+      focus: () => {},
+    } as any;
+
+    scrollToMatch(mockView, matches[0]);
+
+    const spans = tableEl.querySelectorAll(".incsearch-table-cell-match");
+    expect(spans.length).toBe(2);
+    // Active match (index 0) has is-current
+    expect(spans[0].classList.contains("is-current")).toBe(true);
+    // Non-active match (index 1) does NOT have is-current
+    expect(spans[1].classList.contains("is-current")).toBe(false);
+
+    // Switch active match to index 1
+    sessionState.activeIndex = 1;
+    scrollToMatch(mockView, matches[1]);
+
+    const updatedSpans = tableEl.querySelectorAll(".incsearch-table-cell-match");
+    expect(updatedSpans.length).toBe(2);
+    expect(updatedSpans[0].classList.contains("is-current")).toBe(false);
+    expect(updatedSpans[1].classList.contains("is-current")).toBe(true);
+
+    document.body.removeChild(tableEl);
   });
 });

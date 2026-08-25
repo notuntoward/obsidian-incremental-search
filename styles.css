@@ -30,17 +30,6 @@
   border-radius: var(--radius-s, 4px);
 }
 
-.incsearch-table-has-match {
-  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
-  outline-offset: 2px !important;
-  border-radius: var(--radius-s, 4px) !important;
-}
-
-.incsearch-cell-has-match {
-  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
-  outline-offset: -2px !important;
-}
-
 .incsearch-table-cell-match {
   background-color: var(--incsearch-match-bg) !important;
   color: #000000 !important;

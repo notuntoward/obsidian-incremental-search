@@ -553,8 +553,11 @@ function applyLivePreviewHighlights(view: EditorView, match: MatchRange) {
 		}
 	}
 
+	if (session?.matches && session.matches.length > 0) {
+		highlightAllTableMatches(view, session.matches, session.activeIndex, highlightAll);
+	}
+
 	if (match.inTable && match.tableMatchData) {
-		highlightTableWidget(view, match.tableMatchData);
 		showWidgetTableToast(match.tableMatchData);
 	}
 }
@@ -629,10 +632,6 @@ function clearAllTableHighlights(view: EditorView) {
 				parent.normalize();
 			}
 		});
-		Array.from(view.dom.querySelectorAll(".incsearch-table-has-match, .incsearch-cell-has-match")).forEach((el) => {
-			el.classList.remove("incsearch-table-has-match");
-			el.classList.remove("incsearch-cell-has-match");
-		});
 	}
 }
 
@@ -653,48 +652,149 @@ function getTableWidgetElement(view: EditorView, tableSectionStart: number): HTM
 	return el.closest("table") as HTMLTableElement | null;
 }
 
-function highlightMatchedSubstringInCell(cell: HTMLElement, matchText: string) {
-	if (!matchText) return;
+function highlightCellMatches(
+	cell: HTMLElement,
+	cellMatches: Array<{ match: MatchRange; isCurrent: boolean }>
+) {
 	const wrapper = cell.querySelector(".table-cell-wrapper") ?? cell;
-	for (const child of Array.from(wrapper.childNodes)) {
-		if (child.nodeType === Node.TEXT_NODE && child.textContent) {
-			const text = child.textContent;
-			const idx = text.toLowerCase().indexOf(matchText.toLowerCase());
+	let matchIndexInCell = 0;
+
+	function walk(node: Node) {
+		if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+			const text = node.textContent;
+			if (matchIndexInCell >= cellMatches.length) return;
+
+			let nextMatch = cellMatches[matchIndexInCell];
+			const matchText = nextMatch.match.tableMatchData
+				? nextMatch.match.tableMatchData.cellText
+						.slice(
+							nextMatch.match.tableMatchData.matchStartInCell,
+							nextMatch.match.tableMatchData.matchEndInCell
+						)
+						.trim()
+				: "";
+
+			if (!matchText) {
+				matchIndexInCell++;
+				return;
+			}
+
+			let idx = text.toLowerCase().indexOf(matchText.toLowerCase());
+			let lastPos = 0;
 			if (idx !== -1) {
-				const before = text.slice(0, idx);
-				const matched = text.slice(idx, idx + matchText.length);
-				const after = text.slice(idx + matchText.length);
+				const frag = document.createDocumentFragment();
+				while (idx !== -1 && matchIndexInCell < cellMatches.length) {
+					nextMatch = cellMatches[matchIndexInCell];
+					const currentMatchText = nextMatch.match.tableMatchData
+						? nextMatch.match.tableMatchData.cellText
+								.slice(
+									nextMatch.match.tableMatchData.matchStartInCell,
+									nextMatch.match.tableMatchData.matchEndInCell
+								)
+								.trim()
+						: matchText;
 
-				const fragment = document.createDocumentFragment();
-				if (before) fragment.appendChild(document.createTextNode(before));
-				const mark = document.createElement("span");
-				mark.className = "incsearch-table-cell-match incsearch-match-exact is-current";
-				mark.textContent = matched;
-				fragment.appendChild(mark);
-				if (after) fragment.appendChild(document.createTextNode(after));
+					const before = text.slice(lastPos, idx);
+					if (before) frag.appendChild(document.createTextNode(before));
+					const matched = text.slice(idx, idx + currentMatchText.length);
 
-				wrapper.replaceChild(fragment, child);
-				break;
+					const mark = document.createElement("span");
+					mark.className = nextMatch.isCurrent
+						? "incsearch-table-cell-match incsearch-match-exact is-current"
+						: "incsearch-table-cell-match incsearch-match-exact";
+					mark.textContent = matched;
+					frag.appendChild(mark);
+
+					matchIndexInCell++;
+					lastPos = idx + currentMatchText.length;
+
+					if (matchIndexInCell < cellMatches.length) {
+						const subsequentMatch = cellMatches[matchIndexInCell];
+						const subText = subsequentMatch.match.tableMatchData
+							? subsequentMatch.match.tableMatchData.cellText
+									.slice(
+										subsequentMatch.match.tableMatchData.matchStartInCell,
+										subsequentMatch.match.tableMatchData.matchEndInCell
+									)
+									.trim()
+							: matchText;
+						idx = text.toLowerCase().indexOf(subText.toLowerCase(), lastPos);
+					} else {
+						idx = -1;
+					}
+				}
+				const after = text.slice(lastPos);
+				if (after) frag.appendChild(document.createTextNode(after));
+
+				const parent = node.parentNode;
+				if (parent) {
+					parent.replaceChild(frag, node);
+				}
+			}
+		} else if (node.nodeType === Node.ELEMENT_NODE) {
+			const el = node as HTMLElement;
+			if (el.classList.contains("incsearch-table-cell-match")) {
+				return;
+			}
+			for (const child of Array.from(el.childNodes)) {
+				walk(child);
 			}
 		}
 	}
+
+	walk(wrapper);
 }
 
-function highlightTableWidget(view: EditorView, data: NonNullable<MatchRange["tableMatchData"]>) {
-	const table = getTableWidgetElement(view, data.sectionStart);
-	if (!table) return;
-	table.classList.add("incsearch-table-has-match");
+function highlightAllTableMatches(
+	view: EditorView,
+	matches: MatchRange[],
+	activeIndex: number,
+	highlightAll: boolean
+) {
+	const tableMatches = matches
+		.map((m, idx) => ({ match: m, index: idx }))
+		.filter(({ match, index }) => match.inTable && match.tableMatchData && (highlightAll || index === activeIndex));
 
-	if (typeof data.rowIndex === "number" && typeof data.colIndex === "number") {
-		const row = table.rows?.[data.rowIndex];
-		const cell = row?.cells?.[data.colIndex];
-		if (cell) {
-			cell.classList.add("incsearch-cell-has-match");
-			const matchedString = data.cellText.slice(data.matchStartInCell, data.matchEndInCell).trim();
-			if (matchedString) {
-				highlightMatchedSubstringInCell(cell, matchedString);
-			}
+	if (tableMatches.length === 0) return;
+
+	const cellMap = new Map<
+		string,
+		{
+			sectionStart: number;
+			rowIndex: number;
+			colIndex: number;
+			cellMatches: Array<{ match: MatchRange; isCurrent: boolean }>;
 		}
+	>();
+
+	for (const { match, index } of tableMatches) {
+		const data = match.tableMatchData!;
+		const cellKey = `${data.sectionStart}:${data.rowIndex ?? 0}:${data.colIndex ?? 0}`;
+		let entry = cellMap.get(cellKey);
+		if (!entry) {
+			entry = {
+				sectionStart: data.sectionStart,
+				rowIndex: data.rowIndex ?? 0,
+				colIndex: data.colIndex ?? 0,
+				cellMatches: [],
+			};
+			cellMap.set(cellKey, entry);
+		}
+		entry.cellMatches.push({
+			match,
+			isCurrent: index === activeIndex,
+		});
+	}
+
+	for (const entry of cellMap.values()) {
+		const table = getTableWidgetElement(view, entry.sectionStart);
+		if (!table) continue;
+
+		const row = table.rows?.[entry.rowIndex];
+		const cell = row?.cells?.[entry.colIndex];
+		if (!cell) continue;
+
+		highlightCellMatches(cell, entry.cellMatches);
 	}
 }
 
