@@ -146,4 +146,105 @@ describe("PDF Match Geometry", () => {
 		expect(result.rects[0].left).toBeCloseTo(80 * 1.2, 1);
 		expect(result.rects[0].width).toBeGreaterThan(0);
 	});
+
+	it("accurately maps to DOM spans when raw items contain interleaved empty items", () => {
+		// PDF raw stream: 2 non-empty items with empty items in between
+		const rawItems: PdfTextItem[] = [
+			{ str: "Header Title", transform: [1, 0, 0, 1, 50, 700] },
+			{ str: "", transform: [1, 0, 0, 1, 50, 650] }, // Empty item
+			{ str: "", transform: [1, 0, 0, 1, 50, 600] }, // Empty item
+			{ str: "Target Keyword", transform: [1, 0, 0, 1, 50, 500] },
+		];
+		const model = buildPageTextModel(1, rawItems);
+
+		// PDF.js DOM textLayer only creates 2 spans for the 2 non-empty items
+		const span0 = document.createElement("span");
+		span0.textContent = "Header Title";
+		const span1 = document.createElement("span");
+		span1.textContent = "Target Keyword";
+		textLayerEl.appendChild(span0);
+		textLayerEl.appendChild(span1);
+
+		let targetedElement: any = null;
+		const originalCreateRange = document.createRange;
+		document.createRange = () => {
+			const range = originalCreateRange.call(document);
+			range.setStart = (node: any) => {
+				targetedElement = node.parentElement || node;
+			};
+			range.getClientRects = () =>
+				[
+					{
+						left: 150,
+						top: 200,
+						width: 100,
+						height: 20,
+					},
+				] as any;
+			return range;
+		};
+
+		// Match itemIndex 1 ("Target Keyword", which was raw index 3)
+		const result = computeMatchGeometry(
+			pageEl,
+			textLayerEl,
+			[{ itemIndex: 1, startOffset: 0, endOffset: 6 }],
+			model
+		);
+
+		expect(result.rects).toHaveLength(1);
+		// Targeted DOM element must be span1 ("Target Keyword"), not undefined or span0
+		expect(targetedElement).toBe(span1);
+		expect(targetedElement.textContent).toBe("Target Keyword");
+
+		document.createRange = originalCreateRange;
+	});
+
+	it("falls back to transform geometry if DOM Range returns a collapsed/narrow rect (e.g. link wrapper / icon)", () => {
+		const rawItems: PdfTextItem[] = [
+			{ str: "Myndex", transform: [1, 0, 0, 1, 100, 500], width: 60, height: 14 },
+		];
+		const model = buildPageTextModel(1, rawItems);
+
+		const span = document.createElement("span");
+		span.textContent = "Myndex";
+		textLayerEl.appendChild(span);
+
+		const mockViewport = {
+			convertToViewportPoint: (x: number, y: number) => [x * 1.5, 800 - y * 1.5],
+			width: 600,
+			height: 800,
+		};
+
+		// Mock Range returning an artificially narrow rect (5px instead of expected ~90px)
+		const originalCreateRange = document.createRange;
+		document.createRange = () => {
+			const range = originalCreateRange.call(document);
+			range.getClientRects = () =>
+				[
+					{
+						left: 250,
+						top: 150,
+						width: 5, // Narrow sliver
+						height: 20,
+					},
+				] as any;
+			return range;
+		};
+
+		const result = computeMatchGeometry(
+			pageEl,
+			textLayerEl,
+			[{ itemIndex: 0, startOffset: 0, endOffset: 6 }],
+			model,
+			mockViewport
+		);
+
+		expect(result.rects).toHaveLength(1);
+		// Should reject the 5px sliver and use viewport transform width: 60 * 1.5 = 90px
+		expect(result.rects[0].width).toBe(90);
+		expect(result.rects[0].left).toBe(150);
+
+		document.createRange = originalCreateRange;
+	});
 });

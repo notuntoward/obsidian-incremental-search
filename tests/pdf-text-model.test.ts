@@ -116,4 +116,44 @@ describe("PDF Text Model & Normalization", () => {
 
 		expect(model.normalizedText).toBe("Top header Title banner Body paragraph Bottom footer");
 	});
+
+	it("skips empty string items and correctly assigns domIndex 1:1 with non-empty DOM spans", () => {
+		const rawItems: PdfTextItem[] = [
+			{ str: "First span", transform: [1, 0, 0, 1, 50, 700] },
+			{ str: "", transform: [1, 0, 0, 1, 50, 650] }, // Empty item, PDF.js creates no DOM span
+			{ str: "", transform: [1, 0, 0, 1, 50, 600] }, // Empty item
+			{ str: "Second span", transform: [1, 0, 0, 1, 50, 500] },
+			{ str: "", transform: [1, 0, 0, 1, 50, 450] }, // Empty item
+			{ str: "Third span", transform: [1, 0, 0, 1, 50, 400] },
+		];
+
+		const model = buildPageTextModel(1, rawItems);
+		expect(model.items).toHaveLength(3);
+
+		expect(model.items[0].str).toBe("First span");
+		expect(model.items[0].domIndex).toBe(0);
+
+		expect(model.items[1].str).toBe("Second span");
+		expect(model.items[1].domIndex).toBe(1); // Maps to DOM span 1, NOT raw index 3
+
+		expect(model.items[2].str).toBe("Third span");
+		expect(model.items[2].domIndex).toBe(2); // Maps to DOM span 2, NOT raw index 5
+	});
+
+	it("deduplicates identical text items at the same position (drop shadows, double strikes)", () => {
+		const rawItems: PdfTextItem[] = [
+			{ str: "Title Header", transform: [1, 0, 0, 1, 50, 700], width: 100, height: 14 },
+			// Exact duplicate of Title Header at (50, 700)
+			{ str: "Title Header", transform: [1, 0, 0, 1, 50.1, 700.1], width: 100, height: 14 },
+			{ str: "Body paragraph", transform: [1, 0, 0, 1, 50, 500], width: 200, height: 12 },
+			// Exact duplicate of Body paragraph at (50, 500)
+			{ str: "Body paragraph", transform: [1, 0, 0, 1, 50, 500], width: 200, height: 12 },
+		];
+
+		const model = buildPageTextModel(1, rawItems);
+		expect(model.items).toHaveLength(2);
+		expect(model.items[0].str).toBe("Title Header");
+		expect(model.items[1].str).toBe("Body paragraph");
+		expect(model.normalizedText).toBe("Title Header Body paragraph");
+	});
 });

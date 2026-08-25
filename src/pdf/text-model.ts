@@ -88,17 +88,50 @@ function normalizeCharacter(ch: string): string {
 }
 
 /**
+ * Filters out empty string items and deduplicates identical text items at the exact same coordinates
+ * (e.g. from drop shadows, faux bolding, or duplicate PDF content streams).
+ */
+export function deduplicateRawItems(rawItems: PdfTextItem[]): PdfTextItem[] {
+	if (!rawItems || rawItems.length === 0) return [];
+	const filtered: PdfTextItem[] = [];
+	for (let i = 0; i < rawItems.length; i++) {
+		const it = rawItems[i];
+		if (!it.str || it.str.length === 0) continue;
+
+		// Check if there is already an identical item at the exact same location
+		const isDuplicate = filtered.some((prev) => {
+			if (prev.str !== it.str) return false;
+			const pTf = prev.transform || [1, 0, 0, 1, 0, 0];
+			const iTf = it.transform || [1, 0, 0, 1, 0, 0];
+			return (
+				Math.abs(pTf[4] - iTf[4]) < 0.5 &&
+				Math.abs(pTf[5] - iTf[5]) < 0.5 &&
+				Math.abs((prev.width || 0) - (it.width || 0)) < 1
+			);
+		});
+
+		if (!isDuplicate) {
+			filtered.push(it);
+		}
+	}
+	return filtered;
+}
+
+/**
  * Sorts PDF text items into visual reading order (top-to-bottom, left-to-right)
  * while preserving the original DOM index for exact textLayer element lookup.
+ * Note: Empty string items and identical position duplicates are omitted.
  */
 export function sortItemsReadingOrder(rawItems: PdfTextItem[]): PdfTextItem[] {
-	if (!rawItems || rawItems.length <= 1) {
-		return rawItems ? rawItems.map((it, idx) => ({ ...it, domIndex: it.domIndex ?? idx })) : [];
+	if (!rawItems || rawItems.length === 0) {
+		return [];
 	}
 
-	const indexedItems: PdfTextItem[] = rawItems.map((item, originalIndex) => ({
+	const nonDuplicates = deduplicateRawItems(rawItems);
+	let currentDomIndex = 0;
+	const indexedItems: PdfTextItem[] = nonDuplicates.map((item) => ({
 		...item,
-		domIndex: item.domIndex ?? originalIndex,
+		domIndex: item.domIndex ?? currentDomIndex++,
 	}));
 
 	indexedItems.sort((a, b) => {

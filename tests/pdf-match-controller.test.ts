@@ -183,6 +183,38 @@ describe("PDF Match Controller", () => {
 		expect(page2Overlay).not.toBeNull();
 	});
 
+	it("deduplicates identical text items at the same coordinates so forward search never requires double-stepping", async () => {
+		mockAdapter.getPage = async (pageNumber: number) => {
+			if (pageNumber === 1) {
+				return {
+					pageNumber: 1,
+					getTextContent: async () => ({
+						items: [
+							{ str: "First section item", transform: [1, 0, 0, 1, 50, 700], width: 100, height: 14 },
+							// Exact duplicate of Myndex Research at (50, 500)
+							{ str: "Myndex Research", transform: [1, 0, 0, 1, 50, 500], width: 120, height: 14 },
+							{ str: "Myndex Research", transform: [1, 0, 0, 1, 50, 500], width: 120, height: 14 },
+							{ str: "Last footer item", transform: [1, 0, 0, 1, 50, 200], width: 100, height: 14 },
+						],
+					}),
+					getViewport: () => ({ width: 600, height: 800 }),
+				};
+			}
+			return null;
+		};
+
+		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+		await controller.search("Myndex");
+
+		// Must deduplicate to exactly 1 match (not 2)
+		expect(controller.state.matches).toHaveLength(1);
+		expect(controller.state.activeIndex).toBe(0);
+
+		// Advancing forward wraps to 0 directly without getting stuck on duplicate
+		controller.advance("forward");
+		expect(controller.state.activeIndex).toBe(0);
+	});
+
 	it("cleans up overlays and listeners on destroy", async () => {
 		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
 		await controller.search("algorithm");

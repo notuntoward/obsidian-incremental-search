@@ -16,16 +16,77 @@ export function computeMatchGeometry(
 		return { rects: [] };
 	}
 
-	// Only use DOM range geometry if textLayer is fully populated with child elements
-	if (textLayerElement && textLayerElement.children.length >= pageModel.items.length) {
+	const transformRects = computeTransformGeometry(pageElement, itemSpans, pageModel, viewport);
+
+	// If textLayer is available, try measuring exact DOM ranges, but validate against transform geometry
+	if (textLayerElement && textLayerElement.children.length > 0) {
 		const domRects = computeDomRangeGeometry(pageElement, textLayerElement, itemSpans, pageModel);
-		if (domRects.length > 0) {
-			return { rects: domRects };
+		if (domRects.length === itemSpans.length && domRects.length > 0) {
+			const isPlausible = domRects.every((dr, idx) => {
+				const tr = transformRects[idx];
+				if (!tr) return dr.width > 0 && dr.height > 0;
+				// If DOM rect width is less than 50% of transform width (e.g. collapsed around single letter/icon), reject
+				return dr.width >= tr.width * 0.5 && Math.abs(dr.left - tr.left) <= Math.max(tr.width, 30);
+			});
+			if (isPlausible) {
+				return { rects: domRects };
+			}
 		}
 	}
 
-	const transformRects = computeTransformGeometry(pageElement, itemSpans, pageModel, viewport);
 	return { rects: transformRects };
+}
+
+/**
+ * Finds the DOM element in .textLayer that corresponds to a text item,
+ * verifying that the element's textContent matches the item's string.
+ */
+function findMatchingDomElement(
+	domChildren: HTMLElement[],
+	targetDomIndex: number,
+	expectedStr: string
+): HTMLElement | null {
+	if (!expectedStr) return null;
+	const trimmed = expectedStr.trim();
+
+	// 1. Direct index check
+	if (targetDomIndex < domChildren.length) {
+		const directEl = domChildren[targetDomIndex];
+		const text = directEl.textContent || "";
+		if (text === expectedStr || (trimmed && text.includes(trimmed))) {
+			return directEl;
+		}
+	}
+
+	// 2. Search adjacent elements within a local window (e.g. ±15 elements)
+	for (let offset = 1; offset <= 15; offset++) {
+		const left = targetDomIndex - offset;
+		if (left >= 0 && left < domChildren.length) {
+			const el = domChildren[left];
+			const text = el.textContent || "";
+			if (text === expectedStr || (trimmed && text.includes(trimmed))) {
+				return el;
+			}
+		}
+		const right = targetDomIndex + offset;
+		if (right < domChildren.length) {
+			const el = domChildren[right];
+			const text = el.textContent || "";
+			if (text === expectedStr || (trimmed && text.includes(trimmed))) {
+				return el;
+			}
+		}
+	}
+
+	// 3. Scan all children for matching text
+	for (const el of domChildren) {
+		const text = el.textContent || "";
+		if (text === expectedStr || (trimmed && text.includes(trimmed))) {
+			return el;
+		}
+	}
+
+	return null;
 }
 
 /**
@@ -43,16 +104,15 @@ function computeDomRangeGeometry(
 
 	for (const span of itemSpans) {
 		const item = pageModel.items[span.itemIndex];
-		if (!item) continue;
+		if (!item || !item.str) continue;
 
 		// Map itemIndex to DOM element using item.domIndex
 		const targetDomIndex = item.domIndex ?? span.itemIndex;
-		let targetEl: HTMLElement | null = null;
-		if (targetDomIndex < domChildren.length) {
-			targetEl = domChildren[targetDomIndex];
+		const targetEl = findMatchingDomElement(domChildren, targetDomIndex, item.str);
+		if (!targetEl) {
+			// If element text doesn't match, abort DOM measurement to allow transform geometry fallback
+			return [];
 		}
-
-		if (!targetEl) continue;
 
 		const textNode = targetEl.firstChild || targetEl;
 		const totalLength = textNode.textContent?.length ?? item.str.length;
@@ -79,7 +139,7 @@ function computeDomRangeGeometry(
 				}
 			}
 		} catch {
-			// Ignore DOM range errors for detached/malformed nodes and continue
+			// Ignore DOM range errors
 		}
 	}
 

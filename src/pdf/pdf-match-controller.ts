@@ -185,15 +185,18 @@ export class PdfMatchController {
 			const itemSpans = mapNormalizedRangeToItemSpans(model, nm.start, nm.end);
 			const { rects } = computeMatchGeometry(pageEl, textLayerEl, itemSpans, model, viewport);
 
-			newPdfMatches.push({
-				id: `p${pageNumber}-m${i}-${nm.start}-${nm.end}`,
-				pageNumber,
-				from: nm.start,
-				to: nm.end,
-				chars: nm.chars,
-				itemSpans,
-				rects,
-			});
+			const isDuplicate = newPdfMatches.some((m) => m.from === nm.start && m.to === nm.end);
+			if (!isDuplicate) {
+				newPdfMatches.push({
+					id: `p${pageNumber}-m${i}-${nm.start}-${nm.end}`,
+					pageNumber,
+					from: nm.start,
+					to: nm.end,
+					chars: nm.chars,
+					itemSpans,
+					rects,
+				});
+			}
 		}
 
 		// Insert matches in sorted page and offset order
