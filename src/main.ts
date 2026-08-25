@@ -489,21 +489,6 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Double-tap window (ms)")
-			.setDesc("How quickly you must press the search hotkey twice to reuse your last query.")
-			.addText((text) =>
-				text
-					.setValue(String(this.plugin.settings.doubleTapWindowMs))
-					.onChange(async (value) => {
-						const parsed = parseInt(value, 10);
-						if (!isNaN(parsed)) {
-							this.plugin.settings.doubleTapWindowMs = parsed;
-							await this.plugin.saveSettings();
-						}
-					})
-			);
-
-		new Setting(containerEl)
 			.setName("Match only visible part of links")
 			.setDesc("Ignore hidden URLs in markdown links and hidden destinations in wikilinks.")
 			.addToggle((toggle) =>
