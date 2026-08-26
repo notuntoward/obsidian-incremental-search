@@ -219,13 +219,14 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		getTextLayerElement(pageNumber: number): HTMLElement | null {
 			const pageEl = this.getPageElement(pageNumber);
 			if (pageEl) {
-				const textLayer = pageEl.querySelector(".textLayer, .text-layer") as HTMLElement | null;
+				const textLayer = pageEl.querySelector(
+					".textLayer, .text-layer"
+				) as HTMLElement | null;
 				if (textLayer) return textLayer;
 			}
 			try {
 				const pageView =
-					pdfViewer.getPageView?.(pageNumber - 1) ||
-					pdfViewer._pages?.[pageNumber - 1];
+					pdfViewer.getPageView?.(pageNumber - 1) || pdfViewer._pages?.[pageNumber - 1];
 				if (pageView?.textLayer?.div) return pageView.textLayer.div;
 				if (pageView?.textLayer?.textLayerDiv) return pageView.textLayer.textLayerDiv;
 			} catch {
@@ -352,9 +353,15 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			}
 
 			// 1. If an active match element is present in DOM, scroll it directly into center
-			const currentHighlight = pageEl.querySelector(".incsearch-pdf-match.is-current") as HTMLElement | null;
+			const currentHighlight = pageEl.querySelector(
+				".incsearch-pdf-match.is-current"
+			) as HTMLElement | null;
 			if (currentHighlight && typeof currentHighlight.scrollIntoView === "function") {
-				currentHighlight.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+				currentHighlight.scrollIntoView({
+					block: "center",
+					inline: "nearest",
+					behavior: "smooth",
+				});
 				return;
 			}
 
@@ -437,7 +444,10 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 					});
 					return true;
 				} catch (e) {
-					console.error("Incremental Search: error executing command on findController", e);
+					console.error(
+						"Incremental Search: error executing command on findController",
+						e
+					);
 				}
 			}
 

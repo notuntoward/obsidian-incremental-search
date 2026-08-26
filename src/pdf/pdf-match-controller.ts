@@ -81,7 +81,11 @@ export class PdfMatchController {
 		}
 
 		fc.match = (query: any, pageContent: string, pageIndex: number) => {
-			if (this.settings.spaceAsWildcard && this.state.query && this.state.query.trim().length > 0) {
+			if (
+				this.settings.spaceAsWildcard &&
+				this.state.query &&
+				this.state.query.trim().length > 0
+			) {
 				const q = this.state.query;
 				// If query has space separation between words (wildcard gap or literal spaces)
 				if (q.includes(" ")) {
@@ -219,7 +223,10 @@ export class PdfMatchController {
 				return;
 			}
 
-			const { processedQuery, phraseSearch } = processPdfQuery(query, this.settings.spaceAsWildcard);
+			const { processedQuery, phraseSearch } = processPdfQuery(
+				query,
+				this.settings.spaceAsWildcard
+			);
 			const handled = this.adapter.executeNativeFind({
 				query: processedQuery,
 				type: "",
@@ -372,7 +379,13 @@ export class PdfMatchController {
 
 		if (model) {
 			for (const match of pageMatches) {
-				const { rects } = computeMatchGeometry(pageEl, textLayerEl, match.itemSpans, model, viewport);
+				const { rects } = computeMatchGeometry(
+					pageEl,
+					textLayerEl,
+					match.itemSpans,
+					model,
+					viewport
+				);
 				if (rects.length > 0) {
 					match.rects = rects;
 				}
@@ -400,7 +413,10 @@ export class PdfMatchController {
 		this.state.direction = direction;
 
 		if (this.adapter.executeNativeFind && this.state.query) {
-			const { processedQuery, phraseSearch } = processPdfQuery(this.state.query, this.settings.spaceAsWildcard);
+			const { processedQuery, phraseSearch } = processPdfQuery(
+				this.state.query,
+				this.settings.spaceAsWildcard
+			);
 			const handled = this.adapter.executeNativeFind({
 				query: processedQuery,
 				type: "again",

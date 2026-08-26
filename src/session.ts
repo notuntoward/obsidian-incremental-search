@@ -2,7 +2,13 @@ import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet } from "@
 import { StateField, StateEffect, EditorSelection } from "@codemirror/state";
 import { unfoldEffect, foldEffect, foldedRanges } from "@codemirror/language";
 import { CachedMetadata } from "obsidian";
-import { MatchRange, SearchDirection, SearchSessionState, AllMatchesDisplayMode, shouldShowAllMatches } from "./types";
+import {
+	MatchRange,
+	SearchDirection,
+	SearchSessionState,
+	AllMatchesDisplayMode,
+	shouldShowAllMatches,
+} from "./types";
 import { computeMatches } from "./engine";
 import { removeWidget, showWidgetTableToast, hideWidgetTableToast } from "./widget";
 
@@ -86,38 +92,45 @@ export function buildHighlightDecorations(
 		const exactCls = isCurrent ? "incsearch-match-exact is-current" : "incsearch-match-exact";
 
 		if (m.chars && m.chars.length > 1) {
-			const spanCls = isCurrent
-				? "incsearch-match-wildcard-span is-current"
-				: "incsearch-match-wildcard-span";
+			if (isCurrent) {
+				const spanCls = "incsearch-match-wildcard-span is-current";
+				positions.push({
+					from: m.from,
+					to: m.to,
+					mark: Decoration.mark({ class: spanCls }),
+				});
 
-			positions.push({
-				from: m.from,
-				to: m.to,
-				mark: Decoration.mark({ class: spanCls }),
-			});
-
-			let currentOffset = m.from;
-			for (const c of m.chars) {
-				if (c.from > currentOffset) {
+				let currentOffset = m.from;
+				for (const c of m.chars) {
+					if (c.from > currentOffset) {
+						positions.push({
+							from: currentOffset,
+							to: c.from,
+							mark: Decoration.mark({ class: "incsearch-match-wildcard-gap" }),
+						});
+					}
+					positions.push({
+						from: c.from,
+						to: c.to,
+						mark: Decoration.mark({ class: "incsearch-match-wildcard-word" }),
+					});
+					currentOffset = c.to;
+				}
+				if (currentOffset < m.to) {
 					positions.push({
 						from: currentOffset,
-						to: c.from,
+						to: m.to,
 						mark: Decoration.mark({ class: "incsearch-match-wildcard-gap" }),
 					});
 				}
-				positions.push({
-					from: c.from,
-					to: c.to,
-					mark: Decoration.mark({ class: "incsearch-match-wildcard-word" }),
-				});
-				currentOffset = c.to;
-			}
-			if (currentOffset < m.to) {
-				positions.push({
-					from: currentOffset,
-					to: m.to,
-					mark: Decoration.mark({ class: "incsearch-match-wildcard-gap" }),
-				});
+			} else {
+				for (const c of m.chars) {
+					positions.push({
+						from: c.from,
+						to: c.to,
+						mark: Decoration.mark({ class: "incsearch-match-wildcard-word" }),
+					});
+				}
 			}
 		} else {
 			positions.push({
@@ -500,9 +513,12 @@ function clearAllCalloutHighlights(view: EditorView) {
 export function restoreAutoUnfoldedStructures(view: EditorView, keepMatchPos?: number) {
 	// 1. Re-fold CM6 folded ranges
 	if (autoUnfoldedFoldRanges.length > 0) {
-		const toReFold = typeof keepMatchPos === "number"
-			? autoUnfoldedFoldRanges.filter((r) => keepMatchPos < r.from || keepMatchPos >= r.to)
-			: autoUnfoldedFoldRanges;
+		const toReFold =
+			typeof keepMatchPos === "number"
+				? autoUnfoldedFoldRanges.filter(
+						(r) => keepMatchPos < r.from || keepMatchPos >= r.to
+					)
+				: autoUnfoldedFoldRanges;
 
 		if (toReFold.length > 0) {
 			try {
@@ -518,7 +534,8 @@ export function restoreAutoUnfoldedStructures(view: EditorView, keepMatchPos?: n
 
 	// 2. Re-collapse Live Preview Callout elements
 	if (autoUnfoldedCallouts.length > 0) {
-		const keepCallout = typeof keepMatchPos === "number" ? getCalloutAtPos(view, keepMatchPos) : null;
+		const keepCallout =
+			typeof keepMatchPos === "number" ? getCalloutAtPos(view, keepMatchPos) : null;
 		for (const callout of autoUnfoldedCallouts) {
 			if (callout !== keepCallout) {
 				collapseCallout(callout);
@@ -539,7 +556,7 @@ export function applyLivePreviewHighlights(view: EditorView, match: MatchRange) 
 		? shouldShowAllMatches(
 				session.allMatchesDisplayMode ?? "on-demand",
 				session.isDemandPeekActive ?? false
-		  )
+			)
 		: true;
 
 	const calloutRange = getCalloutRangeAtPos(view, match.from);
@@ -570,9 +587,10 @@ export function applyLivePreviewHighlights(view: EditorView, match: MatchRange) 
 	}
 
 	if (currentCallout && calloutRange) {
-		const rawText = typeof view.state.sliceDoc === "function"
-			? view.state.sliceDoc(match.from, match.to)
-			: (view.state.doc?.sliceString?.(match.from, match.to) ?? "");
+		const rawText =
+			typeof view.state.sliceDoc === "function"
+				? view.state.sliceDoc(match.from, match.to)
+				: (view.state.doc?.sliceString?.(match.from, match.to) ?? "");
 		const matchText = rawText.replace(/^>\s*/, "").trim();
 		if (matchText) {
 			const activeIdx = getCalloutMatchIndex(view, calloutRange, match.from, matchText);
@@ -662,7 +680,10 @@ function clearAllTableHighlights(view: EditorView) {
 	}
 }
 
-function getTableWidgetElement(view: EditorView, tableSectionStart: number): HTMLTableElement | null {
+function getTableWidgetElement(
+	view: EditorView,
+	tableSectionStart: number
+): HTMLTableElement | null {
 	if (!view.dom || typeof view.domAtPos !== "function") return null;
 	const result = view.domAtPos(tableSectionStart);
 	if (!result) return null;
@@ -672,7 +693,7 @@ function getTableWidgetElement(view: EditorView, tableSectionStart: number): HTM
 	}
 	const el = node instanceof HTMLElement ? node : null;
 	if (!el) return null;
-	
+
 	if (el.matches("table")) return el as HTMLTableElement;
 	const innerTable = el.querySelector("table");
 	if (innerTable) return innerTable as HTMLTableElement;
@@ -780,7 +801,10 @@ function highlightAllTableMatches(
 ) {
 	const tableMatches = matches
 		.map((m, idx) => ({ match: m, index: idx }))
-		.filter(({ match, index }) => match.inTable && match.tableMatchData && (highlightAll || index === activeIndex));
+		.filter(
+			({ match, index }) =>
+				match.inTable && match.tableMatchData && (highlightAll || index === activeIndex)
+		);
 
 	if (tableMatches.length === 0) return;
 
@@ -889,7 +913,13 @@ export function recomputeQuery(
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
 
-	const allMatches = computeMatches(view.state, query, spaceAsWildcard, matchOnlyVisibleLinks, linkCache);
+	const allMatches = computeMatches(
+		view.state,
+		query,
+		spaceAsWildcard,
+		matchOnlyVisibleLinks,
+		linkCache
+	);
 	const cursorPos = session.originSelection.head;
 
 	let activeIndex = 0;

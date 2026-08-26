@@ -57,6 +57,24 @@ export class Setting {
 	addToggle(_cb: (toggle: any) => any): this {
 		return this;
 	}
+	addSlider(_cb: (slider: any) => any): this {
+		const mockSlider = {
+			setLimits: function () {
+				return this;
+			},
+			setValue: function () {
+				return this;
+			},
+			setDynamicTooltip: function () {
+				return this;
+			},
+			onChange: function () {
+				return this;
+			},
+		};
+		_cb(mockSlider);
+		return this;
+	}
 	addButton(_cb: (button: any) => any): this {
 		return this;
 	}
@@ -131,6 +149,12 @@ if (typeof window !== "undefined" && typeof HTMLElement !== "undefined") {
   if (!(HTMLElement.prototype as any).empty) {
     (HTMLElement.prototype as any).empty = function () {
       this.innerHTML = "";
+    };
+  }
+  if (!(HTMLElement.prototype as any).setText) {
+    (HTMLElement.prototype as any).setText = function (val: string) {
+      this.textContent = val;
+      return this;
     };
   }
   if (!(HTMLElement.prototype as any).createDiv) {

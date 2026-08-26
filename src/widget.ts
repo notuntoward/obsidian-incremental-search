@@ -25,7 +25,9 @@ export function updateWidgetCounter(view: EditorView) {
 	if (!activeWidgetEl) return;
 	const counter = activeWidgetEl.querySelector(".incsearch-counter");
 	const dirIndicator = activeWidgetEl.querySelector(".incsearch-dir");
-	const tableIcon = activeWidgetEl.querySelector(".incsearch-table-icon") as HTMLSpanElement | null;
+	const tableIcon = activeWidgetEl.querySelector(
+		".incsearch-table-icon"
+	) as HTMLSpanElement | null;
 	const session = view.state.field(searchSessionField, false);
 	if (!counter || !dirIndicator || !session || !session.matches) return;
 
@@ -51,12 +53,15 @@ export function updatePdfWidgetCounter(controller: PdfMatchController) {
 	if (!activeWidgetEl) return;
 	const counter = activeWidgetEl.querySelector(".incsearch-counter");
 	const dirIndicator = activeWidgetEl.querySelector(".incsearch-dir");
-	const tableIcon = activeWidgetEl.querySelector(".incsearch-table-icon") as HTMLSpanElement | null;
+	const tableIcon = activeWidgetEl.querySelector(
+		".incsearch-table-icon"
+	) as HTMLSpanElement | null;
 	if (!counter || !dirIndicator) return;
 
 	if (tableIcon) tableIcon.style.display = "none";
 
-	const { matches, activeIndex, direction, isScanning, query, totalMatchesCount } = controller.state;
+	const { matches, activeIndex, direction, isScanning, query, totalMatchesCount } =
+		controller.state;
 
 	if (totalMatchesCount !== undefined) {
 		if (totalMatchesCount === 0) {
@@ -72,7 +77,9 @@ export function updatePdfWidgetCounter(controller: PdfMatchController) {
 	dirIndicator.textContent = direction === "backward" ? "▲" : "▼";
 }
 
-export function showWidgetTableToast(data: NonNullable<import("./types").MatchRange["tableMatchData"]>) {
+export function showWidgetTableToast(
+	data: NonNullable<import("./types").MatchRange["tableMatchData"]>
+) {
 	if (!activeWidgetEl) return;
 	const toast = activeWidgetEl.querySelector(".incsearch-table-toast") as HTMLDivElement;
 	if (!toast) return;
@@ -205,7 +212,9 @@ export function renderWidget(
 	input.addEventListener("input", () => {
 		adjustInputSize();
 		const activeFile = plugin.app.workspace.getActiveFile();
-		const linkCache = activeFile ? plugin.app.metadataCache.getFileCache(activeFile) ?? undefined : undefined;
+		const linkCache = activeFile
+			? (plugin.app.metadataCache.getFileCache(activeFile) ?? undefined)
+			: undefined;
 		recomputeQuery(
 			view,
 			input.value,
@@ -278,7 +287,9 @@ export function renderWidget(
 				const session = view.state.field(searchSessionField, false);
 				const currentDir = session?.direction ?? "forward";
 				const dir: SearchDirection = evt.shiftKey
-					? (currentDir === "forward" ? "backward" : "forward")
+					? currentDir === "forward"
+						? "backward"
+						: "forward"
 					: currentDir;
 				advance(view, dir);
 				updateCounter();
@@ -441,7 +452,9 @@ export function renderPdfWidget(
 			if (plugin.settings.searchExitBehavior === "obsidian") {
 				const currentDir = controller.state.direction || "forward";
 				const dir: SearchDirection = evt.shiftKey
-					? (currentDir === "forward" ? "backward" : "forward")
+					? currentDir === "forward"
+						? "backward"
+						: "forward"
 					: currentDir;
 				controller.advance(dir);
 				updateCounter();

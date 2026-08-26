@@ -2,7 +2,9 @@
 :root {
   --incsearch-tint-ratio: 15%;
   --incsearch-gap-tint-ratio: 6%;
-  --incsearch-match-bg: var(--text-highlight-bg, #ffe066);
+  --incsearch-secondary-fill: rgba(112, 93, 207, 0.22);
+  --incsearch-secondary-edge: rgba(112, 93, 207, 0.50);
+  --incsearch-match-bg: var(--incsearch-secondary-fill);
   --incsearch-gap-bg: color-mix(
     in srgb,
     var(--background-primary) calc(100% - var(--incsearch-gap-tint-ratio)),
@@ -11,13 +13,25 @@
   --incsearch-gap-underline: var(--text-faint, rgba(128, 128, 128, 0.4));
 }
 
+.theme-dark {
+  --incsearch-secondary-fill: rgba(185, 165, 255, 0.38);
+  --incsearch-secondary-edge: rgba(185, 165, 255, 0.76);
+}
+
 /* Mode A & B - Exact Matches */
 .incsearch-match-exact {
-  background-color: var(--incsearch-match-bg);
-  color: #000000 !important;
+  background-color: var(--incsearch-secondary-fill);
+  color: inherit !important;
   border-radius: var(--radius-s, 2px);
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+.theme-dark .incsearch-match-exact {
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent);
 }
 
 .incsearch-match-exact.is-current {
@@ -27,39 +41,67 @@
   box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 1px;
   border-radius: var(--radius-s, 4px);
+  text-decoration: none !important;
+}
+
+.incsearch-match-secondary--underline,
+.incsearch-match-exact.incsearch-match-secondary--underline,
+.incsearch-match-wildcard-word.incsearch-match-secondary--underline {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  text-decoration: underline dotted var(--incsearch-secondary-edge, currentColor) !important;
+  text-decoration-thickness: 1.5px !important;
+  text-underline-offset: 2px !important;
 }
 
 .incsearch-table-cell-match {
-  background-color: var(--incsearch-match-bg) !important;
-  color: #000000 !important;
+  background-color: var(--incsearch-secondary-fill) !important;
+  color: inherit !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent) !important;
   border-radius: var(--radius-s, 2px) !important;
   font-weight: 600 !important;
+}
+
+.theme-dark .incsearch-table-cell-match {
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent) !important;
 }
 
 .incsearch-table-cell-match.is-current {
   background-color: transparent !important;
   color: inherit !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
   outline-offset: 1px !important;
   border-radius: var(--radius-s, 4px) !important;
+  text-decoration: none !important;
 }
 
 .incsearch-callout-match {
-  background-color: var(--text-highlight-bg, #ffe066) !important;
-  color: #000000 !important;
+  background-color: var(--incsearch-secondary-fill) !important;
+  color: inherit !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent) !important;
   border-radius: var(--radius-s, 2px) !important;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   display: inline;
 }
 
+.theme-dark .incsearch-callout-match {
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent) !important;
+}
+
 .incsearch-callout-match.is-current {
   background-color: transparent !important;
   color: inherit !important;
-  outline: 2px solid var(--interactive-accent, #705dcf) !important;
-  box-shadow: 0 0 0 2px var(--interactive-accent, #705dcf) !important;
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent, #705dcf)) !important;
+  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent, #705dcf)) !important;
   outline-offset: 1px !important;
   border-radius: var(--radius-s, 4px) !important;
+  text-decoration: none !important;
   display: inline;
 }
 
@@ -120,11 +162,20 @@
 
 .incsearch-match-wildcard-word,
 .incsearch-match-fuzzy-word {
-  background-color: var(--incsearch-match-bg);
-  color: #000000 !important;
+  background-color: var(--incsearch-secondary-fill);
+  color: inherit !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent);
+  border-radius: var(--radius-s, 2px);
   font-weight: 600;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+.theme-dark .incsearch-match-wildcard-word,
+.theme-dark .incsearch-match-fuzzy-word {
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent);
 }
 
 .incsearch-match-wildcard-gap,
@@ -204,8 +255,10 @@
 }
 
 .incsearch-pdf-match {
-  background-color: var(--incsearch-match-bg);
-  opacity: 0.55;
+  background-color: var(--incsearch-secondary-fill);
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent);
+  opacity: 0.80;
   border-radius: var(--radius-s, 2px);
   position: absolute;
   pointer-events: none;
@@ -214,7 +267,9 @@
 
 .theme-dark .incsearch-pdf-match {
   mix-blend-mode: screen;
-  opacity: 0.45;
+  opacity: 0.75;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent);
 }
 
 .incsearch-pdf-match.is-current {
@@ -235,3 +290,21 @@
   box-shadow: none !important;
 }
 
+/* Settings Preview Box */
+.incsearch-settings-preview {
+  padding: 12px 16px;
+  margin: 10px 0 16px 0;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 6px);
+  line-height: 1.6;
+  font-size: var(--font-text-size, 14px);
+}
+
+.incsearch-settings-preview-label {
+  font-size: var(--font-ui-smaller, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}

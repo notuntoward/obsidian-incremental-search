@@ -39,7 +39,9 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 	getSuggestions(query: string): number[] {
 		const activeFile = this.app.workspace.getActiveFile();
-		const linkCache = activeFile ? this.app.metadataCache.getFileCache(activeFile) ?? undefined : undefined;
+		const linkCache = activeFile
+			? (this.app.metadataCache.getFileCache(activeFile) ?? undefined)
+			: undefined;
 		recomputeQuery(
 			this.cm,
 			query,

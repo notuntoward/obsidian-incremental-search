@@ -18,7 +18,12 @@ export function computeMatchGeometry(
 
 	// If textLayer is available, measure exact DOM ranges from rendered browser font layout
 	if (textLayerElement && textLayerElement.children.length > 0) {
-		const domRects = computeDomRangeGeometry(pageElement, textLayerElement, itemSpans, pageModel);
+		const domRects = computeDomRangeGeometry(
+			pageElement,
+			textLayerElement,
+			itemSpans,
+			pageModel
+		);
 		if (domRects.length === itemSpans.length && domRects.length > 0) {
 			const allValid = domRects.every((dr) => dr.width >= 3 && dr.height >= 3);
 			if (allValid) {
@@ -250,7 +255,11 @@ function computeTransformGeometry(
 		const item = pageModel.items[span.itemIndex];
 		if (!item || !item.str || item.str.length === 0) continue;
 
-		const { startFrac, endFrac } = getSubStringFractions(item.str, span.startOffset, span.endOffset);
+		const { startFrac, endFrac } = getSubStringFractions(
+			item.str,
+			span.startOffset,
+			span.endOffset
+		);
 
 		const transform = item.transform || [1, 0, 0, 1, 0, 0];
 		const itemX = transform[4] || 0;

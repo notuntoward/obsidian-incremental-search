@@ -283,7 +283,7 @@ describe("session: termination & query persistence", () => {
 });
 
 describe("session: searchHighlightPlugin decorations", () => {
-  it("builds decorations for wildcard matches with chars and full span", () => {
+  it("builds decorations for wildcard matches with chars and full span when active, and only word marks when secondary", () => {
     const session: SearchSessionState = {
       query: "the KAN",
       direction: "forward",
@@ -296,18 +296,25 @@ describe("session: searchHighlightPlugin decorations", () => {
             { from: 22, to: 25 },
           ],
         },
-        {
-          from: 30,
-          to: 37,
-        },
       ],
       activeIndex: 0,
       originSelection: { anchor: 0, head: 0 },
+      allMatchesDisplayMode: "always",
     };
 
-    const decorations = buildHighlightDecorations(session, [{ from: 0, to: 100 }]);
-    expect(decorations.size).toBeGreaterThan(0);
+    // When active, includes full span, words, and gap (4 decorations)
+    const activeDecorations = buildHighlightDecorations(session, [{ from: 0, to: 100 }]);
+    expect(activeDecorations.size).toBe(4);
+
+    // When secondary (activeIndex is different), only includes the 2 word marks
+    const secondarySession: SearchSessionState = {
+      ...session,
+      activeIndex: 1, // different match is active
+    };
+    const secondaryDecorations = buildHighlightDecorations(secondarySession, [{ from: 0, to: 100 }]);
+    expect(secondaryDecorations.size).toBe(2);
   });
+
 
   it("returns Decoration.none when session is null or has no matches", () => {
     const decorationsNull = buildHighlightDecorations(null, [{ from: 0, to: 100 }]);

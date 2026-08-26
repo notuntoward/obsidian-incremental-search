@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { parseColor, getRelativeLuminance, getContrastRatio, resolveOutlineColor } from "../src/utils/colors";
 
 describe("colors utility", () => {
@@ -20,4 +20,16 @@ describe("colors utility", () => {
 		// Same color
 		expect(getContrastRatio(whiteLum, whiteLum)).toBeCloseTo(1, 2);
 	});
+
+	it("parses color strings into RGB tuples", () => {
+		expect(parseColor("#ffffff")).toEqual([255, 255, 255]);
+		expect(parseColor("#000000")).toEqual([0, 0, 0]);
+		expect(parseColor("rgb(100, 150, 200)")).toEqual([100, 150, 200]);
+		expect(parseColor("transparent")).toBeNull();
+	});
+
+	it("resolves outline color with contrast awareness", () => {
+		expect(resolveOutlineColor()).toBeDefined();
+	});
 });
+

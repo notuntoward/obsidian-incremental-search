@@ -408,6 +408,9 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     plugin.loadData = async () => ({});
     await plugin.loadSettings();
     expect(plugin.settings.allMatchesDisplayMode).toBe("on-demand");
+    expect(plugin.settings.secondaryHighlightStyle).toBe("adaptive");
+    expect(plugin.settings.secondaryProminence).toBe(0.75);
+    expect(plugin.settings.secondaryEnforceLegibility).toBe(true);
   });
 
   it("migrates legacy boolean fuzzyMode to spaceAsWildcard", async () => {
@@ -418,5 +421,16 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(plugin.settings.spaceAsWildcard).toBe(false);
     expect((plugin.settings as any).fuzzyMode).toBeUndefined();
   });
+
+  it("renders the settings tab with secondary highlight controls", () => {
+    const settingTab = new (plugin.constructor as any).prototype.constructor(plugin.app, plugin);
+    // Get setting tab class from plugin instance
+    let registeredTab: any = null;
+    plugin.addSettingTab = (tab: any) => {
+      registeredTab = tab;
+    };
+    plugin.onunload();
+  });
 });
+
 

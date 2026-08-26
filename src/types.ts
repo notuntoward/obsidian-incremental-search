@@ -41,6 +41,7 @@ export interface SearchSessionState {
 }
 
 export type SearchExitBehavior = "emacs" | "obsidian";
+export type SecondaryHighlightStyle = "adaptive" | "underline" | "tint" | "theme" | "custom";
 
 export interface IncrementalSearchSettings {
 	lastQuery: string;
@@ -50,6 +51,11 @@ export interface IncrementalSearchSettings {
 	matchOnlyVisibleLinks: boolean;
 	allMatchesDisplayMode: AllMatchesDisplayMode;
 	searchExitBehavior: SearchExitBehavior;
+	secondaryHighlightStyle: SecondaryHighlightStyle;
+	secondaryProminence: number;
+	secondaryEnforceLegibility: boolean;
+	secondaryCustomLightColor: string;
+	secondaryCustomDarkColor: string;
 }
 
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
@@ -60,4 +66,9 @@ export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	matchOnlyVisibleLinks: true,
 	allMatchesDisplayMode: "on-demand",
 	searchExitBehavior: "emacs",
+	secondaryHighlightStyle: "adaptive",
+	secondaryProminence: 0.75,
+	secondaryEnforceLegibility: true,
+	secondaryCustomLightColor: "",
+	secondaryCustomDarkColor: "",
 };

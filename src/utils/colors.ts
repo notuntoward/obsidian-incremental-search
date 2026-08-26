@@ -1,21 +1,15 @@
+import { parseCssColor, relativeLuminance, contrastRatio } from "./adaptive-highlight";
+
 /**
  * Parses a CSS color string into RGB values [0-255].
  * Supports hex (#rgb, #rrggbb), rgb(), rgba().
  */
 export function parseColor(color: string): [number, number, number] | null {
-	// Create a dummy element to let the browser resolve the color
-	const div = document.createElement("div");
-	div.style.color = color;
-	div.style.display = "none";
-	document.body.appendChild(div);
-	const computed = window.getComputedStyle(div).color;
-	document.body.removeChild(div);
-
-	const match = computed.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-	if (match) {
-		return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+	const c = parseCssColor(color);
+	if (c.a === 0 && color.trim().toLowerCase() === "transparent") {
+		return null;
 	}
-	return null;
+	return [c.r, c.g, c.b];
 }
 
 /**
@@ -23,11 +17,7 @@ export function parseColor(color: string): [number, number, number] | null {
  * RGB values must be in [0-255].
  */
 export function getRelativeLuminance(rgb: [number, number, number]): number {
-	const [r, g, b] = rgb.map((val) => {
-		const srgb = val / 255;
-		return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
-	});
-	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+	return relativeLuminance({ r: rgb[0], g: rgb[1], b: rgb[2], a: 1 });
 }
 
 /**
@@ -41,33 +31,34 @@ export function getContrastRatio(lum1: number, lum2: number): number {
 
 /**
  * Checks the contrast of the accent color against the computed match background.
- * If contrast < 3.0, it falls back to --text-normal.
+ * If contrast < 2.5, it falls back to --text-normal.
  */
 export function resolveOutlineColor(): string {
+	if (typeof document === "undefined" || typeof window === "undefined" || !document.body) {
+		return "#705dcf";
+	}
 	const bodyStyle = window.getComputedStyle(document.body);
 
 	// Get computed colors
-	const matchBg = bodyStyle.getPropertyValue("--incsearch-match-bg").trim();
+	const appBg = bodyStyle.getPropertyValue("--background-primary").trim();
 	const accent = bodyStyle.getPropertyValue("--interactive-accent").trim();
 	const fallback = bodyStyle.getPropertyValue("--text-normal").trim() || "#000000";
 
-	if (!matchBg || !accent) {
+	if (!accent) {
 		return fallback;
 	}
 
-	const rgbBg = parseColor(matchBg);
-	const rgbAccent = parseColor(accent);
+	const rgbBg = parseCssColor(
+		appBg || (document.body.classList.contains("theme-dark") ? "#1e1e1e" : "#ffffff")
+	);
+	const rgbAccent = parseCssColor(accent);
 
-	if (!rgbBg || !rgbAccent) {
-		return fallback;
-	}
-
-	const lumBg = getRelativeLuminance(rgbBg);
-	const lumAccent = getRelativeLuminance(rgbAccent);
+	const lumBg = relativeLuminance(rgbBg);
+	const lumAccent = relativeLuminance(rgbAccent);
 
 	const ratio = getContrastRatio(lumBg, lumAccent);
 
-	if (ratio >= 3.0) {
+	if (ratio >= 2.5) {
 		return accent;
 	}
 	return fallback;
@@ -77,6 +68,7 @@ export function resolveOutlineColor(): string {
  * Updates the `--incsearch-current-outline-resolved` CSS variable on the document body.
  */
 export function updateResolvedOutlineColor() {
+	if (typeof document === "undefined" || !document.body) return;
 	const resolved = resolveOutlineColor();
 	document.body.style.setProperty("--incsearch-current-outline-resolved", resolved);
 }

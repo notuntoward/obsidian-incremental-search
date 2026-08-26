@@ -55,7 +55,10 @@ export const parseFuzzyQuery = parseWildcardQuery;
  * Frontmatter is always non-visible metadata and is always excluded.
  * Link destinations/URLs are excluded when filterHiddenLinks is true.
  */
-function getHiddenRangesFromCache(cache: CachedMetadata, filterHiddenLinks: boolean): { from: number; to: number }[] {
+function getHiddenRangesFromCache(
+	cache: CachedMetadata,
+	filterHiddenLinks: boolean
+): { from: number; to: number }[] {
 	const ranges: { from: number; to: number }[] = [];
 
 	// 1. Frontmatter Position / YAML sections (Always hidden)
@@ -85,10 +88,7 @@ function getHiddenRangesFromCache(cache: CachedMetadata, filterHiddenLinks: bool
 
 	// 2. Hidden Links / Destinations (Filtered when filterHiddenLinks is true)
 	if (filterHiddenLinks) {
-		const allLinks: ReferenceCache[] = [
-			...(cache.links || []),
-			...(cache.embeds || []),
-		];
+		const allLinks: ReferenceCache[] = [...(cache.links || []), ...(cache.embeds || [])];
 		for (const link of allLinks) {
 			const start = link.position.start.offset;
 			const end = link.position.end.offset;
@@ -229,7 +229,7 @@ function findCellBoundaries(lineText: string, matchStart: number, matchEnd: numb
 	let cellStart = 0;
 	let colIndex = 0;
 	for (let i = 0; i <= matchStart; i++) {
-		if (lineText[i] === '|' && (i === 0 || lineText[i - 1] !== '\\')) {
+		if (lineText[i] === "|" && (i === 0 || lineText[i - 1] !== "\\")) {
 			cellStart = i + 1;
 			colIndex++;
 		}
@@ -238,7 +238,7 @@ function findCellBoundaries(lineText: string, matchStart: number, matchEnd: numb
 
 	let cellEnd = lineText.length;
 	for (let i = matchEnd; i < lineText.length; i++) {
-		if (lineText[i] === '|' && (i === 0 || lineText[i - 1] !== '\\')) {
+		if (lineText[i] === "|" && (i === 0 || lineText[i - 1] !== "\\")) {
 			cellEnd = i;
 			break;
 		}
@@ -264,8 +264,8 @@ export function computeMatches(
 	const caseSensitive = isCaseSensitive(query);
 	const results: MatchRange[] = [];
 
-	const hiddenRanges = linkCache 
-		? getHiddenRangesFromCache(linkCache, matchOnlyVisibleLinks) 
+	const hiddenRanges = linkCache
+		? getHiddenRangesFromCache(linkCache, matchOnlyVisibleLinks)
 		: [];
 
 	const tableRanges: { from: number; to: number }[] = [];
@@ -296,10 +296,15 @@ export function computeMatches(
 				const tableRange = tableRanges.find((r) => m.from < r.to && m.to > r.from);
 				if (tableRange) {
 					m.inTable = true;
-					const { cellText, cellStartOffset, colIndex } = findCellBoundaries(line.text, m.from - line.from, m.to - line.from);
+					const { cellText, cellStartOffset, colIndex } = findCellBoundaries(
+						line.text,
+						m.from - line.from,
+						m.to - line.from
+					);
 					const tableStartLine = doc.lineAt(tableRange.from).number;
 					const lineOffsetInTable = line.number - tableStartLine;
-					const rowIndex = lineOffsetInTable === 0 ? 0 : Math.max(0, lineOffsetInTable - 1);
+					const rowIndex =
+						lineOffsetInTable === 0 ? 0 : Math.max(0, lineOffsetInTable - 1);
 					m.tableMatchData = {
 						sectionStart: tableRange.from,
 						cellText,

@@ -1,6 +1,11 @@
 import { Plugin, PluginSettingTab, App, Setting, Editor, View } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { IncrementalSearchSettings, DEFAULT_SETTINGS, SearchDirection, AllMatchesDisplayMode } from "./types";
+import {
+	IncrementalSearchSettings,
+	DEFAULT_SETTINGS,
+	SearchDirection,
+	AllMatchesDisplayMode,
+} from "./types";
 import {
 	searchSessionField,
 	searchHighlightPlugin,
@@ -20,6 +25,7 @@ import {
 } from "./widget";
 import { IncrementalSearchSuggestModal } from "./modal";
 import { updateResolvedOutlineColor } from "./utils/colors";
+import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/adaptive-highlight";
 import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
 
@@ -35,6 +41,7 @@ export * from "./pdf/match-geometry";
 export * from "./pdf/highlight-layer";
 export * from "./pdf/pdf-view-adapter";
 export * from "./pdf/pdf-match-controller";
+export * from "./utils/adaptive-highlight";
 
 export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;
@@ -49,11 +56,14 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 		this.app.workspace.onLayoutReady(() => {
 			updateResolvedOutlineColor();
+			getOrComputeSecondaryStyle(this.settings);
 		});
 
 		this.registerEvent(
 			this.app.workspace.on("css-change", () => {
+				invalidateAppearanceCache();
 				updateResolvedOutlineColor();
+				getOrComputeSecondaryStyle(this.settings);
 			})
 		);
 
@@ -90,8 +100,12 @@ export default class IncrementalSearchPlugin extends Plugin {
 			});
 		};
 
-		this.registerDomEvent(document, "pointerdown", handleLeafInteraction, { capture: true } as any);
-		this.registerDomEvent(document, "mousedown", handleLeafInteraction, { capture: true } as any);
+		this.registerDomEvent(document, "pointerdown", handleLeafInteraction, {
+			capture: true,
+		} as any);
+		this.registerDomEvent(document, "mousedown", handleLeafInteraction, {
+			capture: true,
+		} as any);
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -135,7 +149,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 		removeAllWidgets();
 	}
 
-	private getActiveTarget(): { type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
+	private getActiveTarget():
+		{ type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
 		const activeEl = document.activeElement;
 
 		// 1. If document.activeElement is inside a specific workspace leaf, use that leaf
@@ -186,7 +201,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 
 		// 4. Check workspace.activeLeaf
-		const activeLeaf = (this.app.workspace as any).activeLeaf ||
+		const activeLeaf =
+			(this.app.workspace as any).activeLeaf ||
 			(this.app.workspace as any).getMostRecentLeaf?.();
 		const activeView = activeLeaf?.view;
 
@@ -269,30 +285,19 @@ export default class IncrementalSearchPlugin extends Plugin {
 		const adapter = createPdfViewAdapter(view);
 		if (!adapter) return;
 
-		this.pdfController = new PdfMatchController(
-			adapter,
-			this.settings,
-			direction,
-			() => {
-				if (this.pdfController) {
-					updatePdfWidgetCounter(this.pdfController);
-				}
+		this.pdfController = new PdfMatchController(adapter, this.settings, direction, () => {
+			if (this.pdfController) {
+				updatePdfWidgetCounter(this.pdfController);
 			}
-		);
+		});
 
 		const startingQuery = "";
-		renderPdfWidget(
-			this.pdfController,
-			this,
-			startingQuery,
-			direction,
-			() => {
-				this.pdfController?.destroy();
-				this.pdfController = null;
-				this.activePdfView = null;
-				removeWidget();
-			}
-		);
+		renderPdfWidget(this.pdfController, this, startingQuery, direction, () => {
+			this.pdfController?.destroy();
+			this.pdfController = null;
+			this.activePdfView = null;
+			removeWidget();
+		});
 	}
 
 	invoke(editor: Editor, direction: SearchDirection) {
@@ -312,7 +317,9 @@ export default class IncrementalSearchPlugin extends Plugin {
 		if (session) {
 			if (session.query === "" && this.settings.lastQuery) {
 				const activeFile = this.app.workspace.getActiveFile();
-				const linkCache = activeFile ? this.app.metadataCache.getFileCache(activeFile) ?? undefined : undefined;
+				const linkCache = activeFile
+					? (this.app.metadataCache.getFileCache(activeFile) ?? undefined)
+					: undefined;
 				recomputeQuery(
 					view,
 					this.settings.lastQuery,
@@ -391,7 +398,10 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 	async loadSettings() {
 		const loaded = (await this.loadData()) || {};
-		if (loaded.allMatchesDisplayMode === undefined && typeof loaded.highlightAllMatches === "boolean") {
+		if (
+			loaded.allMatchesDisplayMode === undefined &&
+			typeof loaded.highlightAllMatches === "boolean"
+		) {
 			loaded.allMatchesDisplayMode = loaded.highlightAllMatches ? "always" : "off";
 		}
 		delete loaded.highlightAllMatches;
@@ -406,6 +416,9 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 
 	async saveSettings() {
+		invalidateAppearanceCache();
+		updateResolvedOutlineColor();
+		getOrComputeSecondaryStyle(this.settings);
 		await this.saveData(this.settings);
 	}
 }
@@ -424,9 +437,7 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Search exit behavior")
-			.setDesc(
-				"Determines how Enter and Escape end an active incremental search session."
-			)
+			.setDesc("Determines how Enter and Escape end an active incremental search session.")
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOption("emacs", "Emacs-style (Enter accepts, Escape cancels)")
@@ -454,6 +465,101 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName("Secondary match highlight style")
+			.setDesc(
+				"Visual styling strategy for non-current matches. 'Adaptive' automatically derives fill and edge colors from the active theme and current match."
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("adaptive", "Adaptive (Theme-matched fill + edge)")
+					.addOption("underline", "Dotted underline only")
+					.addOption("tint", "Subtle background tint only")
+					.addOption("theme", "Obsidian highlight default")
+					.addOption("custom", "Custom colors")
+					.setValue(this.plugin.settings.secondaryHighlightStyle)
+					.onChange(async (value) => {
+						this.plugin.settings.secondaryHighlightStyle = value as any;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Secondary match prominence")
+			.setDesc(
+				"Controls the visual strength and subordination level of secondary matches relative to the active match."
+			)
+			.addSlider((slider) =>
+				slider
+					.setLimits(20, 100, 5)
+					.setValue(Math.round(this.plugin.settings.secondaryProminence * 100))
+					.setDynamicTooltip()
+					.onChange(async (val) => {
+						this.plugin.settings.secondaryProminence = val / 100;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Enforce text legibility (WCAG)")
+			.setDesc(
+				"Automatically fall back to a dotted underline if background tinting would compromise normal text contrast."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.secondaryEnforceLegibility)
+					.onChange(async (value) => {
+						this.plugin.settings.secondaryEnforceLegibility = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		if (this.plugin.settings.secondaryHighlightStyle === "custom") {
+			new Setting(containerEl)
+				.setName("Custom color (Light theme)")
+				.setDesc(
+					"Custom CSS color (hex, rgb, or rgba) for secondary highlights in light mode."
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder("#ffe066 or rgba(255, 224, 102, 0.5)")
+						.setValue(this.plugin.settings.secondaryCustomLightColor)
+						.onChange(async (val) => {
+							this.plugin.settings.secondaryCustomLightColor = val;
+							await this.plugin.saveSettings();
+						})
+				);
+
+			new Setting(containerEl)
+				.setName("Custom color (Dark theme)")
+				.setDesc(
+					"Custom CSS color (hex, rgb, or rgba) for secondary highlights in dark mode."
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder("#705dcf or rgba(112, 93, 207, 0.5)")
+						.setValue(this.plugin.settings.secondaryCustomDarkColor)
+						.onChange(async (val) => {
+							this.plugin.settings.secondaryCustomDarkColor = val;
+							await this.plugin.saveSettings();
+						})
+				);
+		}
+
+		// Preview swatch
+		const previewContainer = containerEl.createDiv({ cls: "incsearch-settings-preview" });
+		const previewHeader = previewContainer.createDiv({
+			cls: "incsearch-settings-preview-label",
+		});
+		previewHeader.setText("Highlighting Live Preview");
+		const previewBody = previewContainer.createDiv();
+		previewBody.createSpan({ text: "Example text demonstrating an " });
+		previewBody.createSpan({ cls: "incsearch-match-exact is-current", text: "active match" });
+		previewBody.createSpan({ text: " and a " });
+		previewBody.createSpan({ cls: "incsearch-match-exact", text: "secondary match" });
+		previewBody.createSpan({ text: " in the active theme." });
 
 		new Setting(containerEl)
 			.setName("Space-as-wildcard matching")
