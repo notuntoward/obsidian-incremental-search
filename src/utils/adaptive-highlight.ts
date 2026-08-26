@@ -240,30 +240,57 @@ export function isMonochrome(c: RGBA): boolean {
 }
 
 /**
- * Ensures the accent color has high vibrancy and luminosity for dark backgrounds,
- * or adequate saturation/contrast for warm light backgrounds (e.g. Flexoki warm cream, Solarized).
+ * Calculates the Hunt colorfulness adaptation factor (F_L^0.25) according to CAM16 / CIECAM02.
+ * The Hunt effect establishes that perceived colorfulness (M = C * F_L^0.25) increases with adapting
+ * luminance. At low luminance (dark themes), colors appear desaturated and dim.
+ *
+ * @param bgLuminance - Standard relative luminance Y_bg in [0, 1]
+ * @returns Normalized Hunt colorfulness factor in [0.60, 1.00]
  */
-export function ensurePerceptibleAccent(accent: RGBA, bg: RGBA, isDark: boolean): RGBA {
+export function calculateHuntAdaptationFactor(bgLuminance: number): number {
+	const clampedY = Math.max(0, Math.min(1, bgLuminance));
+	// Map relative luminance [0, 1] to display adapting luminance L_A [5, 200] cd/m^2
+	const La = 5 + 195 * clampedY;
+	const k = 1 / (5 * La + 1);
+	const k4 = k * k * k * k;
+	const oneMinusK4 = 1 - k4;
+	const Fl = 0.2 * k4 * (5 * La) + 0.1 * oneMinusK4 * oneMinusK4 * Math.cbrt(5 * La);
+
+	// Normalizing factor against white reference (Fl ~ 1.0 at La = 200)
+	const FlRef = 1.0;
+	const huntCorrelate = Math.pow(Fl, 0.25) / FlRef;
+	return Math.max(0.5, Math.min(1.0, huntCorrelate));
+}
+
+/**
+ * Ensures the accent color has high vibrancy and luminosity for dark backgrounds,
+ * or adequate saturation/contrast for warm light backgrounds (e.g. Flexoki warm cream, Solarized),
+ * using continuous Hunt adaptation factors.
+ */
+export function ensurePerceptibleAccent(accent: RGBA, bg: RGBA, isDarkLegacy?: boolean): RGBA {
 	const bgLum = relativeLuminance(bg);
 	const accentLum = relativeLuminance(accent);
+	const isDark = isDarkLegacy ?? bgLum < 0.35;
+	const H = calculateHuntAdaptationFactor(bgLum);
+	const D = Math.max(0, Math.min(1, (1 - H) / 0.265)); // Darkness deficit [0, 1]
 
-	if (isDark || bgLum < 0.15) {
-		// Dark / Black background
+	if (isDark || bgLum < 0.35) {
+		// Dark / Black / Slate background:
+		// Compensate for the Hunt effect and Stevens effect by scaling max channel to 255
+		// and applying luminous lift inversely proportional to the Hunt colorfulness factor.
 		if (isMonochrome(accent)) {
-			// Pure white for monochrome dark themes
 			return { r: 255, g: 255, b: 255, a: 1 };
 		}
 		const maxChannel = Math.max(accent.r, accent.g, accent.b);
 		if (maxChannel === 0) {
 			return { r: 255, g: 255, b: 255, a: 1 };
 		}
-		// Scale max channel to 255 and apply luminous lift for dark surfaces
 		const scale = 255 / maxChannel;
 		const rScaled = accent.r * scale;
 		const gScaled = accent.g * scale;
 		const bScaled = accent.b * scale;
 
-		const lift = accentLum < 0.35 ? 45 : 20;
+		const lift = Math.round(50 * D * (1 - Math.min(1, accentLum * 1.5)));
 		const r = Math.min(255, Math.round(rScaled + lift * (1 - rScaled / 255)));
 		const g = Math.min(255, Math.round(gScaled + lift * (1 - gScaled / 255)));
 		const b = Math.min(255, Math.round(bScaled + lift * (1 - bScaled / 255)));
@@ -276,7 +303,7 @@ export function ensurePerceptibleAccent(accent: RGBA, bg: RGBA, isDark: boolean)
 
 		const currentContrast = contrastRatio(accent, bg);
 
-		// If accent is too pale or has low contrast against warm paper:
+		// If accent is too pale (e.g. pale yellow on warm paper) or has low contrast against paper:
 		if (accentLum > 0.38 || currentContrast < 2.8) {
 			const maxChannel = Math.max(accent.r, accent.g, accent.b);
 			if (maxChannel > 0) {
@@ -515,27 +542,40 @@ export function chooseAccent(a: MeasuredAppearance): RGBA {
 }
 
 /**
- * Determines appropriate fill alpha and edge alpha for secondary match highlights.
- * Dynamically scales across the full range of the prominence slider (0.20 to 1.00)
- * with robust visibility guarantees for dark mode and warm light modes.
+ * Determines appropriate fill alpha and edge alpha for secondary match highlights
+ * using a continuous psychophysical transfer function based on the Hunt Effect and the Stevens Effect.
+ *
+ * @param prominenceScale - Slider prominence value in [0.20, 1.00]
+ * @param bgLuminanceOrIsDark - Background relative luminance [0, 1] or boolean flag
  */
 export function calculateSecondaryAlphas(
 	prominenceScale = 0.75,
-	isDark = false
+	bgLuminanceOrIsDark: number | boolean = false
 ): { fillAlpha: number; edgeAlpha: number } {
-	const clampedProminence = Math.max(0.2, Math.min(1.0, prominenceScale));
+	const clampedP = Math.max(0.2, Math.min(1.0, prominenceScale));
+	const bgLuminance =
+		typeof bgLuminanceOrIsDark === "number"
+			? bgLuminanceOrIsDark
+			: bgLuminanceOrIsDark
+				? 0.015
+				: 1.0;
 
-	if (isDark) {
-		// Dark mode requires high luminous fill (0.21 to 0.45) and bold edge (0.46 to 0.90) to pop
-		const fillAlpha = Number((0.15 + 0.3 * clampedProminence).toFixed(3));
-		const edgeAlpha = Number((0.35 + 0.55 * clampedProminence).toFixed(3));
-		return { fillAlpha, edgeAlpha };
-	} else {
-		// Light/warm mode scales smoothly from subtle (0.11) to prominent (0.26)
-		const fillAlpha = Number((0.08 + 0.18 * clampedProminence).toFixed(3));
-		const edgeAlpha = Number((0.2 + 0.4 * clampedProminence).toFixed(3));
-		return { fillAlpha, edgeAlpha };
-	}
+	const H = calculateHuntAdaptationFactor(bgLuminance);
+	// Darkness factor D smoothly ranges from 0.0 (pure white) to 1.0 (true black)
+	const D = Math.max(0, Math.min(1, (1 - H) / 0.265));
+
+	// Continuous Hunt/Stevens perceptual transfer function
+	// Fill alpha scales smoothly from [0.08..0.24] on white to [0.20..0.46] on true black
+	const minFill = 0.08 + 0.12 * D;
+	const maxFill = 0.24 + 0.22 * D;
+	const fillAlpha = Number((minFill + (maxFill - minFill) * clampedP).toFixed(3));
+
+	// Edge alpha scales smoothly from [0.20..0.55] on white to [0.45..0.92] on true black
+	const minEdge = 0.2 + 0.25 * D;
+	const maxEdge = 0.55 + 0.37 * D;
+	const edgeAlpha = Number((minEdge + (maxEdge - minEdge) * clampedP).toFixed(3));
+
+	return { fillAlpha, edgeAlpha };
 }
 
 /**
@@ -580,7 +620,8 @@ export function buildSecondaryStyle(
 	const styleMode: SecondaryHighlightStyle = settings?.secondaryHighlightStyle ?? "adaptive";
 	const prominence = Math.max(0.2, Math.min(1.0, settings?.secondaryProminence ?? 0.75));
 	const enforceLegibility = settings?.secondaryEnforceLegibility ?? true;
-	const isDark = measured.mode === "dark" || relativeLuminance(measured.appBackground) < 0.15;
+	const bgLuminance = relativeLuminance(measured.appBackground);
+	const isDark = measured.mode === "dark" || bgLuminance < 0.35;
 
 	// 1. Custom color mode
 	if (styleMode === "custom") {
@@ -591,7 +632,7 @@ export function buildSecondaryStyle(
 			const customRgba = parseCssColor(customStr.trim());
 			const { fillAlpha: calcFill, edgeAlpha: calcEdge } = calculateSecondaryAlphas(
 				prominence,
-				isDark
+				bgLuminance
 			);
 			const fillAlpha = customRgba.a > 0 && customRgba.a < 1.0 ? customRgba.a : calcFill;
 			const edgeAlpha =
@@ -622,7 +663,7 @@ export function buildSecondaryStyle(
 	if (styleMode === "underline") {
 		const rawAccent = chooseAccent(measured);
 		const accent = ensurePerceptibleAccent(rawAccent, measured.appBackground, isDark);
-		const { edgeAlpha } = calculateSecondaryAlphas(prominence, isDark);
+		const { edgeAlpha } = calculateSecondaryAlphas(prominence, bgLuminance);
 		return {
 			mode: measured.mode,
 			fillCss: "transparent",
@@ -636,7 +677,7 @@ export function buildSecondaryStyle(
 	// 3. Theme highlight default mode
 	if (styleMode === "theme" && measured.themeHighlightBg) {
 		const hl = measured.themeHighlightBg;
-		const { fillAlpha, edgeAlpha } = calculateSecondaryAlphas(prominence, isDark);
+		const { fillAlpha, edgeAlpha } = calculateSecondaryAlphas(prominence, bgLuminance);
 		const fillComp = composite({ ...hl, a: fillAlpha }, measured.appBackground);
 		return {
 			mode: measured.mode,
@@ -652,8 +693,10 @@ export function buildSecondaryStyle(
 	if (styleMode === "tint") {
 		const rawAccent = chooseAccent(measured);
 		const accent = ensurePerceptibleAccent(rawAccent, measured.appBackground, isDark);
-		const { fillAlpha } = calculateSecondaryAlphas(prominence, isDark);
-		const fillComp = composite({ ...accent, a: fillAlpha }, measured.appBackground);
+		const { fillAlpha } = calculateSecondaryAlphas(prominence, bgLuminance);
+		const effectiveFillAlpha =
+			isDark && isMonochrome(accent) ? Math.min(fillAlpha, 0.2) : fillAlpha;
+		const fillComp = composite({ ...accent, a: effectiveFillAlpha }, measured.appBackground);
 		const readable = textRemainsReadable(
 			measured.normalText,
 			measured.appBackground,
@@ -663,7 +706,7 @@ export function buildSecondaryStyle(
 		return {
 			mode: measured.mode,
 			fillCss: readable
-				? `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${fillAlpha.toFixed(3)})`
+				? `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${effectiveFillAlpha.toFixed(3)})`
 				: "transparent",
 			edgeCss: "transparent",
 			useUnderline: !readable,
@@ -675,9 +718,11 @@ export function buildSecondaryStyle(
 	// 5. Default "adaptive" mode (fill + inset edge, with underline fallback if low readability)
 	const rawAccent = chooseAccent(measured);
 	const accent = ensurePerceptibleAccent(rawAccent, measured.appBackground, isDark);
-	const { fillAlpha, edgeAlpha } = calculateSecondaryAlphas(prominence, isDark);
+	const { fillAlpha, edgeAlpha } = calculateSecondaryAlphas(prominence, bgLuminance);
+	const effectiveFillAlpha =
+		isDark && isMonochrome(accent) ? Math.min(fillAlpha, 0.2) : fillAlpha;
 
-	const fillComp = composite({ ...accent, a: fillAlpha }, measured.appBackground);
+	const fillComp = composite({ ...accent, a: effectiveFillAlpha }, measured.appBackground);
 	const readable = textRemainsReadable(
 		measured.normalText,
 		measured.appBackground,
@@ -686,7 +731,7 @@ export function buildSecondaryStyle(
 	);
 
 	const fillCss = readable
-		? `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${fillAlpha.toFixed(3)})`
+		? `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${effectiveFillAlpha.toFixed(3)})`
 		: "transparent";
 	const edgeCss = `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${edgeAlpha.toFixed(3)})`;
 

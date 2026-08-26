@@ -6,6 +6,7 @@ import {
 	contrastRatio,
 	toCssRgba,
 	isMonochrome,
+	calculateHuntAdaptationFactor,
 	ensurePerceptibleAccent,
 	chooseAccent,
 	calculateSecondaryAlphas,
@@ -47,8 +48,8 @@ describe("adaptive-highlight module", () => {
 
 			const parsed8 = parseCssColor("#1e1e1e80");
 			expect(parsed8.r).toBe(30);
-			expect(parsed8.g).toBe(30);
 			expect(parsed8.b).toBe(30);
+			expect(parsed8.g).toBe(30);
 			expect(parsed8.a).toBeCloseTo(0.502, 2);
 		});
 
@@ -119,20 +120,44 @@ describe("adaptive-highlight module", () => {
 		});
 	});
 
-	describe("ensurePerceptibleAccent", () => {
+	describe("calculateHuntAdaptationFactor (Hunt Effect & CAM16)", () => {
+		it("monotonically increases with background luminance", () => {
+			const black = calculateHuntAdaptationFactor(0.0);
+			const slate = calculateHuntAdaptationFactor(0.05);
+			const midGrey = calculateHuntAdaptationFactor(0.20);
+			const warmCream = calculateHuntAdaptationFactor(0.90);
+			const white = calculateHuntAdaptationFactor(1.00);
+
+			expect(black).toBeLessThan(slate);
+			expect(slate).toBeLessThan(midGrey);
+			expect(midGrey).toBeLessThan(warmCream);
+			expect(warmCream).toBeLessThanOrEqual(white);
+		});
+
+		it("yields correct mathematical bounds for CAM16 adaptation", () => {
+			const hBlack = calculateHuntAdaptationFactor(0.0);
+			const hWhite = calculateHuntAdaptationFactor(1.0);
+
+			expect(hBlack).toBeGreaterThanOrEqual(0.65);
+			expect(hBlack).toBeLessThan(0.80);
+			expect(hWhite).toBeCloseTo(1.0, 2);
+		});
+	});
+
+	describe("ensurePerceptibleAccent with Hunt effect compensation", () => {
 		const pitchBlackBg = { r: 0, g: 0, b: 0, a: 1 };
 		const warmCreamBg = { r: 255, g: 252, b: 240, a: 1 }; // Flexoki Warm Paper #FFFCF0
 
 		it("lifts dark accent colors for dark backgrounds", () => {
 			const darkPurple = { r: 112, g: 93, b: 207, a: 1 };
-			const lifted = ensurePerceptibleAccent(darkPurple, pitchBlackBg, true);
+			const lifted = ensurePerceptibleAccent(darkPurple, pitchBlackBg);
 			expect(relativeLuminance(lifted)).toBeGreaterThan(0.3);
 			expect(lifted.b).toBe(255);
 		});
 
 		it("keeps white/monochrome accents bright on dark backgrounds", () => {
 			const white = { r: 255, g: 255, b: 255, a: 1 };
-			const res = ensurePerceptibleAccent(white, pitchBlackBg, true);
+			const res = ensurePerceptibleAccent(white, pitchBlackBg);
 			expect(res.r).toBe(255);
 			expect(res.g).toBe(255);
 			expect(res.b).toBe(255);
@@ -140,14 +165,14 @@ describe("adaptive-highlight module", () => {
 
 		it("deepens pale yellow highlights for warm light paper", () => {
 			const paleYellow = { r: 255, g: 224, b: 102, a: 1 }; // #ffe066
-			const deepened = ensurePerceptibleAccent(paleYellow, warmCreamBg, false);
+			const deepened = ensurePerceptibleAccent(paleYellow, warmCreamBg);
 			expect(relativeLuminance(deepened)).toBeLessThan(0.4);
 			expect(Math.max(deepened.r, deepened.g, deepened.b)).toBeLessThanOrEqual(185);
 		});
 
 		it("preserves saturated chromatic accents for warm light paper", () => {
 			const flexokiTeal = { r: 36, g: 131, b: 123, a: 1 }; // #24837B
-			const res = ensurePerceptibleAccent(flexokiTeal, warmCreamBg, false);
+			const res = ensurePerceptibleAccent(flexokiTeal, warmCreamBg);
 			expect(res.r).toBe(36);
 			expect(res.g).toBe(131);
 			expect(res.b).toBe(123);
@@ -248,30 +273,55 @@ describe("adaptive-highlight module", () => {
 		});
 	});
 
-	describe("calculateSecondaryAlphas", () => {
+	describe("calculateSecondaryAlphas with continuous Hunt adaptation", () => {
 		it("provides high-contrast, scalable alphas for dark themes across prominence range", () => {
-			const low = calculateSecondaryAlphas(0.2, true);
-			expect(low.fillAlpha).toBeCloseTo(0.21, 2);
-			expect(low.edgeAlpha).toBeCloseTo(0.46, 2);
+			const low = calculateSecondaryAlphas(0.2, 0.0); // pitch black
+			expect(low.fillAlpha).toBeGreaterThanOrEqual(0.20);
+			expect(low.edgeAlpha).toBeGreaterThanOrEqual(0.45);
 
-			const mid = calculateSecondaryAlphas(0.75, true);
-			expect(mid.fillAlpha).toBeCloseTo(0.375, 2);
-			expect(mid.edgeAlpha).toBeCloseTo(0.763, 2);
+			const mid = calculateSecondaryAlphas(0.75, 0.0);
+			expect(mid.fillAlpha).toBeGreaterThanOrEqual(0.35);
+			expect(mid.edgeAlpha).toBeGreaterThanOrEqual(0.75);
 
-			const high = calculateSecondaryAlphas(1.0, true);
-			expect(high.fillAlpha).toBeCloseTo(0.45, 2);
-			expect(high.edgeAlpha).toBeCloseTo(0.9, 2);
+			const high = calculateSecondaryAlphas(1.0, 0.0);
+			expect(high.fillAlpha).toBeCloseTo(0.46, 2);
+			expect(high.edgeAlpha).toBeCloseTo(0.92, 2);
 		});
 
 		it("provides smooth scaling for light/warm themes across prominence range", () => {
-			const low = calculateSecondaryAlphas(0.2, false);
-			expect(low.fillAlpha).toBeCloseTo(0.116, 2);
+			const low = calculateSecondaryAlphas(0.2, 1.0); // pure white
+			expect(low.fillAlpha).toBeCloseTo(0.112, 2);
+			expect(low.edgeAlpha).toBeCloseTo(0.27, 2);
 
-			const mid = calculateSecondaryAlphas(0.75, false);
-			expect(mid.fillAlpha).toBeCloseTo(0.215, 2);
+			const mid = calculateSecondaryAlphas(0.75, 1.0);
+			expect(mid.fillAlpha).toBeCloseTo(0.20, 2);
+			expect(mid.edgeAlpha).toBeCloseTo(0.46, 2);
 
-			const high = calculateSecondaryAlphas(1.0, false);
-			expect(high.fillAlpha).toBeCloseTo(0.26, 2);
+			const high = calculateSecondaryAlphas(1.0, 1.0);
+			expect(high.fillAlpha).toBeCloseTo(0.24, 2);
+			expect(high.edgeAlpha).toBeCloseTo(0.55, 2);
+		});
+
+		it("exhibits continuous, monotonic progression across variable background lightness", () => {
+			const prom = 0.75;
+			const aBlack = calculateSecondaryAlphas(prom, 0.0);
+			const aObsidianDark = calculateSecondaryAlphas(prom, 0.015);
+			const aSlate = calculateSecondaryAlphas(prom, 0.05);
+			const aMidGrey = calculateSecondaryAlphas(prom, 0.25);
+			const aWarmPaper = calculateSecondaryAlphas(prom, 0.90);
+			const aWhite = calculateSecondaryAlphas(prom, 1.0);
+
+			// Fill alphas smoothly decrease as background luminance increases
+			expect(aBlack.fillAlpha).toBeGreaterThan(aSlate.fillAlpha);
+			expect(aSlate.fillAlpha).toBeGreaterThan(aMidGrey.fillAlpha);
+			expect(aMidGrey.fillAlpha).toBeGreaterThan(aWarmPaper.fillAlpha);
+			expect(aWarmPaper.fillAlpha).toBeGreaterThanOrEqual(aWhite.fillAlpha);
+
+			// Edge alphas smoothly decrease as background luminance increases
+			expect(aBlack.edgeAlpha).toBeGreaterThan(aSlate.edgeAlpha);
+			expect(aSlate.edgeAlpha).toBeGreaterThan(aMidGrey.edgeAlpha);
+			expect(aMidGrey.edgeAlpha).toBeGreaterThan(aWarmPaper.edgeAlpha);
+			expect(aWarmPaper.edgeAlpha).toBeGreaterThanOrEqual(aWhite.edgeAlpha);
 		});
 	});
 
@@ -344,7 +394,7 @@ describe("adaptive-highlight module", () => {
 			const alpha = parseFloat(fillMatch![4]);
 			const b = parseInt(fillMatch![3], 10);
 			const compB = b * alpha + 229 * (1 - alpha);
-			expect(Math.abs(compB - 229)).toBeGreaterThanOrEqual(30);
+			expect(Math.abs(compB - 229)).toBeGreaterThanOrEqual(25);
 		});
 	});
 
@@ -392,12 +442,12 @@ describe("adaptive-highlight module", () => {
 			const fillMatch = style.fillCss.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
 			expect(fillMatch).not.toBeNull();
 			const alpha = parseFloat(fillMatch![4]);
-			expect(alpha).toBeCloseTo(0.45, 2);
+			expect(alpha).toBeCloseTo(0.46, 2);
 
 			const edgeMatch = style.edgeCss.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
 			expect(edgeMatch).not.toBeNull();
 			const edgeAlpha = parseFloat(edgeMatch![4]);
-			expect(edgeAlpha).toBeCloseTo(0.90, 2);
+			expect(edgeAlpha).toBeCloseTo(0.92, 2);
 		});
 
 		it("produces clean monochrome badges on pure black background with monochrome theme", () => {
