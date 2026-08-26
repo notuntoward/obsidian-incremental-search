@@ -48,7 +48,7 @@ describe("widget: counter & lifecycle", () => {
     };
 
     mockPlugin = {
-      settings: { fuzzyMode: true, lastQuery: "", usePopupModal: false, doubleTapWindowMs: 600, matchOnlyVisibleLinks: true },
+      settings: { spaceAsWildcard: true, lastQuery: "", usePopupModal: false, doubleTapWindowMs: 600, matchOnlyVisibleLinks: true },
       saveSettings: async () => {},
       app: {
         workspace: {

@@ -17,12 +17,15 @@ export interface PdfViewAdapter {
 	on(event: string, handler: (...args: any[]) => void): () => void;
 	scrollToRect(pageNumber: number, rect?: MatchRect): void;
 	scrollPageIntoView(pageNumber: number): void;
+	findController?: any;
 	executeNativeFind?(command: {
 		query: string;
 		type?: string;
 		findPrevious?: boolean;
 		highlightAll?: boolean;
 		caseSensitive?: boolean;
+		phraseSearch?: boolean;
+		entireWord?: boolean;
 	}): boolean;
 }
 
@@ -163,13 +166,18 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 	if (containerEl && typeof containerEl.setAttribute === "function") {
 		containerEl.setAttribute("tabindex", "-1");
 	}
-	if (view.contentEl && typeof view.contentEl.setAttribute === "function") {
-		view.contentEl.setAttribute("tabindex", "-1");
-	}
+	const child = (view as any)?.viewer?.child || (view as any)?.child;
+	const findController =
+		pdfViewer?.findController ||
+		child?.findController ||
+		child?.pdfViewer?.findController ||
+		(view as any)?.viewer?.findController ||
+		(view as any)?.findController;
 
 	return {
 		numPages,
 		containerEl,
+		findController,
 
 		async getPage(pageNumber: number): Promise<PdfPageProxyAdapter | null> {
 			if (pageNumber < 1 || pageNumber > numPages) return null;
@@ -379,8 +387,18 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			findPrevious?: boolean;
 			highlightAll?: boolean;
 			caseSensitive?: boolean;
+			phraseSearch?: boolean;
+			entireWord?: boolean;
 		}): boolean {
-			const { query, type = "", findPrevious = false, highlightAll = true, caseSensitive = false } = command;
+			const {
+				query,
+				type = "",
+				findPrevious = false,
+				highlightAll = true,
+				caseSensitive = false,
+				phraseSearch = true,
+				entireWord = false,
+			} = command;
 			const child = (view as any)?.viewer?.child || (view as any)?.child;
 			const findController =
 				pdfViewer?.findController ||
@@ -394,9 +412,9 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 					eventBus.dispatch("find", {
 						type,
 						query,
-						phraseSearch: true,
+						phraseSearch,
 						caseSensitive,
-						entireWord: false,
+						entireWord,
 						highlightAll,
 						findPrevious,
 					});
@@ -411,9 +429,9 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 					const cmd = type === "again" ? "findagain" : "find";
 					findController.executeCommand(cmd, {
 						query,
-						phraseSearch: true,
+						phraseSearch,
 						caseSensitive,
-						entireWord: false,
+						entireWord,
 						highlightAll,
 						findPrevious,
 					});

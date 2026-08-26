@@ -3,8 +3,8 @@ import { EditorState } from "@codemirror/state";
 import { mockFileCache } from "./__mocks__/obsidian";
 import {
   isCaseSensitive,
-  parseFuzzyQuery,
-  findFuzzyMatches,
+  parseWildcardQuery,
+  findWildcardMatches,
   findLiteralMatches,
   computeMatches,
 } from "../src/engine";
@@ -25,57 +25,57 @@ describe("engine: isCaseSensitive", () => {
   });
 });
 
-describe("engine: parseFuzzyQuery (space-as-wildcard)", () => {
+describe("engine: parseWildcardQuery (space-as-wildcard)", () => {
   it("handles empty query", () => {
-    expect(parseFuzzyQuery("", false)).toEqual([]);
+    expect(parseWildcardQuery("", false)).toEqual([]);
   });
 
   it("handles single word", () => {
-    expect(parseFuzzyQuery("hello", false)).toEqual(["hello"]);
-    expect(parseFuzzyQuery("Hello", false)).toEqual(["hello"]);
-    expect(parseFuzzyQuery("Hello", true)).toEqual(["Hello"]);
+    expect(parseWildcardQuery("hello", false)).toEqual(["hello"]);
+    expect(parseWildcardQuery("Hello", false)).toEqual(["hello"]);
+    expect(parseWildcardQuery("Hello", true)).toEqual(["Hello"]);
   });
 
   it("treats 1 space as a wildcard gap between tokens", () => {
-    expect(parseFuzzyQuery("hello world", false)).toEqual(["hello", "world"]);
-    expect(parseFuzzyQuery("a b c", false)).toEqual(["a", "b", "c"]);
+    expect(parseWildcardQuery("hello world", false)).toEqual(["hello", "world"]);
+    expect(parseWildcardQuery("a b c", false)).toEqual(["a", "b", "c"]);
   });
 
   it("treats 2 spaces as exactly 1 literal space", () => {
-    expect(parseFuzzyQuery("hello  world", false)).toEqual(["hello world"]);
-    expect(parseFuzzyQuery("the  KAN", false)).toEqual(["the kan"]);
-    expect(parseFuzzyQuery("the  KAN", true)).toEqual(["the KAN"]);
+    expect(parseWildcardQuery("hello  world", false)).toEqual(["hello world"]);
+    expect(parseWildcardQuery("the  KAN", false)).toEqual(["the kan"]);
+    expect(parseWildcardQuery("the  KAN", true)).toEqual(["the KAN"]);
   });
 
   it("treats 3 spaces as exactly 2 literal spaces", () => {
-    expect(parseFuzzyQuery("hello   world", false)).toEqual(["hello  world"]);
+    expect(parseWildcardQuery("hello   world", false)).toEqual(["hello  world"]);
   });
 
   it("treats N spaces as N-1 literal spaces", () => {
-    expect(parseFuzzyQuery("hello    world", false)).toEqual(["hello   world"]);
-    expect(parseFuzzyQuery("a     b", false)).toEqual(["a    b"]);
+    expect(parseWildcardQuery("hello    world", false)).toEqual(["hello   world"]);
+    expect(parseWildcardQuery("a     b", false)).toEqual(["a    b"]);
   });
 
   it("handles mixed space sequences", () => {
     // "a  b c   d" -> "a" + 1-space + "b", wildcard, "c" + 2-spaces + "d"
-    expect(parseFuzzyQuery("a  b c   d", false)).toEqual(["a b", "c  d"]);
+    expect(parseWildcardQuery("a  b c   d", false)).toEqual(["a b", "c  d"]);
   });
 
   it("handles leading and trailing spaces", () => {
-    expect(parseFuzzyQuery(" hello ", false)).toEqual(["hello"]);
-    expect(parseFuzzyQuery("  hello", false)).toEqual([" hello"]);
-    expect(parseFuzzyQuery("hello  ", false)).toEqual(["hello "]);
+    expect(parseWildcardQuery(" hello ", false)).toEqual(["hello"]);
+    expect(parseWildcardQuery("  hello", false)).toEqual([" hello"]);
+    expect(parseWildcardQuery("hello  ", false)).toEqual(["hello "]);
   });
 });
 
-describe("engine: findFuzzyMatches", () => {
+describe("engine: findWildcardMatches", () => {
   it("returns empty array for empty query or whitespace wildcard", () => {
-    expect(findFuzzyMatches("some text", "", 0, false)).toEqual([]);
-    expect(findFuzzyMatches("some text", " ", 0, false)).toEqual([]);
+    expect(findWildcardMatches("some text", "", 0, false)).toEqual([]);
+    expect(findWildcardMatches("some text", " ", 0, false)).toEqual([]);
   });
 
   it("matches single token in text", () => {
-    const matches = findFuzzyMatches("the quick brown fox", "quick", 0, false);
+    const matches = findWildcardMatches("the quick brown fox", "quick", 0, false);
     expect(matches).toHaveLength(1);
     expect(matches[0]).toEqual({
       from: 4,
@@ -86,7 +86,7 @@ describe("engine: findFuzzyMatches", () => {
 
   it("matches sequential tokens with wildcard gap (1 space)", () => {
     const text = "paper, while the original KAN paper's";
-    const matches = findFuzzyMatches(text, "the KAN", 0, false);
+    const matches = findWildcardMatches(text, "the KAN", 0, false);
     expect(matches).toHaveLength(1);
     expect(matches[0].from).toBe(13); // "the" starts at 13
     expect(matches[0].to).toBe(29);   // "KAN" ends at 29
@@ -99,7 +99,7 @@ describe("engine: findFuzzyMatches", () => {
   it("requires literal space when 2 spaces are typed", () => {
     const text = "the original KAN and the KAN";
     // "the  KAN" requires "the KAN" literally (1 space)
-    const matches = findFuzzyMatches(text, "the  KAN", 0, false);
+    const matches = findWildcardMatches(text, "the  KAN", 0, false);
     expect(matches).toHaveLength(1);
     expect(matches[0].from).toBe(21); // second "the KAN"
     expect(matches[0].to).toBe(28);
@@ -107,17 +107,17 @@ describe("engine: findFuzzyMatches", () => {
 
   it("respects case sensitivity when enabled", () => {
     const text = "KAN and kan and Kan";
-    const insensitiveMatches = findFuzzyMatches(text, "kan", 0, false);
+    const insensitiveMatches = findWildcardMatches(text, "kan", 0, false);
     expect(insensitiveMatches).toHaveLength(3);
 
-    const sensitiveMatches = findFuzzyMatches(text, "KAN", 0, true);
+    const sensitiveMatches = findWildcardMatches(text, "KAN", 0, true);
     expect(sensitiveMatches).toHaveLength(1);
     expect(sensitiveMatches[0].from).toBe(0);
     expect(sensitiveMatches[0].to).toBe(3);
   });
 
   it("applies offset correctly to all returned positions", () => {
-    const matches = findFuzzyMatches("hello world", "world", 100, false);
+    const matches = findWildcardMatches("hello world", "world", 100, false);
     expect(matches).toHaveLength(1);
     expect(matches[0]).toEqual({
       from: 106,
@@ -128,7 +128,7 @@ describe("engine: findFuzzyMatches", () => {
 
   it("handles regex special characters safely as literals", () => {
     const text = "function(a: string): boolean { return [a, b].includes(c); }";
-    const matches = findFuzzyMatches(text, "(a: [a, b]", 0, false);
+    const matches = findWildcardMatches(text, "(a: [a, b]", 0, false);
     expect(matches).toHaveLength(1);
     expect(matches[0].from).toBe(8);
     expect(matches[0].to).toBe(44);
@@ -136,7 +136,7 @@ describe("engine: findFuzzyMatches", () => {
 
   it("finds multiple non-overlapping matches across the line", () => {
     const text = "the fox and the dog";
-    const matches = findFuzzyMatches(text, "the", 0, false);
+    const matches = findWildcardMatches(text, "the", 0, false);
     expect(matches).toHaveLength(2);
     expect(matches[0].from).toBe(0);
     expect(matches[0].to).toBe(3);

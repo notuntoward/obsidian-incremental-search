@@ -283,7 +283,7 @@ describe("session: termination & query persistence", () => {
 });
 
 describe("session: searchHighlightPlugin decorations", () => {
-  it("builds decorations for fuzzy matches with chars and full span", () => {
+  it("builds decorations for wildcard matches with chars and full span", () => {
     const session: SearchSessionState = {
       query: "the KAN",
       direction: "forward",

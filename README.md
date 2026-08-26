@@ -12,7 +12,7 @@ Users who keep their hands on the home row will appreciate this keyboard-driven 
 
 ## Features
 
-- **Instant In-Document Highlighting:** Matches highlight directly in your document viewport with active match selection and full fuzzy-span background shading that automatically adapts to both light and dark themes.
+- **Instant In-Document Highlighting:** Matches highlight directly in your document viewport with active match selection and full wildcard-span background shading that automatically adapts to both light and dark themes.
 - **Tables, Callouts & PDF Support:** Seamless search and highlighting across Markdown body text, Live Preview tables (with table toast and row/column awareness), folded/unfolded callouts, and PDF view documents.
 - **Directional Incremental Navigation:** Search starts from your current cursor position. Triggering the search command again advances to the next or previous match in real time.
 - **Smart Space-as-Wildcard Matching:** Type search terms separated by spaces to match words across lines or paragraphs. Type extra spaces to match exact literal spaces.
@@ -68,7 +68,7 @@ The command **Accept current incremental-search match** always ends the active s
 
 ## Space-as-Wildcard Matching Rules
 
-When fuzzy matching is enabled (default), spaces between words act as flexible wildcards or literal space matchers according to the following rules:
+When space-as-wildcard matching is enabled (default), spaces between words act as flexible wildcards or literal space matchers according to the following rules:
 
 | Spaces typed | Wildcard behavior | Literal spaces required in document | Example |
 | :--- | :--- | :--- | :--- |
@@ -86,7 +86,7 @@ Incremental Search uses **smart-case** matching:
 - **All lowercase query:** Search is completely **case-insensitive** (e.g. `resist` matches `resist`, `Resist`, `RESIST`).
 - **Contains capital letters:** Typing one or more uppercase letters automatically turns on **case-sensitive** matching (e.g. `Resist` matches only `Resist`, and `KAN` matches only `KAN`).
 
-This smart-case behavior applies across all search modes, including exact literal search and space-as-wildcard fuzzy search.
+This smart-case behavior applies across all search modes, including exact literal search and space-as-wildcard search.
 
 ---
 
@@ -97,7 +97,7 @@ This smart-case behavior applies across all search modes, including exact litera
   - **Always:** Highlight all matches throughout the note, tables, callouts, and PDF documents.
   - **On demand (Ctrl+Enter to toggle)** (default): Show only the active match normally; press `Ctrl+Enter` (or `Cmd+Enter` on macOS) during search to toggle highlighting for all other matches on or off.
   - **Off:** Highlight only the active match.
-- **Fuzzy matching:** Toggle between space-as-wildcard fuzzy matching and exact literal substring search.
+- **Space-as-wildcard matching:** Toggle between space-as-wildcard matching and exact literal substring search.
 - **Match only visible part of links:** When enabled (default), ignores hidden URLs in Markdown links (`[text](url)`) and hidden destinations in aliased wikilinks (`[[destination|alias]]`).
 - **Use popup modal interface:** Option to use a center-screen modal picker with line numbers instead of the inline floating widget.
 
@@ -133,4 +133,4 @@ npm run test:browser  # Run Playwright browser tests
 ## Acknowledgements
 
 - [**GNU Emacs**](https://www.gnu.org/software/emacs/) — for pioneering incremental search (`isearch`) and space-as-wildcard navigation.
-- [**Ivy / Swiper**](https://github.com/abo-abo/swiper) — for inspiring line-based incremental completion and regex/fuzzy search workflows.
+- [**Ivy / Swiper**](https://github.com/abo-abo/swiper) — for inspiring line-based incremental completion and regex/wildcard search workflows.

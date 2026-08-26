@@ -56,9 +56,15 @@ export function updatePdfWidgetCounter(controller: PdfMatchController) {
 
 	if (tableIcon) tableIcon.style.display = "none";
 
-	const { matches, activeIndex, direction, isScanning, query } = controller.state;
+	const { matches, activeIndex, direction, isScanning, query, totalMatchesCount } = controller.state;
 
-	if (matches.length === 0) {
+	if (totalMatchesCount !== undefined) {
+		if (totalMatchesCount === 0) {
+			counter.textContent = query.length > 0 ? "0/0" : "";
+		} else {
+			counter.textContent = `${activeIndex + 1}/${totalMatchesCount}`;
+		}
+	} else if (matches.length === 0) {
 		counter.textContent = isScanning && query.length > 0 ? "..." : "0/0";
 	} else {
 		counter.textContent = `${activeIndex + 1}/${matches.length}`;
@@ -204,7 +210,7 @@ export function renderWidget(
 			view,
 			input.value,
 			view.state.field(searchSessionField, false)?.direction ?? "forward",
-			plugin.settings.fuzzyMode,
+			plugin.settings.spaceAsWildcard,
 			plugin.settings.matchOnlyVisibleLinks,
 			linkCache,
 			true, // isTyping

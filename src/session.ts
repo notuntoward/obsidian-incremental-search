@@ -87,8 +87,8 @@ export function buildHighlightDecorations(
 
 		if (m.chars && m.chars.length > 1) {
 			const spanCls = isCurrent
-				? "incsearch-match-fuzzy-span is-current"
-				: "incsearch-match-fuzzy-span";
+				? "incsearch-match-wildcard-span is-current"
+				: "incsearch-match-wildcard-span";
 
 			positions.push({
 				from: m.from,
@@ -102,13 +102,13 @@ export function buildHighlightDecorations(
 					positions.push({
 						from: currentOffset,
 						to: c.from,
-						mark: Decoration.mark({ class: "incsearch-match-fuzzy-gap" }),
+						mark: Decoration.mark({ class: "incsearch-match-wildcard-gap" }),
 					});
 				}
 				positions.push({
 					from: c.from,
 					to: c.to,
-					mark: Decoration.mark({ class: "incsearch-match-fuzzy-word" }),
+					mark: Decoration.mark({ class: "incsearch-match-wildcard-word" }),
 				});
 				currentOffset = c.to;
 			}
@@ -116,7 +116,7 @@ export function buildHighlightDecorations(
 				positions.push({
 					from: currentOffset,
 					to: m.to,
-					mark: Decoration.mark({ class: "incsearch-match-fuzzy-gap" }),
+					mark: Decoration.mark({ class: "incsearch-match-wildcard-gap" }),
 				});
 			}
 		} else {
@@ -879,7 +879,7 @@ export function recomputeQuery(
 	view: EditorView,
 	query: string,
 	direction: SearchDirection,
-	fuzzy: boolean,
+	spaceAsWildcard: boolean,
 	matchOnlyVisibleLinks: boolean,
 	linkCache?: CachedMetadata,
 	isTyping = false,
@@ -889,7 +889,7 @@ export function recomputeQuery(
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
 
-	const allMatches = computeMatches(view.state, query, fuzzy, matchOnlyVisibleLinks, linkCache);
+	const allMatches = computeMatches(view.state, query, spaceAsWildcard, matchOnlyVisibleLinks, linkCache);
 	const cursorPos = session.originSelection.head;
 
 	let activeIndex = 0;

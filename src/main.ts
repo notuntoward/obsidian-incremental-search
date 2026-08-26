@@ -357,7 +357,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					view,
 					this.settings.lastQuery,
 					direction,
-					this.settings.fuzzyMode,
+					this.settings.spaceAsWildcard,
 					this.settings.matchOnlyVisibleLinks,
 					linkCache,
 					false,
@@ -417,7 +417,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					view,
 					startingQuery,
 					direction,
-					this.settings.fuzzyMode,
+					this.settings.spaceAsWildcard,
 					this.settings.matchOnlyVisibleLinks,
 					undefined,
 					false,
@@ -434,6 +434,12 @@ export default class IncrementalSearchPlugin extends Plugin {
 			loaded.allMatchesDisplayMode = loaded.highlightAllMatches ? "always" : "off";
 		}
 		delete loaded.highlightAllMatches;
+
+		if (loaded.spaceAsWildcard === undefined && typeof loaded.fuzzyMode === "boolean") {
+			loaded.spaceAsWildcard = loaded.fuzzyMode;
+		}
+		delete loaded.fuzzyMode;
+
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 		await this.saveSettings();
 	}
@@ -489,13 +495,13 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Fuzzy matching")
+			.setName("Space-as-wildcard matching")
 			.setDesc(
 				"Match words separated by wildcard spaces instead of literal substring matches."
 			)
 			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.fuzzyMode).onChange(async (value) => {
-					this.plugin.settings.fuzzyMode = value;
+				toggle.setValue(this.plugin.settings.spaceAsWildcard).onChange(async (value) => {
+					this.plugin.settings.spaceAsWildcard = value;
 					await this.plugin.saveSettings();
 				})
 			);

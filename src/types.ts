@@ -45,7 +45,7 @@ export type SearchExitBehavior = "emacs" | "obsidian";
 export interface IncrementalSearchSettings {
 	lastQuery: string;
 	doubleTapWindowMs: number;
-	fuzzyMode: boolean;
+	spaceAsWildcard: boolean;
 	usePopupModal: boolean;
 	matchOnlyVisibleLinks: boolean;
 	allMatchesDisplayMode: AllMatchesDisplayMode;
@@ -55,7 +55,7 @@ export interface IncrementalSearchSettings {
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	lastQuery: "",
 	doubleTapWindowMs: 600,
-	fuzzyMode: true,
+	spaceAsWildcard: true,
 	usePopupModal: false,
 	matchOnlyVisibleLinks: true,
 	allMatchesDisplayMode: "on-demand",

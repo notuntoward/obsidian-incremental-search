@@ -12,14 +12,14 @@ export function isCaseSensitive(query: string): boolean {
 }
 
 /**
- * Parses a fuzzy query string into literal string tokens according to
+ * Parses a wildcard query string into literal string tokens according to
  * Emacs space-as-wildcard rules:
  * - 1 space: Wildcard separator (unbounded gap between tokens)
  * - 2 spaces: Exactly 1 literal space required
  * - 3 spaces: Exactly 2 literal spaces required
  * - N spaces: Exactly N - 1 literal spaces required
  */
-export function parseFuzzyQuery(query: string, caseSensitive: boolean): string[] {
+export function parseWildcardQuery(query: string, caseSensitive: boolean): string[] {
 	if (query.length === 0) return [];
 
 	const tokens: string[] = [];
@@ -47,6 +47,8 @@ export function parseFuzzyQuery(query: string, caseSensitive: boolean): string[]
 
 	return tokens;
 }
+
+export const parseFuzzyQuery = parseWildcardQuery;
 
 /**
  * This function delegates link-syntax and frontmatter parsing to Obsidian's MetadataCache.
@@ -141,10 +143,10 @@ function isMatchHidden(m: MatchRange, hiddenRanges: { from: number; to: number }
 }
 
 /**
- * Finds all fuzzy matches in a single line of text.
+ * Finds all space-as-wildcard matches in a single line of text.
  * Sequential tokens are searched in order with wildcards in between.
  */
-export function findFuzzyMatches(
+export function findWildcardMatches(
 	text: string,
 	query: string,
 	offset: number,
@@ -152,7 +154,7 @@ export function findFuzzyMatches(
 ): MatchRange[] {
 	if (query.length === 0) return [];
 	const haystack = caseSensitive ? text : text.toLowerCase();
-	const tokens = parseFuzzyQuery(query, caseSensitive);
+	const tokens = parseWildcardQuery(query, caseSensitive);
 
 	if (tokens.length === 0) return [];
 	const results: MatchRange[] = [];
@@ -198,6 +200,8 @@ export function findFuzzyMatches(
 
 	return results;
 }
+
+export const findFuzzyMatches = findWildcardMatches;
 
 /**
  * Finds all literal substring matches in a single line of text.
@@ -252,7 +256,7 @@ function findCellBoundaries(lineText: string, matchStart: number, matchEnd: numb
 export function computeMatches(
 	state: EditorState,
 	query: string,
-	fuzzy: boolean,
+	spaceAsWildcard: boolean,
 	matchOnlyVisibleLinks: boolean,
 	linkCache?: CachedMetadata
 ): MatchRange[] {
@@ -277,8 +281,8 @@ export function computeMatches(
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
 		let lineMatches: MatchRange[] = [];
-		if (fuzzy) {
-			lineMatches = findFuzzyMatches(line.text, query, line.from, caseSensitive);
+		if (spaceAsWildcard) {
+			lineMatches = findWildcardMatches(line.text, query, line.from, caseSensitive);
 		} else {
 			lineMatches = findLiteralMatches(line.text, query, line.from, caseSensitive);
 		}

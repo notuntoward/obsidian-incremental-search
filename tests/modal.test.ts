@@ -43,7 +43,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
       },
     };
     mockPlugin = {
-      settings: { fuzzyMode: true, lastQuery: "", usePopupModal: true, doubleTapWindowMs: 600 },
+      settings: { spaceAsWildcard: true, lastQuery: "", usePopupModal: true, doubleTapWindowMs: 600 },
       saveSettings: async () => {},
     };
 
@@ -112,7 +112,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     expect(suggestions).toEqual([]);
   });
 
-  it("renderSuggestion renders line number and highlights for fuzzy matches", () => {
+  it("renderSuggestion renders line number and highlights for wildcard matches", () => {
     const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     modal.getSuggestions("first match");
 

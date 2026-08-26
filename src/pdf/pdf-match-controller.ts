@@ -1,10 +1,36 @@
 import { SearchDirection, IncrementalSearchSettings, shouldShowAllMatches } from "../types";
+import { isCaseSensitive, findWildcardMatches, parseWildcardQuery } from "../engine";
 import { PdfMatch, PdfSessionState, PageTextModel, MatchRect } from "./types";
 import { PdfViewAdapter } from "./pdf-view-adapter";
 import { buildPageTextModel, mapNormalizedRangeToItemSpans } from "./text-model";
 import { findPageMatches } from "./pattern-matcher";
 import { computeMatchGeometry } from "./match-geometry";
 import { renderPageHighlights, clearAllPdfHighlights } from "./highlight-layer";
+
+/**
+ * Processes a query string for PDF.js findController according to space-as-wildcard rules.
+ */
+export function processPdfQuery(
+	query: string,
+	spaceAsWildcard: boolean
+): { processedQuery: string; phraseSearch: boolean } {
+	if (!query || !spaceAsWildcard) {
+		return { processedQuery: query, phraseSearch: true };
+	}
+
+	// 1. Multiple spaces (2+): collapsed to N-1 literal spaces and treated as an exact phrase
+	if (/ {2,}/.test(query)) {
+		const collapsed = query.replace(/ {2,}/g, (match) => " ".repeat(match.length - 1));
+		return { processedQuery: collapsed, phraseSearch: true };
+	}
+
+	// 2. Single space separating words: search as multi-token words (phraseSearch: false)
+	if (/ \S/.test(query.trim())) {
+		return { processedQuery: query.trim(), phraseSearch: false };
+	}
+
+	return { processedQuery: query, phraseSearch: true };
+}
 
 export class PdfMatchController {
 	adapter: PdfViewAdapter;
@@ -15,6 +41,7 @@ export class PdfMatchController {
 	originPageNumber: number;
 	unsubscribers: (() => void)[] = [];
 	onStateChange?: (state: PdfSessionState) => void;
+	originalMatch?: (query: any, pageContent: string, pageIndex: number) => any;
 
 	constructor(
 		adapter: PdfViewAdapter,
@@ -42,6 +69,36 @@ export class PdfMatchController {
 		};
 
 		this.setupEventListeners();
+		this.setupFindControllerHook();
+	}
+
+	private setupFindControllerHook() {
+		const fc = this.adapter.findController;
+		if (!fc) return;
+
+		if (typeof fc.match === "function") {
+			this.originalMatch = fc.match.bind(fc);
+		}
+
+		fc.match = (query: any, pageContent: string, pageIndex: number) => {
+			if (this.settings.spaceAsWildcard && this.state.query && this.state.query.trim().length > 0) {
+				const q = this.state.query;
+				// If query has space separation between words (wildcard gap or literal spaces)
+				if (q.includes(" ")) {
+					const caseSensitive = isCaseSensitive(q);
+					const wildcardMatches = findWildcardMatches(pageContent, q, 0, caseSensitive);
+					return wildcardMatches.map((m) => ({
+						index: m.from,
+						length: m.to - m.from,
+					}));
+				}
+			}
+
+			if (this.originalMatch) {
+				return this.originalMatch(query, pageContent, pageIndex);
+			}
+			return undefined;
+		};
 	}
 
 	private setupEventListeners() {
@@ -88,6 +145,7 @@ export class PdfMatchController {
 			if (evt?.matchesCount) {
 				const { current, total } = evt.matchesCount;
 				this.state.activeIndex = Math.max(0, current - 1);
+				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
 			}
 		});
@@ -97,6 +155,7 @@ export class PdfMatchController {
 			if (evt?.matchesCount) {
 				const { current, total } = evt.matchesCount;
 				this.state.activeIndex = Math.max(0, current - 1);
+				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
 			}
 		});
@@ -139,14 +198,35 @@ export class PdfMatchController {
 		this.state.scannedPages = 0;
 
 		clearAllPdfHighlights(this.adapter.containerEl);
-		this.notifyStateChange();
+
+		// Toggle CSS visibility class for native text layer highlights
+		if (this.shouldShowAllMatches()) {
+			this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
+		} else {
+			this.adapter.containerEl.classList.add("incsearch-pdf-hide-other-matches");
+		}
 
 		if (this.adapter.executeNativeFind) {
+			if (query.length === 0) {
+				this.adapter.executeNativeFind({
+					query: "",
+					type: "",
+					highlightAll: false,
+				});
+				this.state.totalMatchesCount = 0;
+				this.state.isScanning = false;
+				this.notifyStateChange();
+				return;
+			}
+
+			const { processedQuery, phraseSearch } = processPdfQuery(query, this.settings.spaceAsWildcard);
 			const handled = this.adapter.executeNativeFind({
-				query,
+				query: processedQuery,
 				type: "",
 				findPrevious: direction === "backward",
-				highlightAll: this.shouldShowAllMatches(),
+				highlightAll: true,
+				phraseSearch,
+				caseSensitive: isCaseSensitive(query),
 			});
 			if (handled) {
 				this.state.isScanning = false;
@@ -154,6 +234,8 @@ export class PdfMatchController {
 				return;
 			}
 		}
+
+		this.notifyStateChange();
 
 		if (query.length === 0) {
 			this.state.isScanning = false;
@@ -206,7 +288,7 @@ export class PdfMatchController {
 		if (!model || this.scanGeneration !== generation) return;
 
 		const normalizedMatches = findPageMatches(model, query, {
-			fuzzy: this.settings.fuzzyMode,
+			spaceAsWildcard: this.settings.spaceAsWildcard,
 			caseSensitive: undefined,
 		});
 
@@ -259,7 +341,13 @@ export class PdfMatchController {
 	setDemandPeekActive(active: boolean) {
 		if (this.state.isDemandPeekActive === active) return;
 		this.state.isDemandPeekActive = active;
+		if (this.shouldShowAllMatches()) {
+			this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
+		} else {
+			this.adapter.containerEl.classList.add("incsearch-pdf-hide-other-matches");
+		}
 		this.refreshAllVisibleHighlights();
+		this.notifyStateChange();
 	}
 
 	toggleDemandHighlights() {
@@ -309,15 +397,20 @@ export class PdfMatchController {
 	}
 
 	advance(direction: SearchDirection) {
+		this.state.direction = direction;
+
 		if (this.adapter.executeNativeFind && this.state.query) {
+			const { processedQuery, phraseSearch } = processPdfQuery(this.state.query, this.settings.spaceAsWildcard);
 			const handled = this.adapter.executeNativeFind({
-				query: this.state.query,
+				query: processedQuery,
 				type: "again",
 				findPrevious: direction === "backward",
-				highlightAll: this.shouldShowAllMatches(),
+				highlightAll: true,
+				phraseSearch,
+				caseSensitive: isCaseSensitive(this.state.query),
 			});
 			if (handled) {
-				this.state.direction = direction;
+				this.notifyStateChange();
 				return;
 			}
 		}
@@ -389,6 +482,11 @@ export class PdfMatchController {
 
 	destroy() {
 		this.scanGeneration++;
+		this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
+		if (this.adapter.findController && this.originalMatch) {
+			this.adapter.findController.match = this.originalMatch;
+			this.originalMatch = undefined;
+		}
 		if (this.adapter.executeNativeFind) {
 			this.adapter.executeNativeFind({
 				query: "",

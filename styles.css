@@ -108,7 +108,8 @@
   display: block;
 }
 
-/* Mode C - Fuzzy Matches */
+/* Mode C - Space-as-Wildcard Matches */
+.incsearch-match-wildcard-span.is-current,
 .incsearch-match-fuzzy-span.is-current {
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 2px;
@@ -117,6 +118,7 @@
   -webkit-box-decoration-break: clone;
 }
 
+.incsearch-match-wildcard-word,
 .incsearch-match-fuzzy-word {
   background-color: var(--incsearch-match-bg);
   color: #000000 !important;
@@ -125,6 +127,7 @@
   -webkit-box-decoration-break: clone;
 }
 
+.incsearch-match-wildcard-gap,
 .incsearch-match-fuzzy-gap {
   background-color: var(--incsearch-gap-bg);
   text-decoration: underline;
@@ -224,5 +227,13 @@
   pointer-events: none;
   z-index: 3 !important;
   mix-blend-mode: normal !important;
+}
+
+/* PDF Native TextLayer Highlights (Built into Obsidian PDF) */
+/* Hide non-selected highlights when allMatchesDisplayMode is off or on-demand without peek */
+.incsearch-pdf-hide-other-matches .textLayer .highlight:not(.selected):not(.current) {
+  background-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 

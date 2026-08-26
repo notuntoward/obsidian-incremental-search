@@ -36,7 +36,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     // Mock loadSettings
     plugin.loadData = async () => ({
       doubleTapWindowMs: 600,
-      fuzzyMode: true,
+      spaceAsWildcard: true,
       usePopupModal: false,
       lastQuery: "",
     });
@@ -458,6 +458,15 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     plugin.loadData = async () => ({});
     await plugin.loadSettings();
     expect(plugin.settings.allMatchesDisplayMode).toBe("on-demand");
+  });
+
+  it("migrates legacy boolean fuzzyMode to spaceAsWildcard", async () => {
+    plugin.loadData = async () => ({
+      fuzzyMode: false,
+    });
+    await plugin.loadSettings();
+    expect(plugin.settings.spaceAsWildcard).toBe(false);
+    expect((plugin.settings as any).fuzzyMode).toBeUndefined();
   });
 });
 

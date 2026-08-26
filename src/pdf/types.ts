@@ -55,7 +55,9 @@ export interface PdfMatch {
 }
 
 export interface PdfSearchOptions {
-	fuzzy: boolean;
+	spaceAsWildcard?: boolean;
+	wildcard?: boolean;
+	fuzzy?: boolean;
 	caseSensitive?: boolean;
 	wholeWord?: boolean;
 	maxGapChars?: number;
@@ -72,4 +74,5 @@ export interface PdfSessionState {
 	isScanning: boolean;
 	totalPages: number;
 	scannedPages: number;
+	totalMatchesCount?: number;
 }

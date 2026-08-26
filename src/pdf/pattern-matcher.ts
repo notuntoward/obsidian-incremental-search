@@ -1,7 +1,7 @@
 import {
 	isCaseSensitive,
-	parseFuzzyQuery,
-	findFuzzyMatches,
+	parseWildcardQuery,
+	findWildcardMatches,
 	findLiteralMatches,
 } from "../engine";
 import { PageTextModel, NormalizedMatch, PdfSearchOptions } from "./types";
@@ -17,7 +17,7 @@ function isWholeWord(text: string, start: number, end: number): boolean {
 }
 
 /**
- * Checks if gaps between fuzzy tokens in a match exceed maxGapChars.
+ * Checks if gaps between wildcard tokens in a match exceed maxGapChars.
  */
 function isWithinMaxGap(
 	chars: { from: number; to: number }[] | undefined,
@@ -111,8 +111,10 @@ export function findPageMatches(
 		return results;
 	}
 
-	if (options.fuzzy) {
-		const rawMatches = findFuzzyMatches(text, query, 0, caseSensitive);
+	const useWildcard = options.spaceAsWildcard ?? options.wildcard ?? options.fuzzy ?? true;
+
+	if (useWildcard) {
+		const rawMatches = findWildcardMatches(text, query, 0, caseSensitive);
 		for (const m of rawMatches) {
 			if (options.wholeWord && !isWholeWord(text, m.from, m.to)) {
 				continue;

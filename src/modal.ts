@@ -44,7 +44,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			this.cm,
 			query,
 			this.direction,
-			this.plugin.settings.fuzzyMode,
+			this.plugin.settings.spaceAsWildcard,
 			this.plugin.settings.matchOnlyVisibleLinks,
 			linkCache,
 			false,

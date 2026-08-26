@@ -1,7 +1,193 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { PdfMatchController } from "../src/pdf/pdf-match-controller";
+import { PdfMatchController, processPdfQuery } from "../src/pdf/pdf-match-controller";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
+
+describe("processPdfQuery (Space-as-wildcard for PDF)", () => {
+	it("treats single space as multi-token wildcard words (phraseSearch: false)", () => {
+		const res = processPdfQuery("quick fox dog", true);
+		expect(res.phraseSearch).toBe(false);
+		expect(res.processedQuery).toBe("quick fox dog");
+	});
+
+	it("treats 2 spaces as exactly 1 literal space (phraseSearch: true)", () => {
+		const res = processPdfQuery("the  KAN", true);
+		expect(res.phraseSearch).toBe(true);
+		expect(res.processedQuery).toBe("the KAN");
+	});
+
+	it("treats 3 spaces as exactly 2 literal spaces (phraseSearch: true)", () => {
+		const res = processPdfQuery("the   KAN", true);
+		expect(res.phraseSearch).toBe(true);
+		expect(res.processedQuery).toBe("the  KAN");
+	});
+
+	it("always uses phraseSearch: true when spaceAsWildcard is disabled", () => {
+		const res = processPdfQuery("quick fox dog", false);
+		expect(res.phraseSearch).toBe(true);
+		expect(res.processedQuery).toBe("quick fox dog");
+	});
+});
+
+describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
+	let nativeAdapter: PdfViewAdapter;
+	let containerEl: HTMLDivElement;
+	let nativeFindCommands: any[];
+
+	beforeEach(() => {
+		containerEl = document.createElement("div");
+		nativeFindCommands = [];
+
+		nativeAdapter = {
+			numPages: 5,
+			containerEl,
+			getPage: async () => null,
+			getPageElement: () => null,
+			getTextLayerElement: () => null,
+			getPageViewport: () => ({ width: 600, height: 800 }),
+			getVisiblePageNumbers: () => [1],
+			on: (_event: string, _handler: any) => () => {},
+			scrollToRect: vi.fn(),
+			scrollPageIntoView: vi.fn(),
+			executeNativeFind: (cmd: any) => {
+				nativeFindCommands.push(cmd);
+				return true;
+			},
+		};
+	});
+
+	it("delegates search to native find and applies CSS class in on-demand mode", async () => {
+		const controller = new PdfMatchController(nativeAdapter, {
+			...DEFAULT_SETTINGS,
+			allMatchesDisplayMode: "on-demand",
+			spaceAsWildcard: true,
+		});
+
+		await controller.search("quick fox");
+
+		expect(nativeFindCommands).toHaveLength(1);
+		expect(nativeFindCommands[0].query).toBe("quick fox");
+		expect(nativeFindCommands[0].phraseSearch).toBe(false); // multi-token wildcard
+		expect(nativeFindCommands[0].highlightAll).toBe(true);
+
+		// Container has CSS class to hide non-selected native highlights until peeked
+		expect(containerEl.classList.contains("incsearch-pdf-hide-other-matches")).toBe(true);
+
+		// Press Ctrl+Enter -> toggleDemandHighlights
+		controller.toggleDemandHighlights();
+		expect(containerEl.classList.contains("incsearch-pdf-hide-other-matches")).toBe(false);
+
+		// Press Ctrl+Enter again -> hide other matches
+		controller.toggleDemandHighlights();
+		expect(containerEl.classList.contains("incsearch-pdf-hide-other-matches")).toBe(true);
+	});
+
+	it("delegates double-space literal phrase to native find with phraseSearch: true", async () => {
+		const controller = new PdfMatchController(nativeAdapter, {
+			...DEFAULT_SETTINGS,
+			spaceAsWildcard: true,
+		});
+
+		await controller.search("the  KAN");
+
+		expect(nativeFindCommands).toHaveLength(1);
+		expect(nativeFindCommands[0].query).toBe("the KAN");
+		expect(nativeFindCommands[0].phraseSearch).toBe(true);
+		expect(nativeFindCommands[0].caseSensitive).toBe(true); // smart case on uppercase KAN
+	});
+
+	it("delegates advance forward and backward with type: again", async () => {
+		const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+
+		await controller.search("algorithm");
+		controller.advance("forward");
+
+		expect(nativeFindCommands).toHaveLength(2);
+		expect(nativeFindCommands[1].type).toBe("again");
+		expect(nativeFindCommands[1].findPrevious).toBe(false);
+
+		controller.advance("backward");
+		expect(nativeFindCommands).toHaveLength(3);
+		expect(nativeFindCommands[2].type).toBe("again");
+		expect(nativeFindCommands[2].findPrevious).toBe(true);
+	});
+
+	it("cleans up CSS class and clears native find on destroy", async () => {
+		const controller = new PdfMatchController(nativeAdapter, {
+			...DEFAULT_SETTINGS,
+			allMatchesDisplayMode: "on-demand",
+		});
+
+		await controller.search("test");
+		expect(containerEl.classList.contains("incsearch-pdf-hide-other-matches")).toBe(true);
+
+		controller.destroy();
+		expect(containerEl.classList.contains("incsearch-pdf-hide-other-matches")).toBe(false);
+		expect(nativeFindCommands[nativeFindCommands.length - 1]).toEqual({
+			query: "",
+			type: "",
+			highlightAll: false,
+		});
+	});
+
+	it("hooks findController.match for true space-as-wildcard gap matching ('however a' -> 'However, if a')", async () => {
+		const mockFc = {
+			match: vi.fn((_q: any, _text: string, _pageIdx?: number) => [{ index: 0, length: 1 }]),
+		};
+		const adapterWithFc: PdfViewAdapter = {
+			...nativeAdapter,
+			findController: mockFc,
+		};
+
+		const controller = new PdfMatchController(adapterWithFc, {
+			...DEFAULT_SETTINGS,
+			spaceAsWildcard: true,
+		});
+
+		await controller.search("however a");
+
+		const pageText = "However, if a color is automatically produced by color space conversion";
+		const matches = mockFc.match("however a", pageText, 0);
+
+		expect(matches).toBeDefined();
+		expect(matches).toHaveLength(1);
+		expect(matches[0]).toEqual({
+			index: 0,
+			length: 13, // "However, if a".length
+		});
+
+		// Check restoration on destroy
+		controller.destroy();
+		const restoredMatches = mockFc.match("test", "test page", 0);
+		expect(mockFc.match).toBeDefined();
+	});
+
+	it("returns full match phrase span for 'however, user agents m' on PDF text", async () => {
+		const mockFc = {
+			match: vi.fn((_q: any, _text: string, _pageIdx?: number) => [{ index: 0, length: 1 }]),
+		};
+		const adapterWithFc: PdfViewAdapter = {
+			...nativeAdapter,
+			findController: mockFc,
+		};
+
+		const controller = new PdfMatchController(adapterWithFc, {
+			...DEFAULT_SETTINGS,
+			spaceAsWildcard: true,
+		});
+
+		await controller.search("however, user agents m");
+
+		const pageText = "However, user agents must handle interpolation between legacy sRGB";
+		const matches = mockFc.match("however, user agents m", pageText, 0);
+
+		expect(matches).toBeDefined();
+		expect(matches).toHaveLength(1);
+		expect(matches[0]).toEqual({ index: 0, length: 22 }); // "However, user agents m".length
+
+		controller.destroy();
+	});
+});
 
 describe("PDF Match Controller", () => {
 	let mockAdapter: PdfViewAdapter;
@@ -260,5 +446,47 @@ describe("PDF Match Controller", () => {
 
 		controller.toggleDemandHighlights();
 		expect(controller.shouldShowAllMatches()).toBe(false);
+	});
+
+	it("renders only current match in on-demand mode and toggles DOM highlights on demand", async () => {
+		mockAdapter.getVisiblePageNumbers = () => [1, 2, 3];
+		mockAdapter.getPageViewport = () => ({
+			convertToViewportPoint: (x: number, y: number) => [x, 800 - y],
+			transform: [1, 0, 0, -1, 0, 800],
+			width: 600,
+			height: 800,
+		});
+
+		const controller = new PdfMatchController(mockAdapter, {
+			...DEFAULT_SETTINGS,
+			allMatchesDisplayMode: "on-demand",
+		});
+
+		await controller.search("algorithm");
+		expect(controller.state.matches).toHaveLength(3);
+
+		// Page 1 has the active match (activeIndex = 0)
+		const page1 = pageElements.get(1)!;
+		const page2 = pageElements.get(2)!;
+
+		// On-demand mode before toggle: only page 1 (active) has 1 highlight with is-current; page 2 has 0
+		const p1HighlightsInitial = page1.querySelectorAll(".incsearch-pdf-match");
+		const p2HighlightsInitial = page2.querySelectorAll(".incsearch-pdf-match");
+		expect(p1HighlightsInitial.length).toBe(1);
+		expect(p1HighlightsInitial[0].classList.contains("is-current")).toBe(true);
+		expect(p2HighlightsInitial.length).toBe(0);
+
+		// Toggle on demand (Ctrl+Enter)
+		controller.toggleDemandHighlights();
+
+		const p1HighlightsPeek = page1.querySelectorAll(".incsearch-pdf-match");
+		const p2HighlightsPeek = page2.querySelectorAll(".incsearch-pdf-match");
+		expect(p1HighlightsPeek.length).toBe(1);
+		expect(p2HighlightsPeek.length).toBe(1);
+
+		// Toggle off again
+		controller.toggleDemandHighlights();
+		const p2HighlightsOff = page2.querySelectorAll(".incsearch-pdf-match");
+		expect(p2HighlightsOff.length).toBe(0);
 	});
 });
