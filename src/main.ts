@@ -248,7 +248,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
 					if (input) {
 						input.value = this.settings.lastQuery;
-						input.select();
+						const len = input.value.length;
+						input.setSelectionRange(len, len);
 					}
 				}
 			} else {
@@ -327,7 +328,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
 					if (input) {
 						input.value = this.settings.lastQuery;
-						input.select();
+						const len = input.value.length;
+						input.setSelectionRange(len, len);
 					}
 				}
 			} else {

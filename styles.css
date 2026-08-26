@@ -21,12 +21,11 @@
 }
 
 .incsearch-match-exact.is-current {
-  background-color: var(--text-selection, #80b3ff) !important;
-  color: var(--text-normal, inherit) !important;
+  background-color: transparent !important;
+  color: inherit !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
   box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent));
   outline-offset: 1px;
-  font-weight: 600;
   border-radius: var(--radius-s, 4px);
 }
 
@@ -38,10 +37,11 @@
 }
 
 .incsearch-table-cell-match.is-current {
-  background-color: var(--text-selection, #80b3ff) !important;
-  color: var(--text-normal, inherit) !important;
+  background-color: transparent !important;
+  color: inherit !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
   outline-offset: 1px !important;
+  border-radius: var(--radius-s, 4px) !important;
 }
 
 .incsearch-callout-match {
@@ -54,12 +54,12 @@
 }
 
 .incsearch-callout-match.is-current {
-  background-color: var(--text-selection, #80b3ff) !important;
-  color: var(--text-normal, #000) !important;
+  background-color: transparent !important;
+  color: inherit !important;
   outline: 2px solid var(--interactive-accent, #705dcf) !important;
   box-shadow: 0 0 0 2px var(--interactive-accent, #705dcf) !important;
   outline-offset: 1px !important;
-  font-weight: 700 !important;
+  border-radius: var(--radius-s, 4px) !important;
   display: inline;
 }
 
@@ -218,15 +218,13 @@
 }
 
 .incsearch-pdf-match.is-current {
-  background-color: var(--text-selection, #80b3ff) !important;
-  opacity: 0.85 !important;
+  background-color: transparent !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
   box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
   border-radius: var(--radius-s, 2px) !important;
   position: absolute;
   pointer-events: none;
   z-index: 3 !important;
-  mix-blend-mode: normal !important;
 }
 
 /* PDF Native TextLayer Highlights (Built into Obsidian PDF) */

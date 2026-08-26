@@ -297,7 +297,8 @@ export function renderWidget(
 	});
 
 	input.focus();
-	input.select();
+	const len = input.value.length;
+	input.setSelectionRange(len, len);
 	updateCounter();
 }
 
@@ -469,6 +470,7 @@ export function renderPdfWidget(
 	});
 
 	input.focus();
-	input.select();
+	const len = input.value.length;
+	input.setSelectionRange(len, len);
 	updateCounter();
 }
