@@ -243,51 +243,106 @@
 }
 
 /* PDF Search Overlay & Matches */
-.incsearch-pdf-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 2;
-  overflow: hidden;
+/* PDF Text Layer Inline Highlights */
+
+/* Boost text layer opacity during active search */
+.incsearch-active-pdf .textLayer,
+.incsearch-active-pdf .text-layer {
+  opacity: 1 !important;
 }
 
-.incsearch-pdf-match {
-  background-color: var(--incsearch-secondary-fill);
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent);
-  opacity: 0.80;
-  border-radius: var(--radius-s, 2px);
-  position: absolute;
-  pointer-events: none;
-  mix-blend-mode: multiply;
-}
-
-.theme-dark .incsearch-pdf-match {
-  mix-blend-mode: screen;
-  opacity: 0.75;
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent);
-}
-
-.incsearch-pdf-match.is-current {
+/* Active / Current Match in PDF Text Layer:
+   Rendered via inline <mark class="incsearch-pdf-match is-current">.
+   Padding-top + negative margin-top lifts top by 2px to encompass ascenders (d, h, t, MetS, capitals).
+   Zero index drift, zero coordinate offset, crisp 2px rounded outline. */
+mark.incsearch-pdf-match.is-current,
+.textLayer mark.incsearch-pdf-match.is-current,
+.text-layer mark.incsearch-pdf-match.is-current {
+  position: static !important;
+  display: inline !important;
   background-color: transparent !important;
+  color: transparent !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
-  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
-  border-radius: var(--radius-s, 2px) !important;
-  position: absolute;
-  pointer-events: none;
+  box-shadow: none !important;
+  outline-offset: 0px !important;
+  border-radius: var(--radius-s, 3px) !important;
+  padding: 2px 1px 1px 1px !important;
+  margin: -2px -1px -1px -1px !important;
   z-index: 3 !important;
+  pointer-events: none !important;
+  font: inherit !important;
+  letter-spacing: inherit !important;
+  line-height: inherit !important;
+  vertical-align: baseline !important;
 }
 
-/* PDF Native TextLayer Highlights (Built into Obsidian PDF) */
-/* Hide non-selected highlights when allMatchesDisplayMode is off or on-demand without peek */
-.incsearch-pdf-hide-other-matches .textLayer .highlight:not(.selected):not(.current) {
+/* Secondary Match Highlights in PDF Text Layer:
+   Clean, smooth adaptive background tint with 1px border pill (no bottom line). */
+mark.incsearch-pdf-secondary,
+.textLayer mark.incsearch-pdf-secondary,
+.text-layer mark.incsearch-pdf-secondary {
+  position: static !important;
+  display: inline !important;
+  background-color: var(--incsearch-secondary-fill, rgba(112, 93, 207, 0.22)) !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, rgba(112, 93, 207, 0.50)) !important;
+  border-radius: var(--radius-s, 2px) !important;
+  color: transparent !important;
+  padding: 2px 0 1px 0 !important;
+  margin: -2px 0 -1px 0 !important;
+  pointer-events: none !important;
+  font: inherit !important;
+  letter-spacing: inherit !important;
+  line-height: inherit !important;
+  vertical-align: baseline !important;
+}
+
+.theme-dark mark.incsearch-pdf-secondary,
+.theme-dark .textLayer mark.incsearch-pdf-secondary,
+.theme-dark .text-layer mark.incsearch-pdf-secondary {
+  background-color: var(--incsearch-secondary-fill, rgba(185, 165, 255, 0.38)) !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, rgba(185, 165, 255, 0.76)) !important;
+}
+
+/* Underline Secondary Style */
+.incsearch-secondary-style-underline mark.incsearch-pdf-secondary,
+.incsearch-secondary-style-underline .textLayer mark.incsearch-pdf-secondary,
+.incsearch-secondary-style-underline .text-layer mark.incsearch-pdf-secondary {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  text-decoration: underline dotted var(--incsearch-secondary-edge, currentColor) !important;
+  text-decoration-thickness: 1.5px !important;
+  text-underline-offset: 2px !important;
+}
+
+/* Hide other highlights when allMatchesDisplayMode is off or on-demand without peek */
+.incsearch-pdf-hide-other-matches mark.incsearch-pdf-secondary,
+.incsearch-pdf-hide-other-matches .textLayer mark.incsearch-pdf-secondary,
+.incsearch-pdf-hide-other-matches .text-layer mark.incsearch-pdf-secondary {
   background-color: transparent !important;
   outline: none !important;
   box-shadow: none !important;
+  opacity: 0 !important;
+}
+
+/* Suppress PDF.js native .highlight background/outline so our inline <mark> provides the visuals */
+.textLayer .highlight,
+.textLayer span.highlight,
+.text-layer .highlight,
+.text-layer span.highlight {
+  background-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  border-radius: 0 !important;
+}
+
+/* Suppress blue selection overlay on text layer during incremental search */
+.incsearch-active-pdf ::selection,
+.incsearch-active-pdf .textLayer ::selection,
+.incsearch-active-pdf .text-layer ::selection,
+mark.incsearch-pdf-secondary::selection,
+mark.incsearch-pdf-match::selection {
+  background: transparent !important;
 }
 
 /* Settings Preview Box */

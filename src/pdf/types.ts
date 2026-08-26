@@ -76,3 +76,19 @@ export interface PdfSessionState {
 	scannedPages: number;
 	totalMatchesCount?: number;
 }
+
+export interface PdfViewportAnchor {
+	topPageNumber: number;
+	topPageY: number;
+	topPageX: number;
+	bottomPageNumber: number;
+	bottomPageY: number;
+	bottomPageX: number;
+}
+
+export interface PdfScrollPosition {
+	scrollTop: number;
+	scrollLeft: number;
+	pageNumber?: number;
+}
+

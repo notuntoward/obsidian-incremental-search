@@ -1,4 +1,4 @@
-import { MatchRect, PdfTextItem } from "./types";
+import { MatchRect, PdfTextItem, PdfViewportAnchor, PdfScrollPosition } from "./types";
 
 export interface PdfPageProxyAdapter {
 	pageNumber: number;
@@ -14,10 +14,14 @@ export interface PdfViewAdapter {
 	getTextLayerElement(pageNumber: number): HTMLElement | null;
 	getPageViewport(pageNumber: number): any;
 	getVisiblePageNumbers(): number[];
+	getViewportAnchor?(): PdfViewportAnchor;
+	getScrollPosition?(): PdfScrollPosition;
+	restoreScrollPosition?(pos: PdfScrollPosition): void;
 	on(event: string, handler: (...args: any[]) => void): () => void;
 	scrollToRect(pageNumber: number, rect?: MatchRect): void;
 	scrollPageIntoView(pageNumber: number): void;
 	findController?: any;
+	getActiveFindMatchInfo?(): { pageIndex: number; matchIndex: number } | null;
 	executeNativeFind?(command: {
 		query: string;
 		type?: string;
@@ -252,6 +256,29 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			return null;
 		},
 
+		getActiveFindMatchInfo(): { pageIndex: number; matchIndex: number } | null {
+			const child = (view as any)?.viewer?.child || (view as any)?.child;
+			const findController =
+				pdfViewer?.findController ||
+				child?.findController ||
+				child?.pdfViewer?.findController ||
+				(view as any)?.viewer?.findController ||
+				(view as any)?.findController;
+			if (findController) {
+				const sel = findController.selected || findController._selected;
+				if (
+					sel &&
+					typeof sel.pageIdx === "number" &&
+					typeof sel.matchIdx === "number" &&
+					sel.pageIdx >= 0 &&
+					sel.matchIdx >= 0
+				) {
+					return { pageIndex: sel.pageIdx, matchIndex: sel.matchIdx };
+				}
+			}
+			return null;
+		},
+
 		getVisiblePageNumbers(): number[] {
 			// Try pdfViewer visible pages API
 			try {
@@ -287,6 +314,81 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			}
 
 			return visibleNumbers;
+		},
+
+		getViewportAnchor(): PdfViewportAnchor {
+			const visible = this.getVisiblePageNumbers();
+			const topPageNumber = visible.length > 0 ? Math.min(...visible) : 1;
+			const bottomPageNumber = visible.length > 0 ? Math.max(...visible) : topPageNumber;
+
+			const containerRect = containerEl.getBoundingClientRect();
+			const topPageEl = this.getPageElement(topPageNumber);
+			const bottomPageEl = this.getPageElement(bottomPageNumber);
+
+			let topPageY = 0;
+			let topPageX = 0;
+			if (topPageEl) {
+				const topRect = topPageEl.getBoundingClientRect();
+				topPageY = Math.max(0, containerRect.top - topRect.top);
+				topPageX = Math.max(0, containerRect.left - topRect.left);
+			}
+
+			let bottomPageY = Infinity;
+			let bottomPageX = Infinity;
+			if (bottomPageEl) {
+				const bottomRect = bottomPageEl.getBoundingClientRect();
+				bottomPageY = Math.max(
+					0,
+					Math.min(bottomRect.height, containerRect.bottom - bottomRect.top)
+				);
+				bottomPageX = Math.max(
+					0,
+					Math.min(bottomRect.width, containerRect.right - bottomRect.left)
+				);
+			}
+
+			return {
+				topPageNumber,
+				topPageY,
+				topPageX,
+				bottomPageNumber,
+				bottomPageY,
+				bottomPageX,
+			};
+		},
+
+		getScrollPosition(): PdfScrollPosition {
+			const scrollContainer = getScrollContainer(containerEl);
+			const visible = this.getVisiblePageNumbers();
+			return {
+				scrollTop: scrollContainer.scrollTop || 0,
+				scrollLeft: scrollContainer.scrollLeft || 0,
+				pageNumber: visible.length > 0 ? visible[0] : 1,
+			};
+		},
+
+		restoreScrollPosition(pos: PdfScrollPosition) {
+			const scrollContainer = getScrollContainer(containerEl);
+			if (typeof scrollContainer.scrollTo === "function") {
+				scrollContainer.scrollTo({
+					top: pos.scrollTop,
+					left: pos.scrollLeft,
+					behavior: "smooth",
+				});
+			} else {
+				scrollContainer.scrollTop = pos.scrollTop;
+				scrollContainer.scrollLeft = pos.scrollLeft;
+			}
+			if (pos.pageNumber) {
+				const pageEl = this.getPageElement(pos.pageNumber);
+				if (
+					pageEl &&
+					typeof pageEl.scrollIntoView === "function" &&
+					Math.abs(scrollContainer.scrollTop - pos.scrollTop) > 50
+				) {
+					pageEl.scrollIntoView({ block: "nearest", inline: "nearest" });
+				}
+			}
 		},
 
 		on(event: string, handler: (...args: any[]) => void): () => void {
@@ -414,8 +516,30 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				(view as any)?.viewer?.findController ||
 				(view as any)?.findController;
 
+			if (findController) {
+				try {
+					findController._highlightAll = highlightAll;
+					findController.highlightAll = highlightAll;
+					if (findController.state) {
+						findController.state.highlightAll = highlightAll;
+					}
+				} catch {
+					// Ignore
+				}
+			}
+
 			if (eventBus && typeof eventBus.dispatch === "function") {
 				try {
+					try {
+						eventBus.dispatch("highlightallchange", { highlightAll });
+					} catch {
+						// Ignore
+					}
+					try {
+						eventBus.dispatch("findhighlightallchange", { highlightAll });
+					} catch {
+						// Ignore
+					}
 					eventBus.dispatch("find", {
 						type,
 						query,
@@ -433,6 +557,20 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 
 			if (findController && typeof findController.executeCommand === "function") {
 				try {
+					try {
+						findController.executeCommand("highlightallchange", {
+							highlightAll,
+						});
+					} catch {
+						// Ignore
+					}
+					try {
+						findController.executeCommand("findhighlightallchange", {
+							highlightAll,
+						});
+					} catch {
+						// Ignore
+					}
 					const cmd = type === "again" ? "findagain" : "find";
 					findController.executeCommand(cmd, {
 						query,
@@ -442,6 +580,11 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 						highlightAll,
 						findPrevious,
 					});
+					try {
+						findController._updateAllPages?.();
+					} catch {
+						// Ignore
+					}
 					return true;
 				} catch (e) {
 					console.error(

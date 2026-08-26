@@ -779,6 +779,7 @@ export function getOrComputeSecondaryStyle(
 	const key = getAppearanceCacheKey(settings);
 	const cached = appearanceCache.get(key);
 	if (cached) {
+		applySecondaryStyle(cached);
 		return cached;
 	}
 

@@ -1,6 +1,33 @@
 import { ItemMatchSpan, MatchRect, PageTextModel } from "./types";
 
 /**
+ * Extracts all text nodes inside a DOM tree into a single searchable string,
+ * keeping an exact 1:1 character index to Text node and character offset.
+ */
+interface DomCharMapping {
+	text: string;
+	chars: { node: Text; offset: number }[];
+}
+
+function extractDomCharMapping(container: Node): DomCharMapping {
+	const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+	let node = walker.nextNode() as Text | null;
+	let text = "";
+	const chars: { node: Text; offset: number }[] = [];
+
+	while (node) {
+		const nodeContent = node.textContent || "";
+		for (let i = 0; i < nodeContent.length; i++) {
+			chars.push({ node, offset: i });
+		}
+		text += nodeContent;
+		node = walker.nextNode() as Text | null;
+	}
+
+	return { text, chars };
+}
+
+/**
  * Computes bounding rectangles for match spans on a page.
  * Uses exact DOM Range measurements from PDF.js .textLayer spans if populated,
  * or falls back to PDF.js PageViewport transform matrices.
@@ -16,7 +43,7 @@ export function computeMatchGeometry(
 		return { rects: [] };
 	}
 
-	// If textLayer is available, measure exact DOM ranges from rendered browser font layout
+	// 1. If textLayer is available, measure exact DOM ranges from rendered browser font layout
 	if (textLayerElement && textLayerElement.children.length > 0) {
 		const domRects = computeDomRangeGeometry(
 			pageElement,
@@ -24,14 +51,16 @@ export function computeMatchGeometry(
 			itemSpans,
 			pageModel
 		);
-		if (domRects.length === itemSpans.length && domRects.length > 0) {
-			const allValid = domRects.every((dr) => dr.width >= 3 && dr.height >= 3);
-			if (allValid) {
-				return { rects: domRects };
-			}
+		if (
+			domRects.length === itemSpans.length &&
+			domRects.length > 0 &&
+			domRects.every((dr) => dr.width >= 3 && dr.height >= 3)
+		) {
+			return { rects: domRects };
 		}
 	}
 
+	// 2. Fallback to transform geometry if textLayer is not yet rendered
 	const transformRects = computeTransformGeometry(pageElement, itemSpans, pageModel, viewport);
 	return { rects: transformRects };
 }
@@ -96,37 +125,15 @@ function getTextNodeAndOffset(
 	root: Node,
 	targetOffset: number
 ): { node: Text; offset: number } | null {
-	const textNodes: Text[] = [];
-	if (root.nodeType === Node.TEXT_NODE) {
-		textNodes.push(root as Text);
-	} else {
-		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-		let n = walker.nextNode();
-		while (n) {
-			textNodes.push(n as Text);
-			n = walker.nextNode();
-		}
-	}
-
-	let accumulated = 0;
-	for (const tn of textNodes) {
-		const len = tn.textContent?.length || 0;
-		if (accumulated + len >= targetOffset) {
-			return { node: tn, offset: Math.max(0, targetOffset - accumulated) };
-		}
-		accumulated += len;
-	}
-
-	if (textNodes.length > 0) {
-		const last = textNodes[textNodes.length - 1];
-		return { node: last, offset: last.textContent?.length || 0 };
-	}
-
-	return null;
+	const mapping = extractDomCharMapping(root);
+	if (mapping.chars.length === 0) return null;
+	const idx = Math.max(0, Math.min(targetOffset, mapping.chars.length - 1));
+	return mapping.chars[idx] || null;
 }
 
 /**
- * Computes exact bounding rectangles using DOM Range on .textLayer span elements.
+ * Computes exact bounding rectangles using DOM Range on .textLayer span elements,
+ * normalized by current page zoom / CSS transforms.
  */
 function computeDomRangeGeometry(
 	pageElement: HTMLElement,
@@ -135,51 +142,90 @@ function computeDomRangeGeometry(
 	pageModel: PageTextModel
 ): MatchRect[] {
 	const pageRect = pageElement.getBoundingClientRect();
+	const scaleX = pageElement.offsetWidth > 0 ? pageRect.width / pageElement.offsetWidth : 1;
+	const scaleY = pageElement.offsetHeight > 0 ? pageRect.height / pageElement.offsetHeight : 1;
 	const domChildren = Array.from(textLayerElement.children) as HTMLElement[];
 	const resultRects: MatchRect[] = [];
+	let pageDomMapping: DomCharMapping | null = null;
 
 	for (const span of itemSpans) {
 		const item = pageModel.items[span.itemIndex];
 		if (!item || !item.str) continue;
 
-		// Map itemIndex to DOM element using item.domIndex
+		let rectsForSpan: MatchRect[] = [];
+
+		// 1. Try element-level match first
 		const targetDomIndex = item.domIndex ?? span.itemIndex;
 		const targetEl = findMatchingDomElement(domChildren, targetDomIndex, item.str);
-		if (!targetEl) {
-			// If element text doesn't match, abort DOM measurement to allow transform geometry fallback
-			return [];
-		}
+		if (targetEl) {
+			const elMapping = extractDomCharMapping(targetEl);
+			const totalLength = elMapping.chars.length;
+			const localStart = Math.max(0, Math.min(span.startOffset, totalLength));
+			const localEnd = Math.max(localStart, Math.min(span.endOffset, totalLength));
 
-		const totalLength = targetEl.textContent?.length ?? item.str.length;
-		const localStart = Math.max(0, Math.min(span.startOffset, totalLength));
-		const localEnd = Math.max(localStart, Math.min(span.endOffset, totalLength));
+			if (localStart < localEnd && localEnd <= elMapping.chars.length) {
+				const startChar = elMapping.chars[localStart];
+				const endChar = elMapping.chars[localEnd - 1];
+				try {
+					const range = document.createRange();
+					range.setStart(startChar.node, startChar.offset);
+					range.setEnd(endChar.node, endChar.offset + 1);
 
-		if (localStart === localEnd) continue;
-
-		const startPos = getTextNodeAndOffset(targetEl, localStart);
-		const endPos = getTextNodeAndOffset(targetEl, localEnd);
-		if (!startPos || !endPos) continue;
-
-		try {
-			const range = document.createRange();
-			range.setStart(startPos.node, startPos.offset);
-			range.setEnd(endPos.node, endPos.offset);
-
-			const clientRects = range.getClientRects();
-			for (let i = 0; i < clientRects.length; i++) {
-				const r = clientRects[i];
-				if (r.width > 0 && r.height > 0) {
-					resultRects.push({
-						left: Math.max(0, r.left - pageRect.left),
-						top: Math.max(0, r.top - pageRect.top),
-						width: r.width,
-						height: r.height,
-					});
+					const clientRects = range.getClientRects();
+					for (let i = 0; i < clientRects.length; i++) {
+						const r = clientRects[i];
+						if (r.width > 0 && r.height > 0) {
+							rectsForSpan.push({
+								left: Math.max(0, (r.left - pageRect.left) / scaleX),
+								top: Math.max(0, (r.top - pageRect.top) / scaleY),
+								width: Math.max(2, r.width / scaleX),
+								height: Math.max(2, r.height / scaleY),
+							});
+						}
+					}
+				} catch {
+					// Ignore DOM range errors
 				}
 			}
-		} catch {
-			// Ignore DOM range errors
 		}
+
+		// 2. If element-level match failed, search in the page-wide DOM text mapping
+		if (rectsForSpan.length === 0) {
+			if (!pageDomMapping) {
+				pageDomMapping = extractDomCharMapping(textLayerElement);
+			}
+
+			const targetSnippet = item.str.slice(span.startOffset, span.endOffset);
+			if (targetSnippet && pageDomMapping.text.length > 0) {
+				const foundIdx = pageDomMapping.text.indexOf(targetSnippet);
+				if (foundIdx !== -1 && foundIdx + targetSnippet.length <= pageDomMapping.chars.length) {
+					const startChar = pageDomMapping.chars[foundIdx];
+					const endChar = pageDomMapping.chars[foundIdx + targetSnippet.length - 1];
+					try {
+						const range = document.createRange();
+						range.setStart(startChar.node, startChar.offset);
+						range.setEnd(endChar.node, endChar.offset + 1);
+
+						const clientRects = range.getClientRects();
+						for (let i = 0; i < clientRects.length; i++) {
+							const r = clientRects[i];
+							if (r.width > 0 && r.height > 0) {
+								rectsForSpan.push({
+									left: Math.max(0, (r.left - pageRect.left) / scaleX),
+									top: Math.max(0, (r.top - pageRect.top) / scaleY),
+									width: Math.max(2, r.width / scaleX),
+									height: Math.max(2, r.height / scaleY),
+								});
+							}
+						}
+					} catch {
+						// Ignore DOM range errors
+					}
+				}
+			}
+		}
+
+		resultRects.push(...rectsForSpan);
 	}
 
 	return resultRects;
@@ -269,9 +315,10 @@ function computeTransformGeometry(
 
 		const subX1 = itemX + itemWidth * startFrac;
 		const subX2 = itemX + itemWidth * endFrac;
-		// PDF transform[5] is the font baseline. Glyphs extend below by ~0.2*h (descent) and above by ~0.85*h (ascent).
-		const subY1 = itemY - 0.2 * itemHeight;
-		const subY2 = itemY + 0.85 * itemHeight;
+		// PDF transform[5] is the font baseline. In standard PDF coordinates (+Y up),
+		// ascent is above baseline (+0.75 * itemHeight) and descent is below (-0.25 * itemHeight).
+		const subY1 = itemY - 0.25 * itemHeight;
+		const subY2 = itemY + 0.75 * itemHeight;
 
 		// 1. Check if viewport has convertToViewportPoint (standard PDF.js PageViewport API)
 		if (viewport && typeof viewport.convertToViewportPoint === "function") {
@@ -313,7 +360,7 @@ function computeTransformGeometry(
 			left: Math.max(0, subX1 * scaleX),
 			top: Math.max(0, pageHeight - subY2 * scaleY),
 			width: Math.max(2, (subX2 - subX1) * scaleX),
-			height: Math.max(2, itemHeight * scaleY),
+			height: Math.max(2, (subY2 - subY1) * scaleY),
 		});
 	}
 
