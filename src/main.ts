@@ -122,12 +122,6 @@ export default class IncrementalSearchPlugin extends Plugin {
 			checkCallback: (checking: boolean) => this.handleCommand(checking, "backward"),
 		});
 
-		this.addCommand({
-			id: "accept-match",
-			name: "Accept current incremental-search match",
-			checkCallback: (checking: boolean) => this.handleAcceptCommand(checking),
-		});
-
 		this.addSettingTab(new IncrementalSearchSettingTab(this.app, this));
 	}
 
@@ -203,8 +197,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 			return { type: "editor", editor: activeView.editor };
 		}
 
-		// 5. Fallback check for activeView of type View
-		const fallbackView = (this.app.workspace as any).getActiveViewOfType?.(View);
+		// 5. Fallback to activeLeaf on workspace
+		const fallbackView = this.app.workspace.getActiveViewOfType(View as any);
 		if (fallbackView && isPdfView(fallbackView)) {
 			return { type: "pdf", view: fallbackView };
 		}
@@ -213,41 +207,6 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 
 		return null;
-	}
-
-	handleAcceptCommand(checking: boolean): boolean {
-		if (this.pdfController) {
-			if (!checking) {
-				const widget = getActiveWidget();
-				const input = widget?.querySelector<HTMLInputElement>(".incsearch-input");
-				if (input?.value) {
-					this.settings.lastQuery = input.value;
-					void this.saveSettings();
-				}
-				this.pdfController.accept();
-				this.pdfController = null;
-				this.activePdfView = null;
-				removeWidget();
-			}
-			return true;
-		}
-
-		const target = this.getActiveTarget();
-		if (target?.type === "editor") {
-			// @ts-expect-error CodeMirror view is attached to editor.cm in Obsidian runtime
-			const view: EditorView | undefined = target.editor.cm;
-			if (view) {
-				const session = view.state.field(searchSessionField, false);
-				if (session) {
-					if (!checking) {
-						commitMatch(view, this);
-					}
-					return true;
-				}
-			}
-		}
-
-		return false;
 	}
 
 	handleCommand(checking: boolean, direction: SearchDirection, explicitEditor?: Editor): boolean {

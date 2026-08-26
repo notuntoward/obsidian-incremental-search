@@ -25,20 +25,19 @@ Users who keep their hands on the home row will appreciate this keyboard-driven 
 
 ---
 
-## Commands & Recommended Keybindings
+## Commands & Hotkeys
 
-The plugin registers three commands in Obsidian's Command Palette. **Commands are not mapped to default hotkeys out of the box** so they do not conflict with your existing keymap.
+The plugin registers two commands in Obsidian's Command Palette. **Commands are not mapped to default hotkeys out of the box** so they do not conflict with your existing keymap.
 
-| Command Name | Command ID | Description | Recommended Keybinding |
+| Command Name | Command ID | Description | Example Hotkeys |
 | :--- | :--- | :--- | :--- |
-| **Incremental Search: Forward** | `forward` | Starts/advances forward search from cursor | `Ctrl+S` (Windows/Linux) or `⌃S` / `⌥S` (macOS) |
-| **Incremental Search: Backward** | `backward` | Starts/advances backward search from cursor | `Ctrl+R` (Windows/Linux) or `⌃R` / `⌥R` (macOS) |
-| **Incremental Search: Accept current incremental-search match** | `accept-match` | Accepts current match and closes search (useful when Enter is set to find-next) | `Alt+Enter` |
+| **Incremental Search: Forward** | `forward` | Starts or advances forward search from cursor | `Ctrl+S` (Win/Linux) or `⌃S` / `⌥S` (macOS) |
+| **Incremental Search: Backward** | `backward` | Starts or advances backward search from cursor | `Ctrl+R` (Win/Linux) or `⌃R` / `⌥R` (macOS) |
 
 To configure these hotkeys in Obsidian:
 1. Open **Settings → Hotkeys**.
 2. Search for `Incremental Search`.
-3. Assign your preferred shortcuts to **Forward**, **Backward**, and **Accept current incremental-search match**.
+3. Assign your preferred shortcuts to **Forward** and **Backward**.
 
 ---
 
@@ -46,23 +45,23 @@ To configure these hotkeys in Obsidian:
 
 An incremental-search session can end in one of two ways:
 
-- **Accept** ends search at the current match.
-- **Cancel** returns to the selection and viewport that were active before search began.
+- **Accept** ends search at the current match and places the cursor there.
+- **Cancel** dismisses search and restores the selection and viewport that were active before search began.
 
-The **Search exit behavior** setting controls the meaning of `Enter` and `Esc` while incremental search is active:
+The **Search exit behavior** setting controls how `Enter` and `Esc` behave during search:
 
 | Behavior | `Enter` | `Esc` |
 | :--- | :--- | :--- |
-| **Emacs-style** (default) | Accept the current match and end search | Cancel search and restore the original selection and viewport |
-| **Obsidian-style** | Find the next match in the current direction | Accept the current match and end search |
+| **Emacs-style** (default) | Accept current match and end search | Cancel search and restore original position |
+| **Obsidian-style** | Find next match in current direction | Accept current match and end search |
 
-In either mode:
-- `Ctrl+S` searches forward and `Ctrl+R` searches backward.
-- `Shift+Enter` searches backward in Obsidian-style mode.
-- `Ctrl+Enter` (or `Cmd+Enter` on macOS) toggles all non-current match highlights on/off when **Highlight all matches** is set to **On demand**.
-- `Ctrl+G` cancels search and restores your origin position.
+### Active Search Controls
 
-The command **Accept current incremental-search match** always ends the active search at its current match, independent of the selected behavior. It has no default hotkey; assign one in **Settings → Hotkeys** if desired.
+While the search widget is active:
+- **Advance / Reverse**: Pressing your assigned forward/backward search hotkeys (or `F3` / `Shift+F3`) advances to the next or previous match. In Obsidian-style mode, `Enter` / `Shift+Enter` also cycles through matches.
+- **Toggle Highlights**: Pressing `Ctrl+Enter` (`Cmd+Enter` on macOS) toggles all non-current match highlights on/off when **Highlight all matches** is set to **On demand**.
+- **Cancel Search**: Pressing `Ctrl+G` (or `Esc` in Emacs-style mode) cancels search and returns you to your origin position.
+- **Dismiss**: Clicking outside the search widget or switching focus accepts the current position and closes the widget.
 
 ---
 
