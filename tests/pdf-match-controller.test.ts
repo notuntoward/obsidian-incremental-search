@@ -158,7 +158,10 @@ describe("PDF Match Controller", () => {
 			height: 800,
 		});
 
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+		const controller = new PdfMatchController(mockAdapter, {
+			...DEFAULT_SETTINGS,
+			allMatchesDisplayMode: "always",
+		});
 		await controller.search("algorithm");
 
 		// Page 2 match initially computed via fallback transform matrix
@@ -242,5 +245,20 @@ describe("PDF Match Controller", () => {
 		// Cancel should scroll back to origin page 1
 		controller.cancel();
 		expect(scrolledPage).toBe(1);
+	});
+
+	it("respects allMatchesDisplayMode and toggles demand highlights in PDF controller", async () => {
+		const controller = new PdfMatchController(mockAdapter, {
+			...DEFAULT_SETTINGS,
+			allMatchesDisplayMode: "on-demand",
+		});
+
+		expect(controller.shouldShowAllMatches()).toBe(false);
+
+		controller.toggleDemandHighlights();
+		expect(controller.shouldShowAllMatches()).toBe(true);
+
+		controller.toggleDemandHighlights();
+		expect(controller.shouldShowAllMatches()).toBe(false);
 	});
 });

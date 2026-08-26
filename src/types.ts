@@ -1,4 +1,19 @@
 export type SearchDirection = "forward" | "backward";
+export type AllMatchesDisplayMode = "always" | "on-demand" | "off";
+
+export function shouldShowAllMatches(
+	mode: AllMatchesDisplayMode = "on-demand",
+	isDemandPeekActive = false
+): boolean {
+	switch (mode) {
+		case "always":
+			return true;
+		case "on-demand":
+			return isDemandPeekActive;
+		case "off":
+			return false;
+	}
+}
 
 export interface MatchRange {
 	from: number;
@@ -21,7 +36,8 @@ export interface SearchSessionState {
 	matches: MatchRange[];
 	activeIndex: number;
 	originSelection: { anchor: number; head: number };
-	highlightAllMatches?: boolean;
+	allMatchesDisplayMode?: AllMatchesDisplayMode;
+	isDemandPeekActive?: boolean;
 }
 
 export type SearchExitBehavior = "emacs" | "obsidian";
@@ -32,7 +48,7 @@ export interface IncrementalSearchSettings {
 	fuzzyMode: boolean;
 	usePopupModal: boolean;
 	matchOnlyVisibleLinks: boolean;
-	highlightAllMatches: boolean;
+	allMatchesDisplayMode: AllMatchesDisplayMode;
 	searchExitBehavior: SearchExitBehavior;
 }
 
@@ -42,6 +58,6 @@ export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	fuzzyMode: true,
 	usePopupModal: false,
 	matchOnlyVisibleLinks: true,
-	highlightAllMatches: true,
+	allMatchesDisplayMode: "on-demand",
 	searchExitBehavior: "emacs",
 };

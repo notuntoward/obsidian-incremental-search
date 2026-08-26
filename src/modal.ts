@@ -9,6 +9,7 @@ import {
 	saveSessionQuery,
 	setSession,
 	restoreAutoUnfoldedStructures,
+	toggleDemandHighlights,
 } from "./session";
 
 export class IncrementalSearchSuggestModal extends SuggestModal<number> {
@@ -19,6 +20,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	observer: MutationObserver | null = null;
 	chosen: boolean = false;
 	selectedMatch: MatchRange | null = null;
+	modalKeyCleanup: (() => void) | null = null;
 
 	constructor(
 		app: App,
@@ -46,7 +48,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			this.plugin.settings.matchOnlyVisibleLinks,
 			linkCache,
 			false,
-			this.plugin.settings.highlightAllMatches
+			this.plugin.settings.allMatchesDisplayMode
 		);
 		const session = this.cm.state.field(searchSessionField, false);
 		if (!session || !session.matches || session.matches.length === 0) return [];
@@ -100,6 +102,31 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 	onOpen() {
 		super.onOpen();
+		this.scope.register(["Mod"], "Enter", (evt) => {
+			evt.preventDefault();
+			toggleDemandHighlights(this.cm);
+			return false;
+		});
+
+		const onGlobalKeyDown = (evt: KeyboardEvent) => {
+			const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+			const isEnter =
+				evt.key === "Enter" ||
+				evt.code === "Enter" ||
+				evt.code === "NumpadEnter" ||
+				evt.keyCode === 13;
+			if (isCtrlOrMeta && isEnter) {
+				evt.preventDefault();
+				evt.stopPropagation();
+				evt.stopImmediatePropagation();
+				toggleDemandHighlights(this.cm);
+			}
+		};
+		window.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+		this.modalKeyCleanup = () => {
+			window.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+		};
+
 		this.observer = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				if (mutation.type === "attributes" && mutation.attributeName === "class") {
@@ -123,6 +150,10 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 	onClose() {
 		super.onClose();
+		if (this.modalKeyCleanup) {
+			this.modalKeyCleanup();
+			this.modalKeyCleanup = null;
+		}
 		if (this.observer) {
 			this.observer.disconnect();
 			this.observer = null;

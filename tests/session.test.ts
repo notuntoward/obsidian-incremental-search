@@ -323,7 +323,7 @@ describe("session: searchHighlightPlugin decorations", () => {
     expect(decorationsEmpty.size).toBe(0);
   });
 
-  it("decorates all matches when highlightAllMatches is true, and only active match when false", () => {
+  it("decorates all matches when allMatchesDisplayMode is 'always', only active when 'off' or 'on-demand' (without peek), and all matches when 'on-demand' with peek active", () => {
     const session: SearchSessionState = {
       query: "cat",
       direction: "forward",
@@ -334,17 +334,111 @@ describe("session: searchHighlightPlugin decorations", () => {
       ],
       activeIndex: 1,
       originSelection: { anchor: 0, head: 0 },
-      highlightAllMatches: true,
+      allMatchesDisplayMode: "always",
     };
 
-    const decoAll = buildHighlightDecorations(session, [{ from: 0, to: 100 }]);
-    expect(decoAll.size).toBe(3);
+    // Mode "always" -> all 3 matches decorated
+    const decoAlways = buildHighlightDecorations(session, [{ from: 0, to: 100 }]);
+    expect(decoAlways.size).toBe(3);
 
-    const decoActiveOnly = buildHighlightDecorations(
-      { ...session, highlightAllMatches: false },
+    // Mode "off" -> only 1 active match decorated
+    const decoOff = buildHighlightDecorations(
+      { ...session, allMatchesDisplayMode: "off" },
       [{ from: 0, to: 100 }]
     );
-    expect(decoActiveOnly.size).toBe(1);
+    expect(decoOff.size).toBe(1);
+
+    // Mode "on-demand" without peek -> only 1 active match decorated
+    const decoOnDemandNormal = buildHighlightDecorations(
+      { ...session, allMatchesDisplayMode: "on-demand", isDemandPeekActive: false },
+      [{ from: 0, to: 100 }]
+    );
+    expect(decoOnDemandNormal.size).toBe(1);
+
+    // Mode "on-demand" with peek active -> all 3 matches decorated
+    const decoOnDemandPeeking = buildHighlightDecorations(
+      { ...session, allMatchesDisplayMode: "on-demand", isDemandPeekActive: true },
+      [{ from: 0, to: 100 }]
+    );
+    expect(decoOnDemandPeeking.size).toBe(3);
+  });
+});
+
+describe("session: demand toggle highlights", () => {
+  it("toggles isDemandPeekActive when in on-demand mode", async () => {
+    const { toggleDemandHighlights, searchSessionField, setSession } = await import("../src/session");
+
+    let currentSession: SearchSessionState | null = {
+      query: "cat",
+      direction: "forward",
+      matches: [{ from: 0, to: 3 }, { from: 10, to: 13 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+      allMatchesDisplayMode: "on-demand",
+      isDemandPeekActive: false,
+    };
+
+    const mockView = {
+      dom: document.createElement("div"),
+      state: {
+        field: (f: any) => (f === searchSessionField ? currentSession : null),
+        sliceDoc: () => "cat",
+      },
+      dispatch: (tr: any) => {
+        if (tr.effects) {
+          const effects = Array.isArray(tr.effects) ? tr.effects : [tr.effects];
+          for (const eff of effects) {
+            if (eff.is(setSession)) {
+              currentSession = eff.value;
+            }
+          }
+        }
+      },
+    } as any;
+
+    expect(currentSession?.isDemandPeekActive).toBe(false);
+
+    // Toggle on
+    toggleDemandHighlights(mockView);
+    expect(currentSession?.isDemandPeekActive).toBe(true);
+
+    // Toggle off
+    toggleDemandHighlights(mockView);
+    expect(currentSession?.isDemandPeekActive).toBe(false);
+  });
+
+  it("does not toggle isDemandPeekActive when not in on-demand mode", async () => {
+    const { toggleDemandHighlights, searchSessionField, setSession } = await import("../src/session");
+
+    let currentSession: SearchSessionState | null = {
+      query: "cat",
+      direction: "forward",
+      matches: [{ from: 0, to: 3 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+      allMatchesDisplayMode: "off",
+      isDemandPeekActive: false,
+    };
+
+    const mockView = {
+      dom: document.createElement("div"),
+      state: {
+        field: (f: any) => (f === searchSessionField ? currentSession : null),
+      },
+      dispatch: (tr: any) => {
+        if (tr.effects) {
+          const effects = Array.isArray(tr.effects) ? tr.effects : [tr.effects];
+          for (const eff of effects) {
+            if (eff.is(setSession)) {
+              currentSession = eff.value;
+            }
+          }
+        }
+      },
+    } as any;
+
+    toggleDemandHighlights(mockView);
+    expect(currentSession?.isDemandPeekActive).toBe(false);
   });
 });
 
@@ -605,7 +699,7 @@ describe("session: callout and fold auto-expansion and restoration", () => {
       matches,
       activeIndex: 0,
       originSelection: { anchor: 0, head: 0 },
-      highlightAllMatches: true,
+      allMatchesDisplayMode: "always",
     };
 
     const mockView = {

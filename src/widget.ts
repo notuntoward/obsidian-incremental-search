@@ -7,10 +7,12 @@ import {
 	cancelSession,
 	closeSession,
 	advance,
+	toggleDemandHighlights,
 } from "./session";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
 
 let activeWidgetEl: HTMLDivElement | null = null;
+let activeKeyCleanup: (() => void) | null = null;
 
 export function getActiveWidget(): HTMLDivElement | null {
 	return activeWidgetEl;
@@ -101,6 +103,10 @@ export function hideWidgetTableToast() {
  * Removes the currently active widget element from the DOM.
  */
 export function removeWidget(_view?: EditorView) {
+	if (activeKeyCleanup) {
+		activeKeyCleanup();
+		activeKeyCleanup = null;
+	}
 	if (activeWidgetEl) {
 		activeWidgetEl.remove();
 		activeWidgetEl = null;
@@ -111,6 +117,10 @@ export function removeWidget(_view?: EditorView) {
  * Sweeps all widget elements from the document (used during plugin unload/reload).
  */
 export function removeAllWidgets() {
+	if (activeKeyCleanup) {
+		activeKeyCleanup();
+		activeKeyCleanup = null;
+	}
 	document.querySelectorAll(".incsearch-widget").forEach((w) => w.remove());
 	if (activeWidgetEl) {
 		activeWidgetEl = null;
@@ -127,6 +137,25 @@ export function renderWidget(
 	initialDirection: SearchDirection
 ) {
 	removeWidget(view);
+
+	const onGlobalKeyDown = (evt: KeyboardEvent) => {
+		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+		const isEnter =
+			evt.key === "Enter" ||
+			evt.code === "Enter" ||
+			evt.code === "NumpadEnter" ||
+			evt.keyCode === 13;
+		if (isCtrlOrMeta && isEnter) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			evt.stopImmediatePropagation();
+			toggleDemandHighlights(view);
+		}
+	};
+	window.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+	activeKeyCleanup = () => {
+		window.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+	};
 
 	const container = view.dom.parentElement ?? view.dom;
 	const el = document.createElement("div");
@@ -179,7 +208,7 @@ export function renderWidget(
 			plugin.settings.matchOnlyVisibleLinks,
 			linkCache,
 			true, // isTyping
-			plugin.settings.highlightAllMatches
+			plugin.settings.allMatchesDisplayMode
 		);
 		updateCounter();
 	});
@@ -198,6 +227,11 @@ export function renderWidget(
 	input.addEventListener("keydown", (evt: KeyboardEvent) => {
 		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
 		const keyLower = evt.key.toLowerCase();
+		const isEnter =
+			evt.key === "Enter" ||
+			evt.code === "Enter" ||
+			evt.code === "NumpadEnter" ||
+			evt.keyCode === 13;
 
 		if (isCtrlOrMeta && (keyLower === "s" || keyLower === "r")) {
 			evt.preventDefault();
@@ -224,7 +258,14 @@ export function renderWidget(
 			return;
 		}
 
-		if (evt.key === "Enter") {
+		if (isCtrlOrMeta && isEnter) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			toggleDemandHighlights(view);
+			return;
+		}
+
+		if (isEnter) {
 			evt.preventDefault();
 			evt.stopPropagation();
 			if (plugin.settings.searchExitBehavior === "obsidian") {
@@ -265,6 +306,25 @@ export function renderPdfWidget(
 	onClose: () => void
 ) {
 	removeWidget();
+
+	const onGlobalKeyDown = (evt: KeyboardEvent) => {
+		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+		const isEnter =
+			evt.key === "Enter" ||
+			evt.code === "Enter" ||
+			evt.code === "NumpadEnter" ||
+			evt.keyCode === 13;
+		if (isCtrlOrMeta && isEnter) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			evt.stopImmediatePropagation();
+			controller.toggleDemandHighlights();
+		}
+	};
+	window.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+	activeKeyCleanup = () => {
+		window.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+	};
 
 	const container = controller.adapter.containerEl;
 	const el = document.createElement("div");
@@ -325,6 +385,11 @@ export function renderPdfWidget(
 	input.addEventListener("keydown", (evt: KeyboardEvent) => {
 		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
 		const keyLower = evt.key.toLowerCase();
+		const isEnter =
+			evt.key === "Enter" ||
+			evt.code === "Enter" ||
+			evt.code === "NumpadEnter" ||
+			evt.keyCode === 13;
 
 		if (isCtrlOrMeta && (keyLower === "s" || keyLower === "r")) {
 			evt.preventDefault();
@@ -356,7 +421,14 @@ export function renderPdfWidget(
 			return;
 		}
 
-		if (evt.key === "Enter") {
+		if (isCtrlOrMeta && isEnter) {
+			evt.preventDefault();
+			evt.stopPropagation();
+			controller.toggleDemandHighlights();
+			return;
+		}
+
+		if (isEnter) {
 			evt.preventDefault();
 			evt.stopPropagation();
 			if (plugin.settings.searchExitBehavior === "obsidian") {

@@ -1,4 +1,4 @@
-import { SearchDirection, MatchRange } from "../types";
+import { SearchDirection, MatchRange, AllMatchesDisplayMode } from "../types";
 
 export interface PdfTextItem {
 	str: string;
@@ -67,7 +67,8 @@ export interface PdfSessionState {
 	direction: SearchDirection;
 	matches: PdfMatch[];
 	activeIndex: number;
-	highlightAllMatches: boolean;
+	allMatchesDisplayMode: AllMatchesDisplayMode;
+	isDemandPeekActive: boolean;
 	isScanning: boolean;
 	totalPages: number;
 	scannedPages: number;

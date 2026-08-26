@@ -1,4 +1,4 @@
-import { SearchDirection, IncrementalSearchSettings } from "../types";
+import { SearchDirection, IncrementalSearchSettings, shouldShowAllMatches } from "../types";
 import { PdfMatch, PdfSessionState, PageTextModel, MatchRect } from "./types";
 import { PdfViewAdapter } from "./pdf-view-adapter";
 import { buildPageTextModel, mapNormalizedRangeToItemSpans } from "./text-model";
@@ -34,7 +34,8 @@ export class PdfMatchController {
 			direction: initialDirection,
 			matches: [],
 			activeIndex: 0,
-			highlightAllMatches: settings.highlightAllMatches,
+			allMatchesDisplayMode: settings.allMatchesDisplayMode,
+			isDemandPeekActive: false,
 			isScanning: false,
 			totalPages: adapter.numPages,
 			scannedPages: 0,
@@ -145,7 +146,7 @@ export class PdfMatchController {
 				query,
 				type: "",
 				findPrevious: direction === "backward",
-				highlightAll: this.state.highlightAllMatches,
+				highlightAll: this.shouldShowAllMatches(),
 			});
 			if (handled) {
 				this.state.isScanning = false;
@@ -244,8 +245,27 @@ export class PdfMatchController {
 		if (pageEl) {
 			const activeId = this.getActiveMatch()?.id ?? null;
 			const pageMatches = this.state.matches.filter((m) => m.pageNumber === pageNumber);
-			renderPageHighlights(pageEl, pageMatches, activeId, this.state.highlightAllMatches);
+			renderPageHighlights(pageEl, pageMatches, activeId, this.shouldShowAllMatches());
 		}
+	}
+
+	shouldShowAllMatches(): boolean {
+		return shouldShowAllMatches(
+			this.settings.allMatchesDisplayMode ?? "on-demand",
+			this.state.isDemandPeekActive
+		);
+	}
+
+	setDemandPeekActive(active: boolean) {
+		if (this.state.isDemandPeekActive === active) return;
+		this.state.isDemandPeekActive = active;
+		this.refreshAllVisibleHighlights();
+	}
+
+	toggleDemandHighlights() {
+		const mode = this.settings.allMatchesDisplayMode ?? "on-demand";
+		if (mode !== "on-demand") return;
+		this.setDemandPeekActive(!this.state.isDemandPeekActive);
 	}
 
 	refreshPageHighlights(pageNumber: number) {
@@ -254,7 +274,7 @@ export class PdfMatchController {
 
 		const pageMatches = this.state.matches.filter((m) => m.pageNumber === pageNumber);
 		if (pageMatches.length === 0) {
-			renderPageHighlights(pageEl, [], null, this.state.highlightAllMatches);
+			renderPageHighlights(pageEl, [], null, this.shouldShowAllMatches());
 			return;
 		}
 
@@ -272,7 +292,7 @@ export class PdfMatchController {
 		}
 
 		const activeId = this.getActiveMatch()?.id ?? null;
-		renderPageHighlights(pageEl, pageMatches, activeId, this.state.highlightAllMatches);
+		renderPageHighlights(pageEl, pageMatches, activeId, this.shouldShowAllMatches());
 	}
 
 	refreshAllVisibleHighlights() {
@@ -294,7 +314,7 @@ export class PdfMatchController {
 				query: this.state.query,
 				type: "again",
 				findPrevious: direction === "backward",
-				highlightAll: this.state.highlightAllMatches,
+				highlightAll: this.shouldShowAllMatches(),
 			});
 			if (handled) {
 				this.state.direction = direction;

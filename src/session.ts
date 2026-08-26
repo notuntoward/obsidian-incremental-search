@@ -2,7 +2,7 @@ import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet } from "@
 import { StateField, StateEffect, EditorSelection } from "@codemirror/state";
 import { unfoldEffect, foldEffect, foldedRanges } from "@codemirror/language";
 import { CachedMetadata } from "obsidian";
-import { MatchRange, SearchDirection, SearchSessionState } from "./types";
+import { MatchRange, SearchDirection, SearchSessionState, AllMatchesDisplayMode, shouldShowAllMatches } from "./types";
 import { computeMatches } from "./engine";
 import { removeWidget, showWidgetTableToast, hideWidgetTableToast } from "./widget";
 
@@ -13,6 +13,25 @@ interface AutoFoldedRange {
 
 let autoUnfoldedFoldRanges: AutoFoldedRange[] = [];
 let autoUnfoldedCallouts: HTMLElement[] = [];
+export function toggleDemandHighlights(view: EditorView) {
+	const session = view.state.field(searchSessionField, false);
+	if (!session) return;
+	const mode = session.allMatchesDisplayMode ?? "on-demand";
+	if (mode !== "on-demand") return;
+
+	const newActive = !(session.isDemandPeekActive ?? false);
+	view.dispatch({
+		effects: setSession.of({
+			...session,
+			allMatchesDisplayMode: mode,
+			isDemandPeekActive: newActive,
+		}),
+	});
+	const activeMatch = session.matches[session.activeIndex];
+	if (activeMatch) {
+		applyLivePreviewHighlights(view, activeMatch);
+	}
+}
 
 export function getAutoUnfoldedCallouts(): readonly HTMLElement[] {
 	return autoUnfoldedCallouts;
@@ -50,7 +69,10 @@ export function buildHighlightDecorations(
 	}
 
 	const positions: { from: number; to: number; mark: Decoration }[] = [];
-	const highlightAll = session.highlightAllMatches !== false;
+	const highlightAll = shouldShowAllMatches(
+		session.allMatchesDisplayMode ?? "on-demand",
+		session.isDemandPeekActive ?? false
+	);
 
 	for (const [i, m] of session.matches.entries()) {
 		const isCurrent = i === session.activeIndex;
@@ -507,13 +529,18 @@ export function restoreAutoUnfoldedStructures(view: EditorView, keepMatchPos?: n
 	clearAllCalloutHighlights(view);
 }
 
-function applyLivePreviewHighlights(view: EditorView, match: MatchRange) {
+export function applyLivePreviewHighlights(view: EditorView, match: MatchRange) {
 	clearAllCalloutHighlights(view);
 	clearAllTableHighlights(view);
 	hideWidgetTableToast();
 
 	const session = view.state.field(searchSessionField, false);
-	const highlightAll = session?.highlightAllMatches !== false;
+	const highlightAll = session
+		? shouldShowAllMatches(
+				session.allMatchesDisplayMode ?? "on-demand",
+				session.isDemandPeekActive ?? false
+		  )
+		: true;
 
 	const calloutRange = getCalloutRangeAtPos(view, match.from);
 	const currentCallout = getCalloutAtPos(view, match.from);
@@ -856,7 +883,8 @@ export function recomputeQuery(
 	matchOnlyVisibleLinks: boolean,
 	linkCache?: CachedMetadata,
 	isTyping = false,
-	highlightAllMatches = true
+	allMatchesDisplayMode: AllMatchesDisplayMode = "on-demand",
+	isDemandPeekActive?: boolean
 ) {
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
@@ -881,6 +909,11 @@ export function recomputeQuery(
 		}
 	}
 
+	const peekActive =
+		typeof isDemandPeekActive === "boolean"
+			? isDemandPeekActive
+			: (session.isDemandPeekActive ?? false);
+
 	view.dispatch({
 		effects: setSession.of({
 			...session,
@@ -888,7 +921,8 @@ export function recomputeQuery(
 			direction,
 			matches: allMatches,
 			activeIndex,
-			highlightAllMatches,
+			allMatchesDisplayMode,
+			isDemandPeekActive: peekActive,
 		}),
 	});
 

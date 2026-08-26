@@ -435,5 +435,29 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(plugin.pdfController).not.toBeNull();
     expect(plugin.activePdfView).toBe(mockPdfView);
   });
+
+  it("migrates legacy boolean highlightAllMatches: true to allMatchesDisplayMode: 'always'", async () => {
+    plugin.loadData = async () => ({
+      highlightAllMatches: true,
+    });
+    await plugin.loadSettings();
+    expect(plugin.settings.allMatchesDisplayMode).toBe("always");
+    expect(plugin.settings.highlightAllMatches).toBeUndefined();
+  });
+
+  it("migrates legacy boolean highlightAllMatches: false to allMatchesDisplayMode: 'off'", async () => {
+    plugin.loadData = async () => ({
+      highlightAllMatches: false,
+    });
+    await plugin.loadSettings();
+    expect(plugin.settings.allMatchesDisplayMode).toBe("off");
+    expect(plugin.settings.highlightAllMatches).toBeUndefined();
+  });
+
+  it("defaults allMatchesDisplayMode to 'on-demand' when not specified", async () => {
+    plugin.loadData = async () => ({});
+    await plugin.loadSettings();
+    expect(plugin.settings.allMatchesDisplayMode).toBe("on-demand");
+  });
 });
 

@@ -1,6 +1,6 @@
 import { Plugin, PluginSettingTab, App, Setting, Editor, View } from "obsidian";
 import { EditorView } from "@codemirror/view";
-import { IncrementalSearchSettings, DEFAULT_SETTINGS, SearchDirection } from "./types";
+import { IncrementalSearchSettings, DEFAULT_SETTINGS, SearchDirection, AllMatchesDisplayMode } from "./types";
 import {
 	searchSessionField,
 	searchHighlightPlugin,
@@ -361,7 +361,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					this.settings.matchOnlyVisibleLinks,
 					linkCache,
 					false,
-					this.settings.highlightAllMatches
+					this.settings.allMatchesDisplayMode
 				);
 				const widget = getActiveWidget();
 				if (widget) {
@@ -393,7 +393,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 				matches: [],
 				activeIndex: 0,
 				originSelection: { anchor: sel.anchor, head: sel.head },
-				highlightAllMatches: this.settings.highlightAllMatches,
+				allMatchesDisplayMode: this.settings.allMatchesDisplayMode,
+				isDemandPeekActive: false,
 			}),
 		});
 
@@ -420,7 +421,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					this.settings.matchOnlyVisibleLinks,
 					undefined,
 					false,
-					this.settings.highlightAllMatches
+					this.settings.allMatchesDisplayMode
 				);
 			}
 			renderWidget(view, this, startingQuery, direction);
@@ -428,7 +429,13 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const loaded = (await this.loadData()) || {};
+		if (loaded.allMatchesDisplayMode === undefined && typeof loaded.highlightAllMatches === "boolean") {
+			loaded.allMatchesDisplayMode = loaded.highlightAllMatches ? "always" : "off";
+		}
+		delete loaded.highlightAllMatches;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		await this.saveSettings();
 	}
 
 	async saveSettings() {
@@ -466,12 +473,17 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Highlight all matches")
-			.setDesc("Highlight all matches across the note or PDF, not just the active match.")
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.highlightAllMatches)
+			.setDesc(
+				"Controls when matches other than the current match are highlighted during incremental search."
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("always", "Always")
+					.addOption("on-demand", "On demand (Ctrl+Enter to toggle)")
+					.addOption("off", "Off")
+					.setValue(this.plugin.settings.allMatchesDisplayMode)
 					.onChange(async (value) => {
-						this.plugin.settings.highlightAllMatches = value;
+						this.plugin.settings.allMatchesDisplayMode = value as AllMatchesDisplayMode;
 						await this.plugin.saveSettings();
 					})
 			);

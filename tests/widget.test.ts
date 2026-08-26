@@ -310,4 +310,55 @@ describe("widget: counter & lifecycle", () => {
     expect(cancelled).toBe(false);
     expect(closed).toBe(true);
   });
+
+  it("handles Ctrl+Enter in editor widget to toggle demand highlights", () => {
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    sessionState = {
+      query: "word",
+      direction: "forward",
+      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+      allMatchesDisplayMode: "on-demand",
+      isDemandPeekActive: false,
+    };
+
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    // Press Ctrl+Enter -> toggles highlights on
+    const ctrlEnterEvent = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlEnterEvent);
+    expect(sessionState?.isDemandPeekActive).toBe(true);
+    expect(getActiveWidget()).not.toBeNull();
+
+    // Press Ctrl+Enter again -> toggles highlights off
+    const ctrlEnterEvent2 = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlEnterEvent2);
+    expect(sessionState?.isDemandPeekActive).toBe(false);
+    expect(getActiveWidget()).not.toBeNull();
+  });
+
+  it("handles Ctrl+Enter in PDF widget to toggle demand highlights", () => {
+    let toggled = false;
+    const mockController: any = {
+      adapter: { containerEl: document.createElement("div") },
+      settings: { allMatchesDisplayMode: "on-demand" },
+      state: { matches: [{ id: "m1" }], activeIndex: 0, direction: "forward", isScanning: false, query: "test", isDemandPeekActive: false },
+      search: async () => {},
+      toggleDemandHighlights: () => {
+        toggled = true;
+      },
+    };
+
+    renderPdfWidget(mockController, mockPlugin, "test", "forward", () => {});
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    const ctrlEnterEvent = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlEnterEvent);
+    expect(toggled).toBe(true);
+    expect(ctrlEnterEvent.defaultPrevented).toBe(true);
+  });
 });

@@ -13,9 +13,11 @@ Users who keep their hands on the home row will appreciate this keyboard-driven 
 ## Features
 
 - **Instant In-Document Highlighting:** Matches highlight directly in your document viewport with active match selection and full fuzzy-span background shading that automatically adapts to both light and dark themes.
+- **Tables, Callouts & PDF Support:** Seamless search and highlighting across Markdown body text, Live Preview tables (with table toast and row/column awareness), folded/unfolded callouts, and PDF view documents.
 - **Directional Incremental Navigation:** Search starts from your current cursor position. Triggering the search command again advances to the next or previous match in real time.
 - **Smart Space-as-Wildcard Matching:** Type search terms separated by spaces to match words across lines or paragraphs. Type extra spaces to match exact literal spaces.
 - **Search Memory & Double-Tap Recall:** Pressing a search hotkey twice in a row (without typing anything in between) immediately recalls and resumes your previous search query in the direction of the second keypress.
+- **On-Demand Highlight Toggling:** Keep focus on the active match, or press `Ctrl+Enter` (`Cmd+Enter` on macOS) to instantly toggle all match highlights across the document on or off.
 - **Clean Keyboard Dismissal & Search Exit Policy:**
   - `Enter` and `Escape` behavior is configurable via the **Search exit behavior** setting to suit both Emacs and Obsidian workflows.
   - Search widget disappears immediately upon exit.
@@ -31,7 +33,7 @@ The plugin registers three commands in Obsidian's Command Palette. **Commands ar
 | :--- | :--- | :--- | :--- |
 | **Incremental Search: Forward** | `forward` | Starts/advances forward search from cursor | `Ctrl+S` (Windows/Linux) or `⌃S` / `⌥S` (macOS) |
 | **Incremental Search: Backward** | `backward` | Starts/advances backward search from cursor | `Ctrl+R` (Windows/Linux) or `⌃R` / `⌥R` (macOS) |
-| **Incremental Search: Accept current incremental-search match** | `accept-match` | Accepts current match and closes search (useful when Enter is set to find-next) | `Alt+Enter` or `Ctrl+Enter` |
+| **Incremental Search: Accept current incremental-search match** | `accept-match` | Accepts current match and closes search (useful when Enter is set to find-next) | `Alt+Enter` |
 
 To configure these hotkeys in Obsidian:
 1. Open **Settings → Hotkeys**.
@@ -54,7 +56,11 @@ The **Search exit behavior** setting controls the meaning of `Enter` and `Esc` w
 | **Emacs-style** (default) | Accept the current match and end search | Cancel search and restore the original selection and viewport |
 | **Obsidian-style** | Find the next match in the current direction | Accept the current match and end search |
 
-In either mode, `Ctrl+S` searches forward and `Ctrl+R` searches backward. In Obsidian-style mode, `Shift+Enter` searches backward.
+In either mode:
+- `Ctrl+S` searches forward and `Ctrl+R` searches backward.
+- `Shift+Enter` searches backward in Obsidian-style mode.
+- `Ctrl+Enter` (or `Cmd+Enter` on macOS) toggles all non-current match highlights on/off when **Highlight all matches** is set to **On demand**.
+- `Ctrl+G` cancels search and restores your origin position.
 
 The command **Accept current incremental-search match** always ends the active search at its current match, independent of the selected behavior. It has no default hotkey; assign one in **Settings → Hotkeys** if desired.
 
@@ -87,10 +93,12 @@ This smart-case behavior applies across all search modes, including exact litera
 ## Settings
 
 - **Search exit behavior:** Choose between **Emacs-style** (`Enter` accepts, `Esc` cancels) and **Obsidian-style** (`Enter` finds next, `Esc` accepts).
-- **Highlight all matches:** When enabled (default), highlights all matching occurrences throughout the note, callouts, or PDF. When disabled, only the single active match is highlighted.
+- **Highlight all matches:** Controls when matches other than the active match are highlighted:
+  - **Always:** Highlight all matches throughout the note, tables, callouts, and PDF documents.
+  - **On demand (Ctrl+Enter to toggle)** (default): Show only the active match normally; press `Ctrl+Enter` (or `Cmd+Enter` on macOS) during search to toggle highlighting for all other matches on or off.
+  - **Off:** Highlight only the active match.
 - **Fuzzy matching:** Toggle between space-as-wildcard fuzzy matching and exact literal substring search.
 - **Match only visible part of links:** When enabled (default), ignores hidden URLs in Markdown links (`[text](url)`) and hidden destinations in aliased wikilinks (`[[destination|alias]]`).
-- **Double-tap window (ms):** The timeout window (default `600ms`) during which consecutive search hotkey presses recall the last search query.
 - **Use popup modal interface:** Option to use a center-screen modal picker with line numbers instead of the inline floating widget.
 
 ---
