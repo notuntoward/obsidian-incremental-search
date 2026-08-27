@@ -344,8 +344,12 @@ mark.incsearch-pdf-secondary,
   background-color: transparent !important;
   outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
   outline-offset: 1px !important;
-  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  box-shadow: none !important;
   border-radius: var(--radius-s, 4px) !important;
+}
+
+::highlight(incsearch-pdf-current-token) {
+  background-color: var(--incsearch-secondary-fill);
 }
 
 /* PDF.js can split one selected match at text-span boundaries. Clip only the
@@ -367,6 +371,18 @@ mark.incsearch-pdf-secondary,
 .incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-prev.incsearch-join-next,
 .incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-prev.incsearch-join-next {
   clip-path: inset(-4px 0);
+}
+
+.incsearch-active-pdf .textLayer .highlight.selected.incsearch-line-join-next,
+.incsearch-active-pdf .text-layer .highlight.selected.incsearch-line-join-next {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+.incsearch-active-pdf .textLayer .highlight.selected.incsearch-line-join-prev,
+.incsearch-active-pdf .text-layer .highlight.selected.incsearch-line-join-prev {
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
 }
 
 .incsearch-active-pdf.incsearch-secondary-style-underline .textLayer .highlight:not(.selected),

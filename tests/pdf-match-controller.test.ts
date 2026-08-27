@@ -6,7 +6,7 @@ import {
 	isMatchAtOrBeforeBottom,
 	findInitialPdfActiveIndex,
 	findPdfWildcardMatches,
-	joinNativeSelectedHighlightFragments,
+	decorateNativeSelectedHighlightFragments,
 } from "../src/pdf/pdf-match-controller";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
@@ -71,7 +71,7 @@ describe("findPdfWildcardMatches", () => {
 	});
 });
 
-describe("joinNativeSelectedHighlightFragments", () => {
+describe("decorateNativeSelectedHighlightFragments", () => {
 	it("joins touching same-line fragments but preserves real line breaks", () => {
 		const container = document.createElement("div");
 		container.innerHTML = `<div class="textLayer">
@@ -92,12 +92,94 @@ describe("joinNativeSelectedHighlightFragments", () => {
 			left: 10, right: 60, top: 35, bottom: 55, width: 50, height: 20,
 		} as DOMRect);
 
-		joinNativeSelectedHighlightFragments(container);
+		decorateNativeSelectedHighlightFragments(container);
 
 		expect(a.classList.contains("incsearch-join-next")).toBe(true);
 		expect(b.classList.contains("incsearch-join-prev")).toBe(true);
 		expect(b.classList.contains("incsearch-join-next")).toBe(false);
 		expect(c.classList.contains("incsearch-join-prev")).toBe(false);
+	});
+
+	it("highlights wildcard query tokens inside native selected fragments", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span class="highlight begin selected">plugin has </span>
+			<span class="highlight end selected">something like isearch and more</span>
+		</div>`;
+		const originalText = container.textContent;
+		const originalChildCounts = Array.from(
+			container.querySelectorAll(".highlight"),
+			(fragment) => fragment.childNodes.length
+		);
+		const registeredRanges: Range[][] = [];
+		const setHighlight = vi.fn();
+		Object.defineProperty(window, "CSS", {
+			configurable: true,
+			value: { highlights: { delete: vi.fn(), set: setHighlight } },
+		});
+		Object.defineProperty(window, "Highlight", {
+			configurable: true,
+			value: class {
+				constructor(...ranges: Range[]) {
+					registeredRanges.push(ranges);
+				}
+			},
+		});
+
+		decorateNativeSelectedHighlightFragments(
+			container,
+			"plugin some like isearch an"
+		);
+
+		expect(container.textContent).toBe(originalText);
+		expect(
+			Array.from(container.querySelectorAll(".highlight"), (fragment) => fragment.childNodes.length)
+		).toEqual(originalChildCounts);
+		expect(registeredRanges).toHaveLength(1);
+		expect(registeredRanges[0].map((range) => range.toString())).toEqual([
+			"plugin",
+			"some",
+			"like",
+			"isearch",
+			"an",
+		]);
+		expect(setHighlight).toHaveBeenCalledWith(
+			"incsearch-pdf-current-token",
+			expect.anything()
+		);
+	});
+
+	it("does not add wildcard token spans for literal double-space queries", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span class="highlight selected">and meta</span>
+		</div>`;
+
+		decorateNativeSelectedHighlightFragments(container, "and  meta");
+
+		expect(container.querySelector(".highlight")?.textContent).toBe("and meta");
+	});
+
+	it("flattens only the facing corners when neighboring line boxes touch", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span id="first" class="highlight begin selected">plugin</span>
+			<span id="second" class="highlight end selected"> something and</span>
+		</div>`;
+		const first = container.querySelector<HTMLElement>("#first")!;
+		const second = container.querySelector<HTMLElement>("#second")!;
+		first.getBoundingClientRect = () => ({
+			left: 640, right: 780, top: 100, bottom: 125, width: 140, height: 25,
+		} as DOMRect);
+		second.getBoundingClientRect = () => ({
+			left: 65, right: 650, top: 127, bottom: 152, width: 585, height: 25,
+		} as DOMRect);
+
+		decorateNativeSelectedHighlightFragments(container);
+
+		expect(first.classList.contains("incsearch-line-join-next")).toBe(true);
+		expect(second.classList.contains("incsearch-line-join-prev")).toBe(true);
+		expect(first.classList.contains("incsearch-join-next")).toBe(false);
 	});
 });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
 	renderPageHighlights,
 	clearPageHighlights,
@@ -107,11 +107,17 @@ describe("PDF Highlight Layer", () => {
 		overlay.classList.add("incsearch-pdf-native-current-overlay");
 		page.append(selected, overlay);
 		container.appendChild(page);
+		const deleteHighlight = vi.fn();
+		Object.defineProperty(window, "CSS", {
+			configurable: true,
+			value: { highlights: { delete: deleteHighlight, set: vi.fn() } },
+		});
 
 		clearAllPdfHighlights(container);
 
 		expect(container.querySelector(".incsearch-pdf-native-current-overlay")).toBeNull();
 		expect(container.querySelector(".highlight.selected")).toBeNull();
 		expect(page.classList.contains("incsearch-pdf-native-envelope-active")).toBe(false);
+		expect(deleteHighlight).toHaveBeenCalledWith("incsearch-pdf-current-token");
 	});
 });

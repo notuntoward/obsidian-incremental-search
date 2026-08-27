@@ -54,6 +54,28 @@ test("native PDF highlights match markdown current and secondary styling", async
 	expect(styles.pdfCurrent.outlineColor).toBe(styles.markdownCurrent.outlineColor);
 	expect(styles.pdfCurrent.outlineStyle).toBe(styles.markdownCurrent.outlineStyle);
 	expect(styles.pdfCurrent.outlineWidth).toBe(styles.markdownCurrent.outlineWidth);
+	expect(styles.pdfCurrent.boxShadow).toBe("none");
+});
+
+test("native wildcard token highlight uses markdown secondary fill", async ({ page }) => {
+	await page.setContent(`
+		<style>:root { --incsearch-secondary-fill: rgba(112, 93, 207, 0.22); }</style>
+		<span id="text">plugin gap</span>
+	`);
+	await page.addStyleTag({ path: path.resolve("styles.css") });
+	await page.evaluate(() => {
+		const highlights = CSS.highlights as unknown as Map<string, Highlight>;
+		const text = document.getElementById("text")!.firstChild!;
+		const range = document.createRange();
+		range.setStart(text, 0);
+		range.setEnd(text, 6);
+		highlights.set("incsearch-pdf-current-token", new Highlight(range));
+	});
+
+	expect(await page.evaluate(() =>
+		(CSS.highlights as unknown as Map<string, Highlight>).has("incsearch-pdf-current-token")
+	)).toBe(true);
+	expect(await page.locator("#text").evaluate((el) => el.childNodes.length)).toBe(1);
 });
 
 test("on-demand mode hides only native PDF secondary matches", async ({ page }) => {

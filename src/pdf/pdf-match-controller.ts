@@ -177,15 +177,95 @@ export function findPdfWildcardMatches(
 	return nonOverlappingMatches;
 }
 
-/** Joins touching PDF.js fragments from the selected match on the same visual line. */
-export function joinNativeSelectedHighlightFragments(containerEl: HTMLElement) {
+const PDF_TOKEN_HIGHLIGHT_NAME = "incsearch-pdf-current-token";
+
+interface CssHighlightRegistry {
+	delete(name: string): boolean;
+	set(name: string, highlight: unknown): void;
+}
+
+function getCssHighlightApi(doc: Document) {
+	const view = doc.defaultView as (Window & {
+		CSS?: typeof CSS & { highlights?: CssHighlightRegistry };
+		Highlight?: new (...ranges: Range[]) => unknown;
+	}) | null;
+	const registry = view?.CSS?.highlights;
+	return { Highlight: view?.Highlight, registry };
+}
+
+function clearNativeSelectedTokenHighlights(doc: Document) {
+	getCssHighlightApi(doc).registry?.delete(PDF_TOKEN_HIGHLIGHT_NAME);
+}
+
+function highlightNativeSelectedTokens(fragments: HTMLElement[], query: string) {
+	const { phraseSearch } = processPdfQuery(query, true);
+	if (phraseSearch) return;
+	const tokens = parseWildcardQuery(query, isCaseSensitive(query));
+	if (tokens.length <= 1) return;
+
+	const segments: { node: Text; start: number; end: number }[] = [];
+	let selectedText = "";
+	for (const fragment of fragments) {
+		const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+		let node = walker.nextNode();
+		while (node) {
+			const textNode = node as Text;
+			const start = selectedText.length;
+			selectedText += textNode.data;
+			segments.push({ node: textNode, start, end: selectedText.length });
+			node = walker.nextNode();
+		}
+	}
+
+	const haystack = isCaseSensitive(query) ? selectedText : selectedText.toLowerCase();
+	const ranges: { start: number; end: number }[] = [];
+	let searchStart = 0;
+	for (const token of tokens) {
+		const start = haystack.indexOf(token, searchStart);
+		if (start === -1) return;
+		ranges.push({ start, end: start + token.length });
+		searchStart = start + token.length;
+	}
+
+	const highlightRanges: Range[] = [];
+	for (const segment of segments) {
+		const segmentRanges = ranges
+			.filter((range) => range.start < segment.end && range.end > segment.start)
+			.sort((a, b) => a.start - b.start);
+		for (const tokenRange of segmentRanges) {
+			const start = Math.max(tokenRange.start, segment.start) - segment.start;
+			const end = Math.min(tokenRange.end, segment.end) - segment.start;
+			const range = segment.node.ownerDocument.createRange();
+			range.setStart(segment.node, start);
+			range.setEnd(segment.node, end);
+			highlightRanges.push(range);
+		}
+	}
+
+	const { Highlight, registry } = getCssHighlightApi(fragments[0]?.ownerDocument ?? document);
+	if (Highlight && registry && highlightRanges.length > 0) {
+		registry.set(PDF_TOKEN_HIGHLIGHT_NAME, new Highlight(...highlightRanges));
+	}
+}
+
+/** Styles selected PDF.js fragments without replacing their native geometry. */
+export function decorateNativeSelectedHighlightFragments(
+	containerEl: HTMLElement,
+	query = ""
+) {
+	clearNativeSelectedTokenHighlights(containerEl.ownerDocument);
 	const fragments = Array.from(
 		containerEl.querySelectorAll<HTMLElement>(
 			".textLayer .highlight.selected, .text-layer .highlight.selected"
 		)
 	);
 	for (const fragment of fragments) {
-		fragment.classList.remove("incsearch-join-prev", "incsearch-join-next");
+		fragment.classList.remove(
+			"incsearch-join-prev",
+			"incsearch-join-next",
+			"incsearch-line-join-prev",
+			"incsearch-line-join-next"
+		);
 	}
 
 	for (let i = 0; i < fragments.length - 1; i++) {
@@ -210,8 +290,20 @@ export function joinNativeSelectedHighlightFragments(containerEl: HTMLElement) {
 		) {
 			current.classList.add("incsearch-join-next");
 			next.classList.add("incsearch-join-prev");
+			continue;
+		}
+
+		const verticalGap = nextRect.top - currentRect.bottom;
+		const horizontalOverlap =
+			Math.min(currentRect.right, nextRect.right) -
+			Math.max(currentRect.left, nextRect.left);
+		if (verticalGap >= 0 && verticalGap <= 4 && horizontalOverlap >= 0) {
+			current.classList.add("incsearch-line-join-next");
+			next.classList.add("incsearch-line-join-prev");
 		}
 	}
+
+	highlightNativeSelectedTokens(fragments, query);
 }
 
 export class PdfMatchController {
@@ -309,7 +401,10 @@ export class PdfMatchController {
 	private setupEventListeners() {
 		const refreshNativeFragmentJoins = () => {
 			window.requestAnimationFrame(() => {
-				joinNativeSelectedHighlightFragments(this.adapter.containerEl);
+				decorateNativeSelectedHighlightFragments(
+					this.adapter.containerEl,
+					this.state.query
+				);
 			});
 		};
 
