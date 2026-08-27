@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   updateWidgetCounter,
+  updatePdfWidgetCounter,
   removeWidget,
   removeAllWidgets,
   getActiveWidget,
   renderWidget,
   renderPdfWidget,
+  renderSearchWidget,
+  createMarkdownSessionController,
+  createPdfSessionController,
+  SearchSessionController,
   setFocusGuard,
 } from "../src/widget";
 import { SearchSessionState } from "../src/types";
@@ -570,4 +575,234 @@ describe("widget: focus-guard regression", () => {
     expect(closed).toBe(true);
   });
 });
+
+describe("widget: unified SearchSessionController & adapters", () => {
+  it("createMarkdownSessionController returns correct counter state when session is empty or active", () => {
+    let sessionState: SearchSessionState | null = null;
+    const mockView: any = {
+      state: { field: () => sessionState },
+      dom: { parentElement: document.createElement("div") },
+    };
+    const mockPlugin: any = {
+      app: { workspace: { getActiveFile: () => null }, metadataCache: { getFileCache: () => null } },
+      settings: { spaceAsWildcard: true, matchOnlyVisibleLinks: true, allMatchesDisplayMode: "off" },
+      saveSettings: async () => {},
+    };
+
+    const ctrl = createMarkdownSessionController(mockView, mockPlugin);
+    expect(ctrl.containerEl).toBe(mockView.dom.parentElement);
+
+    // Empty session
+    expect(ctrl.getCounterState()).toEqual({
+      current: 0,
+      total: 0,
+      direction: "forward",
+      inTable: false,
+    });
+
+    // Active session with 3 matches, match 1 active, in table
+    sessionState = {
+      query: "hello",
+      direction: "backward",
+      matches: [
+        { from: 0, to: 5, inTable: false },
+        { from: 10, to: 15, inTable: true },
+        { from: 20, to: 25, inTable: false },
+      ],
+      activeIndex: 1,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    expect(ctrl.getCounterState()).toEqual({
+      current: 2,
+      total: 3,
+      direction: "backward",
+      inTable: true,
+    });
+  });
+
+  it("createPdfSessionController handles streaming totalMatchesCount and state correctly", () => {
+    let accepted = false;
+    let cancelled = false;
+    let closed = false;
+    const mockController: any = {
+      adapter: { containerEl: document.createElement("div") },
+      state: {
+        matches: [{ id: "m1" }],
+        activeIndex: 0,
+        direction: "forward",
+        isScanning: false,
+        query: "pdf query",
+        totalMatchesCount: undefined,
+      },
+      search: async () => {},
+      advance: () => {},
+      toggleDemandHighlights: () => {},
+      accept: () => { accepted = true; },
+      cancel: () => { cancelled = true; },
+      onStateChange: null,
+    };
+    const mockPlugin: any = {
+      settings: { lastQuery: "" },
+      saveSettings: async () => {},
+    };
+
+    const ctrl = createPdfSessionController(mockController, mockPlugin, () => { closed = true; });
+    expect(ctrl.containerEl).toBe(mockController.adapter.containerEl);
+
+    // Initial state: 1 match
+    expect(ctrl.getCounterState()).toEqual({
+      current: 1,
+      total: 1,
+      direction: "forward",
+      isScanning: false,
+      inTable: false,
+    });
+
+    // Streaming state: totalMatchesCount set
+    mockController.state.totalMatchesCount = 42;
+    mockController.state.activeIndex = 5;
+    expect(ctrl.getCounterState()).toEqual({
+      current: 6,
+      total: 42,
+      direction: "forward",
+      isScanning: false,
+      inTable: false,
+    });
+
+    // 0 matches found with totalMatchesCount = 0
+    mockController.state.totalMatchesCount = 0;
+    expect(ctrl.getCounterState()).toEqual({
+      current: 0,
+      total: 0,
+      direction: "forward",
+      isScanning: false,
+      inTable: false,
+    });
+
+    // Accept saves lastQuery and calls onClose
+    ctrl.accept();
+    expect(accepted).toBe(true);
+    expect(mockPlugin.settings.lastQuery).toBe("pdf query");
+    expect(closed).toBe(true);
+
+    // Cancel saves lastQuery and calls onClose
+    closed = false;
+    ctrl.cancel();
+    expect(cancelled).toBe(true);
+    expect(closed).toBe(true);
+
+    // onStateChange setter/getter works
+    let stateFired = false;
+    ctrl.onStateChange = () => { stateFired = true; };
+    expect(ctrl.onStateChange).not.toBeNull();
+    mockController.onStateChange?.(mockController.state);
+    expect(stateFired).toBe(true);
+  });
+
+  it("renderSearchWidget directly works with a custom SearchSessionController", () => {
+    let advancedDir: string | null = null;
+    let queryInput = "";
+    let accepted = false;
+    let cancelled = false;
+    let toggled = false;
+
+    const mockCtrl: SearchSessionController = {
+      containerEl: document.createElement("div"),
+      getCounterState: () => ({
+        current: queryInput ? 1 : 0,
+        total: queryInput ? 5 : 0,
+        direction: "forward",
+        inTable: false,
+      }),
+      onInput: (q: string) => { queryInput = q; },
+      advance: (dir) => { advancedDir = dir; },
+      toggleDemandHighlights: () => { toggled = true; },
+      accept: () => { accepted = true; removeWidget(); },
+      cancel: () => { cancelled = true; removeWidget(); },
+    };
+
+    const settings: any = {
+      searchExitBehavior: "emacs",
+    };
+
+    renderSearchWidget(mockCtrl, settings, "", "forward");
+    const widget = getActiveWidget();
+    expect(widget).not.toBeNull();
+
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+    const counter = widget?.querySelector(".incsearch-counter");
+    expect(counter?.textContent).toBe("0/0");
+
+    // Type query -> triggers onInput & updates counter
+    input.value = "custom";
+    input.dispatchEvent(new Event("input"));
+    expect(queryInput).toBe("custom");
+    expect(counter?.textContent).toBe("1/5");
+
+    // Advance via Ctrl+S
+    const ctrlS = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlS);
+    expect(advancedDir).toBe("forward");
+
+    // Toggle demand via Ctrl+Enter
+    const ctrlEnter = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(ctrlEnter);
+    expect(toggled).toBe(true);
+
+    // Accept via Enter in Emacs mode
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(enter);
+    expect(accepted).toBe(true);
+    expect(getActiveWidget()).toBeNull();
+  });
+
+  it("updateWidgetCounter supports both SearchSessionController and EditorView overloads", () => {
+    const container = document.createElement("div");
+    const mockCtrl: SearchSessionController = {
+      containerEl: container,
+      getCounterState: () => ({
+        current: 3,
+        total: 10,
+        direction: "backward",
+        inTable: true,
+      }),
+      onInput: () => {},
+      advance: () => {},
+      toggleDemandHighlights: () => {},
+      accept: () => {},
+      cancel: () => {},
+    };
+
+    renderSearchWidget(mockCtrl, { searchExitBehavior: "emacs" } as any, "", "backward");
+    const widget = getActiveWidget();
+    const counter = widget?.querySelector(".incsearch-counter");
+    const dir = widget?.querySelector(".incsearch-dir");
+    const tableIcon = widget?.querySelector(".incsearch-table-icon") as HTMLElement;
+
+    // Passing SearchSessionController directly
+    updateWidgetCounter(mockCtrl);
+    expect(counter?.textContent).toBe("3/10");
+    expect(dir?.textContent).toBe("▲");
+    expect(tableIcon.style.display).toBe("inline-flex");
+
+    // updatePdfWidgetCounter convenience alias
+    const mockPdfCtrl: any = {
+      state: {
+        matches: [{ id: "1" }],
+        activeIndex: 0,
+        direction: "forward",
+        isScanning: false,
+        query: "x",
+        totalMatchesCount: undefined,
+      },
+    };
+    updatePdfWidgetCounter(mockPdfCtrl);
+    expect(counter?.textContent).toBe("1/1");
+    expect(dir?.textContent).toBe("▼");
+
+    removeWidget();
+  });
+});
+
 
