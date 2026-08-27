@@ -71,25 +71,19 @@ test("on-demand mode hides only native PDF secondary matches", async ({ page }) 
 	await expect(page.locator("#current")).toHaveCSS("opacity", "1");
 });
 
-test("native current envelope replaces per-fragment outlines", async ({ page }) => {
+test("joined native current fragments clip only their internal edges", async ({ page }) => {
 	await page.setContent(`
 		<div class="incsearch-active-pdf">
-			<div class="page incsearch-pdf-native-envelope-active">
-				<div class="textLayer">
-					<span id="selected" class="highlight selected">current</span>
-				</div>
-				<svg class="incsearch-pdf-native-current-overlay">
-					<g class="incsearch-pdf-native-current-tokens"><rect id="token" /></g>
-					<g class="incsearch-pdf-native-current-envelope"><path id="envelope" /></g>
-				</svg>
+			<div class="textLayer">
+				<span id="begin" class="highlight begin selected incsearch-join-next">evaluation</span>
+				<span id="end" class="highlight end selected incsearch-join-prev">Disc</span>
+				<span id="next-line" class="highlight end selected">next line</span>
 			</div>
 		</div>
 	`);
 	await page.addStyleTag({ path: path.resolve("styles.css") });
 
-	await expect(page.locator("#selected")).toHaveCSS("outline-style", "none");
-	await expect(page.locator(".incsearch-pdf-native-current-overlay")).toHaveCSS("pointer-events", "none");
-	await expect(page.locator("#token")).toHaveCSS("fill", "rgba(112, 93, 207, 0.22)");
-	await expect(page.locator("#envelope")).toHaveCSS("fill", "none");
-	await expect(page.locator("#envelope")).toHaveCSS("stroke-width", "2px");
+	await expect(page.locator("#begin")).toHaveCSS("clip-path", "inset(-4px 0px -4px -4px)");
+	await expect(page.locator("#end")).toHaveCSS("clip-path", "inset(-4px -4px -4px 0px)");
+	await expect(page.locator("#next-line")).toHaveCSS("clip-path", "none");
 });

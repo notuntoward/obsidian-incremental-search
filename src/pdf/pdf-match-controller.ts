@@ -177,209 +177,40 @@ export function findPdfWildcardMatches(
 	return nonOverlappingMatches;
 }
 
-interface NativeHighlightRect {
-	left: number;
-	top: number;
-	right: number;
-	bottom: number;
-	width: number;
-	height: number;
-}
-
-function groupNativeHighlightLines(rects: NativeHighlightRect[]): NativeHighlightRect[] {
-	const lines: NativeHighlightRect[] = [];
-	for (const rect of rects.sort((a, b) => a.top - b.top || a.left - b.left)) {
-		const line = lines.find((candidate) => {
-			const overlap = Math.min(candidate.bottom, rect.bottom) - Math.max(candidate.top, rect.top);
-			return overlap >= Math.min(candidate.height, rect.height) * 0.6;
-		});
-		if (line) {
-			line.left = Math.min(line.left, rect.left);
-			line.top = Math.min(line.top, rect.top);
-			line.right = Math.max(line.right, rect.right);
-			line.bottom = Math.max(line.bottom, rect.bottom);
-			line.width = line.right - line.left;
-			line.height = line.bottom - line.top;
-		} else {
-			lines.push({ ...rect });
-		}
-	}
-	return lines.sort((a, b) => a.top - b.top);
-}
-
-function getNativeTokenRects(fragments: HTMLElement[], query: string): DOMRect[] {
-	const tokens = parseWildcardQuery(query, isCaseSensitive(query));
-	if (tokens.length <= 1) return [];
-
-	const segments: { node: Text; start: number; end: number }[] = [];
-	let selectedText = "";
-	for (const fragment of fragments) {
-		const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
-		let node = walker.nextNode();
-		while (node) {
-			const textNode = node as Text;
-			const start = selectedText.length;
-			selectedText += textNode.data;
-			segments.push({ node: textNode, start, end: selectedText.length });
-			node = walker.nextNode();
-		}
-	}
-
-	const haystack = isCaseSensitive(query) ? selectedText : selectedText.toLowerCase();
-	const tokenRanges: { start: number; end: number }[] = [];
-	let searchStart = 0;
-	for (const token of tokens) {
-		const start = haystack.indexOf(token, searchStart);
-		if (start === -1) return [];
-		tokenRanges.push({ start, end: start + token.length });
-		searchStart = start + token.length;
-	}
-
-	const rects: DOMRect[] = [];
-	for (const token of tokenRanges) {
-		for (const segment of segments) {
-			const start = Math.max(token.start, segment.start);
-			const end = Math.min(token.end, segment.end);
-			if (start >= end) continue;
-			const range = document.createRange();
-			range.setStart(segment.node, start - segment.start);
-			range.setEnd(segment.node, end - segment.start);
-			if (typeof range.getClientRects === "function") {
-				rects.push(...Array.from(range.getClientRects()));
-			}
-		}
-	}
-	return rects;
-}
-
-function groupTouchingNativeHighlightLines(
-	lines: NativeHighlightRect[]
-): NativeHighlightRect[][] {
-	const groups: NativeHighlightRect[][] = [];
-	const strokeReach = 1;
-	for (const line of lines) {
-		const group = groups[groups.length - 1];
-		const previous = group?.[group.length - 1];
-		const verticalGap = previous ? line.top - previous.bottom : Number.POSITIVE_INFINITY;
-		const horizontalOverlap = previous
-			? Math.min(previous.right, line.right) - Math.max(previous.left, line.left)
-			: Number.NEGATIVE_INFINITY;
-		if (previous && verticalGap <= strokeReach * 2 && horizontalOverlap >= 0) {
-			group.push(line);
-		} else {
-			groups.push([line]);
-		}
-	}
-	return groups;
-}
-
-function buildNativeEnvelopePath(lines: NativeHighlightRect[]): string {
-	const commands: string[] = [];
-	for (const sourceGroup of groupTouchingNativeHighlightLines(lines)) {
-		const group = sourceGroup.map((line) => ({ ...line }));
-		for (let i = 0; i < group.length - 1; i++) {
-			const boundary = (group[i].bottom + group[i + 1].top) / 2;
-			group[i].bottom = boundary;
-			group[i + 1].top = boundary;
-		}
-		commands.push(`M ${group[0].left} ${group[0].top}`);
-		commands.push(`L ${group[0].right} ${group[0].top}`);
-		for (let i = 0; i < group.length; i++) {
-			const line = group[i];
-			commands.push(`L ${line.right} ${line.bottom}`);
-			if (i < group.length - 1) {
-				commands.push(`L ${group[i + 1].right} ${line.bottom}`);
-			}
-		}
-		commands.push(`L ${group[group.length - 1].left} ${group[group.length - 1].bottom}`);
-		for (let i = group.length - 1; i > 0; i--) {
-			commands.push(
-				`L ${group[i].left} ${group[i].top}`,
-				`L ${group[i - 1].left} ${group[i].top}`
-			);
-		}
-		commands.push(`L ${group[0].left} ${group[0].top}`);
-		commands.push("Z");
-	}
-	return commands.join(" ");
-}
-
-/**
- * Recreates markdown's wildcard current-match treatment from PDF.js-native
- * selected fragments: one multiline silhouette plus emphasized query tokens.
- */
-export function renderNativeCurrentMatchEnvelope(containerEl: HTMLElement, query: string) {
-	containerEl
-		.querySelectorAll(".incsearch-pdf-native-current-overlay")
-		.forEach((overlay) => overlay.remove());
-	containerEl
-		.querySelectorAll(".incsearch-pdf-native-envelope-active")
-		.forEach((page) => page.classList.remove("incsearch-pdf-native-envelope-active"));
-
+/** Joins touching PDF.js fragments from the selected match on the same visual line. */
+export function joinNativeSelectedHighlightFragments(containerEl: HTMLElement) {
 	const fragments = Array.from(
 		containerEl.querySelectorAll<HTMLElement>(
 			".textLayer .highlight.selected, .text-layer .highlight.selected"
 		)
 	);
-	const fragmentsByPage = new Map<HTMLElement, HTMLElement[]>();
 	for (const fragment of fragments) {
-		const page = fragment.closest<HTMLElement>(".page, [data-page-number]");
-		if (!page) continue;
-		const pageFragments = fragmentsByPage.get(page) ?? [];
-		pageFragments.push(fragment);
-		fragmentsByPage.set(page, pageFragments);
+		fragment.classList.remove("incsearch-join-prev", "incsearch-join-next");
 	}
 
-	for (const [page, pageFragments] of fragmentsByPage) {
-		const pageRect = page.getBoundingClientRect();
-		if (pageRect.width <= 0 || pageRect.height <= 0) continue;
-		const fragmentRects = pageFragments
-			.map((fragment) => fragment.getBoundingClientRect())
-			.filter((rect) => rect.width > 0 && rect.height > 0)
-			.map((rect) => ({
-				left: rect.left - pageRect.left,
-				top: rect.top - pageRect.top,
-				right: rect.right - pageRect.left,
-				bottom: rect.bottom - pageRect.top,
-				width: rect.width,
-				height: rect.height,
-			}));
-		if (fragmentRects.length === 0) continue;
+	for (let i = 0; i < fragments.length - 1; i++) {
+		const current = fragments[i];
+		const next = fragments[i + 1];
+		const currentRect = current.getBoundingClientRect();
+		const nextRect = next.getBoundingClientRect();
+		const verticalOverlap =
+			Math.min(currentRect.bottom, nextRect.bottom) -
+			Math.max(currentRect.top, nextRect.top);
+		const minHeight = Math.min(currentRect.height, nextRect.height);
+		const edgeGap = Math.min(
+			Math.abs(nextRect.left - currentRect.right),
+			Math.abs(currentRect.left - nextRect.right)
+		);
+		const joinTolerance = Math.max(4, minHeight * 0.75);
 
-		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-		svg.classList.add("incsearch-pdf-native-current-overlay");
-		svg.setAttribute("viewBox", `0 0 ${pageRect.width} ${pageRect.height}`);
-		svg.setAttribute("aria-hidden", "true");
-
-		const tokenGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-		tokenGroup.classList.add("incsearch-pdf-native-current-tokens");
-		for (const rect of getNativeTokenRects(pageFragments, query)) {
-			const tokenRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-			tokenRect.setAttribute("x", `${rect.left - pageRect.left - 1}`);
-			tokenRect.setAttribute("y", `${rect.top - pageRect.top - 1}`);
-			tokenRect.setAttribute("width", `${rect.width + 2}`);
-			tokenRect.setAttribute("height", `${rect.height + 2}`);
-			tokenRect.setAttribute("rx", "2");
-			tokenGroup.appendChild(tokenRect);
+		if (
+			minHeight > 0 &&
+			verticalOverlap >= minHeight * 0.6 &&
+			edgeGap <= joinTolerance
+		) {
+			current.classList.add("incsearch-join-next");
+			next.classList.add("incsearch-join-prev");
 		}
-		svg.appendChild(tokenGroup);
-
-		const envelopeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-		envelopeGroup.classList.add("incsearch-pdf-native-current-envelope");
-		const lines = groupNativeHighlightLines(fragmentRects).map((line) => ({
-			...line,
-			left: line.left - 2,
-			right: line.right + 2,
-			top: line.top - 1,
-			bottom: line.bottom + 1,
-		}));
-		const envelopePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-		envelopePath.setAttribute("d", buildNativeEnvelopePath(lines));
-		envelopePath.setAttribute("vector-effect", "non-scaling-stroke");
-		envelopeGroup.appendChild(envelopePath);
-		svg.appendChild(envelopeGroup);
-		page.appendChild(svg);
-		page.classList.add("incsearch-pdf-native-envelope-active");
 	}
 }
 
@@ -476,9 +307,9 @@ export class PdfMatchController {
 	}
 
 	private setupEventListeners() {
-		const refreshNativeCurrentMatch = () => {
+		const refreshNativeFragmentJoins = () => {
 			window.requestAnimationFrame(() => {
-				renderNativeCurrentMatchEnvelope(this.adapter.containerEl, this.state.query);
+				joinNativeSelectedHighlightFragments(this.adapter.containerEl);
 			});
 		};
 
@@ -488,13 +319,13 @@ export class PdfMatchController {
 			if (typeof pageNumber === "number") {
 				this.refreshPageHighlights(pageNumber);
 			}
-			refreshNativeCurrentMatch();
+			refreshNativeFragmentJoins();
 		});
 		this.unsubscribers.push(unsubTextLayerRendered);
 
 		const unsubTextLayerMatches = this.adapter.on(
 			"updatetextlayermatches",
-			refreshNativeCurrentMatch
+			refreshNativeFragmentJoins
 		);
 		this.unsubscribers.push(unsubTextLayerMatches);
 
@@ -537,7 +368,7 @@ export class PdfMatchController {
 				this.state.activeIndex = clampIndex(current, total);
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
-				refreshNativeCurrentMatch();
+				refreshNativeFragmentJoins();
 			}
 		});
 		this.unsubscribers.push(unsubFindCount);
@@ -548,7 +379,7 @@ export class PdfMatchController {
 				this.state.activeIndex = clampIndex(current, total);
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
-				refreshNativeCurrentMatch();
+				refreshNativeFragmentJoins();
 			}
 		});
 		this.unsubscribers.push(unsubFindState);
