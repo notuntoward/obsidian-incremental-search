@@ -28,6 +28,8 @@ import { updateResolvedOutlineColor } from "./utils/colors";
 import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/adaptive-highlight";
 import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
+import { clearAllPdfHighlights } from "./pdf/highlight-layer";
+import { clearSecondaryHighlights } from "./pdf/text-layer-highlighter";
 
 export * from "./types";
 export * from "./engine";
@@ -120,6 +122,19 @@ export default class IncrementalSearchPlugin extends Plugin {
 				}
 				if (leaf?.view && isPdfView(leaf.view)) {
 					removeWidget();
+					// Clear any residue highlights left behind by previous sessions
+					const adapter = createPdfViewAdapter(leaf.view);
+					if (adapter) {
+						clearSecondaryHighlights(adapter.containerEl);
+						clearAllPdfHighlights(adapter.containerEl);
+						if (adapter.executeNativeFind) {
+							adapter.executeNativeFind({
+								query: "",
+								type: "find",
+								highlightAll: false,
+							});
+						}
+					}
 				}
 			})
 		);

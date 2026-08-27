@@ -5,6 +5,8 @@ import {
 	isMatchAtOrAfterTop,
 	isMatchAtOrBeforeBottom,
 	findInitialPdfActiveIndex,
+	findPdfWildcardMatches,
+	joinNativeSelectedHighlightFragments,
 } from "../src/pdf/pdf-match-controller";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
@@ -36,6 +38,69 @@ describe("processPdfQuery (Space-as-wildcard for PDF)", () => {
 	});
 });
 
+describe("findPdfWildcardMatches", () => {
+	it("keeps wildcard token sequences within PDF.js line boundaries", () => {
+		const pageContent = [
+			"PEDro criteria apply across intervention modalities.",
+			"interventions, for which PEDro is widely accepted.",
+			"instrument across all intervention types was preferred.",
+			"exercise modality and intensity were analyzed.",
+		].join("\n");
+
+		const matches = findPdfWildcardMatches(pageContent, "intervention modalit", false);
+
+		expect(matches).toHaveLength(1);
+		expect(pageContent.slice(matches[0].from, matches[0].to)).toBe(
+			"intervention modalit"
+		);
+	});
+
+	it("skips distant first tokens after PDF.js removes visual line boundaries", () => {
+		const pageContent = [
+			"contributors to heterogeneity, particularly caloric restriction",
+			"populations. To address this, primary analyses were conducted",
+			"x".repeat(300),
+			"compensatory behaviors to better understand long-term relevance",
+		].join(" ");
+
+		const matches = findPdfWildcardMatches(pageContent, "to better", false);
+
+		expect(matches).toHaveLength(1);
+		const matchedText = pageContent.slice(matches[0].from, matches[0].to);
+		expect(matchedText).toBe("to better");
+	});
+});
+
+describe("joinNativeSelectedHighlightFragments", () => {
+	it("joins touching same-line fragments but preserves real line breaks", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span id="a" class="highlight begin selected"></span>
+			<span id="b" class="highlight middle selected"></span>
+			<span id="c" class="highlight end selected"></span>
+		</div>`;
+		const a = container.querySelector<HTMLElement>("#a")!;
+		const b = container.querySelector<HTMLElement>("#b")!;
+		const c = container.querySelector<HTMLElement>("#c")!;
+		a.getBoundingClientRect = () => ({
+			left: 10, right: 50, top: 10, bottom: 30, width: 40, height: 20,
+		} as DOMRect);
+		b.getBoundingClientRect = () => ({
+			left: 60, right: 100, top: 10, bottom: 30, width: 40, height: 20,
+		} as DOMRect);
+		c.getBoundingClientRect = () => ({
+			left: 10, right: 60, top: 35, bottom: 55, width: 50, height: 20,
+		} as DOMRect);
+
+		joinNativeSelectedHighlightFragments(container);
+
+		expect(a.classList.contains("incsearch-join-next")).toBe(true);
+		expect(b.classList.contains("incsearch-join-prev")).toBe(true);
+		expect(b.classList.contains("incsearch-join-next")).toBe(false);
+		expect(c.classList.contains("incsearch-join-prev")).toBe(false);
+	});
+});
+
 describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 	let nativeAdapter: PdfViewAdapter;
 	let containerEl: HTMLDivElement;
@@ -63,18 +128,18 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 		};
 	});
 
-	it("delegates search to native find and applies CSS class in on-demand mode", async () => {
+	it("delegates literal search to native find and applies CSS class in on-demand mode", async () => {
 		const controller = new PdfMatchController(nativeAdapter, {
 			...DEFAULT_SETTINGS,
 			allMatchesDisplayMode: "on-demand",
 			spaceAsWildcard: true,
 		});
 
-		await controller.search("quick fox");
+		await controller.search("algorithm");
 
 		expect(nativeFindCommands).toHaveLength(1);
-		expect(nativeFindCommands[0].query).toBe("quick fox");
-		expect(nativeFindCommands[0].phraseSearch).toBe(false); // multi-token wildcard
+		expect(nativeFindCommands[0].query).toBe("algorithm");
+		expect(nativeFindCommands[0].phraseSearch).toBe(true);
 		expect(nativeFindCommands[0].highlightAll).toBe(false);
 
 		// Container has CSS class to hide non-selected native highlights until peeked
@@ -88,6 +153,46 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 		// Press Ctrl+Enter again -> hide other matches
 		controller.toggleDemandHighlights();
 		expect(containerEl.classList.contains("incsearch-pdf-hide-other-matches")).toBe(true);
+	});
+
+	it("feeds markdown wildcard ranges to native PDF find and keeps native navigation", async () => {
+		const text = "Third, despite the advantages. Third, despite an issue.";
+		const originalMatch = vi.fn((_query: any, _pageContent: string, _pageIndex: number) => [
+			{ index: 99, length: 1 },
+		]);
+		const findController = { match: originalMatch };
+		const adapter: PdfViewAdapter = {
+			...nativeAdapter,
+			findController,
+		};
+		const controller = new PdfMatchController(adapter, {
+			...DEFAULT_SETTINGS,
+			spaceAsWildcard: true,
+			allMatchesDisplayMode: "always",
+		});
+
+		await controller.search("third, despite a");
+
+		expect(nativeFindCommands).toHaveLength(1);
+		expect(nativeFindCommands[0]).toMatchObject({
+			query: "third, despite a",
+			phraseSearch: false,
+			highlightAll: true,
+		});
+		expect(findController.match("third, despite a", text, 0)).toEqual([
+			{ index: 0, length: 20 },
+			{ index: text.lastIndexOf("Third"), length: 16 },
+		]);
+
+		controller.advance("forward");
+		expect(nativeFindCommands[1]).toMatchObject({
+			type: "again",
+			query: "third, despite a",
+			findPrevious: false,
+		});
+
+		controller.destroy();
+		expect(findController.match).toBe(originalMatch);
 	});
 
 	it("delegates double-space literal phrase to native find with phraseSearch: true", async () => {
@@ -166,64 +271,6 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 		expect(nativeFindCommands).toHaveLength(1);
 		expect(nativeFindCommands[0].query).toBe("MetS");
 		expect(nativeFindCommands[0].highlightAll).toBe(true);
-
-		controller.destroy();
-	});
-
-	it("hooks findController.match for true space-as-wildcard gap matching ('however a' -> 'However, if a')", async () => {
-		const mockFc = {
-			match: vi.fn((_q: any, _text: string, _pageIdx?: number) => [{ index: 0, length: 1 }]),
-		};
-		const adapterWithFc: PdfViewAdapter = {
-			...nativeAdapter,
-			findController: mockFc,
-		};
-
-		const controller = new PdfMatchController(adapterWithFc, {
-			...DEFAULT_SETTINGS,
-			spaceAsWildcard: true,
-		});
-
-		await controller.search("however a");
-
-		const pageText = "However, if a color is automatically produced by color space conversion";
-		const matches = mockFc.match("however a", pageText, 0);
-
-		expect(matches).toBeDefined();
-		expect(matches).toHaveLength(1);
-		expect(matches[0]).toEqual({
-			index: 0,
-			length: 13, // "However, if a".length
-		});
-
-		// Check restoration on destroy
-		controller.destroy();
-		const restoredMatches = mockFc.match("test", "test page", 0);
-		expect(mockFc.match).toBeDefined();
-	});
-
-	it("returns full match phrase span for 'however, user agents m' on PDF text", async () => {
-		const mockFc = {
-			match: vi.fn((_q: any, _text: string, _pageIdx?: number) => [{ index: 0, length: 1 }]),
-		};
-		const adapterWithFc: PdfViewAdapter = {
-			...nativeAdapter,
-			findController: mockFc,
-		};
-
-		const controller = new PdfMatchController(adapterWithFc, {
-			...DEFAULT_SETTINGS,
-			spaceAsWildcard: true,
-		});
-
-		await controller.search("however, user agents m");
-
-		const pageText = "However, user agents must handle interpolation between legacy sRGB";
-		const matches = mockFc.match("however, user agents m", pageText, 0);
-
-		expect(matches).toBeDefined();
-		expect(matches).toHaveLength(1);
-		expect(matches[0]).toEqual({ index: 0, length: 22 }); // "However, user agents m".length
 
 		controller.destroy();
 	});

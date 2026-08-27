@@ -317,24 +317,67 @@ mark.incsearch-pdf-secondary,
 /* Hide other highlights when allMatchesDisplayMode is off or on-demand without peek */
 .incsearch-pdf-hide-other-matches mark.incsearch-pdf-secondary,
 .incsearch-pdf-hide-other-matches .textLayer mark.incsearch-pdf-secondary,
-.incsearch-pdf-hide-other-matches .text-layer mark.incsearch-pdf-secondary {
+.incsearch-pdf-hide-other-matches .text-layer mark.incsearch-pdf-secondary,
+.incsearch-pdf-hide-other-matches .textLayer .highlight:not(.selected),
+.incsearch-pdf-hide-other-matches .text-layer .highlight:not(.selected) {
   background-color: transparent !important;
   outline: none !important;
   box-shadow: none !important;
   opacity: 0 !important;
 }
 
-/* Suppress PDF.js native .highlight background/outline so our inline <mark> provides the visuals */
-.textLayer .highlight,
-.textLayer span.highlight,
-.text-layer .highlight,
-.text-layer span.highlight {
-  background-color: transparent !important;
-  outline: none !important;
-  box-shadow: none !important;
+/* Native PDF.js matches use the same visual language as markdown matches. */
+.incsearch-active-pdf .textLayer .highlight,
+.incsearch-active-pdf .text-layer .highlight {
+  --highlight-bg-color: var(--incsearch-secondary-fill) !important;
+  --highlight-selected-bg-color: transparent !important;
+  background-color: var(--incsearch-secondary-fill) !important;
   color: transparent !important;
-  border-radius: 0 !important;
+  border-radius: var(--radius-s, 2px) !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
+              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent) !important;
+  opacity: 1;
 }
+
+.incsearch-active-pdf .textLayer .highlight.selected,
+.incsearch-active-pdf .text-layer .highlight.selected {
+  background-color: transparent !important;
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  outline-offset: 1px !important;
+  box-shadow: 0 0 0 2px var(--incsearch-current-outline-resolved, var(--interactive-accent)) !important;
+  border-radius: var(--radius-s, 4px) !important;
+}
+
+/* PDF.js can split one selected match at text-span boundaries. Clip only the
+   touching internal edges; fragments on different visual lines remain boxed. */
+.incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-next,
+.incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-next {
+  clip-path: inset(-4px 0 -4px -4px);
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+.incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-prev,
+.incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-prev {
+  clip-path: inset(-4px -4px -4px 0);
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
+.incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-prev.incsearch-join-next,
+.incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-prev.incsearch-join-next {
+  clip-path: inset(-4px 0);
+}
+
+.incsearch-active-pdf.incsearch-secondary-style-underline .textLayer .highlight:not(.selected),
+.incsearch-active-pdf.incsearch-secondary-style-underline .text-layer .highlight:not(.selected) {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  text-decoration: underline dotted var(--incsearch-secondary-edge, currentColor) !important;
+  text-decoration-thickness: 1.5px !important;
+  text-underline-offset: 2px !important;
+}
+
 
 /* Suppress blue selection overlay on text layer during incremental search */
 .incsearch-active-pdf ::selection,

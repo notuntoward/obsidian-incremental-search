@@ -97,6 +97,59 @@ describe("PDF View Adapter", () => {
 		expect(adapter).toBeNull();
 	});
 
+	it("dispatches repeated find commands on the active find controller event bus", () => {
+		const wrapperDispatch = vi.fn();
+		const findDispatch = vi.fn();
+		const findEventBus = {
+			dispatch: findDispatch,
+			on: vi.fn(),
+			off: vi.fn(),
+		};
+		const findController = {
+			_eventBus: findEventBus,
+			match: vi.fn(),
+			state: {},
+		};
+		const mockView = {
+			getViewType: () => "pdf",
+			contentEl: document.createElement("div"),
+			viewer: {
+				child: {
+					eventBus: { dispatch: wrapperDispatch },
+					pdfViewer: {
+						pdfViewer: {
+							pdfDocument: { numPages: 1 },
+							pagesCount: 1,
+							findController,
+						},
+					},
+				},
+			},
+		};
+
+		const adapter = createPdfViewAdapter(mockView);
+		const countHandler = vi.fn();
+		adapter?.on("updatefindmatchescount", countHandler);
+		adapter?.executeNativeFind?.({
+			query: "algorithm",
+			type: "again",
+			findPrevious: true,
+			highlightAll: true,
+		});
+
+		expect(findEventBus.on).toHaveBeenCalledWith("updatefindmatchescount", countHandler);
+		expect(findDispatch).toHaveBeenCalledWith(
+			"find",
+			expect.objectContaining({
+				type: "again",
+				query: "algorithm",
+				findPrevious: true,
+			})
+		);
+		expect(findDispatch).toHaveBeenCalledTimes(1);
+		expect(wrapperDispatch).not.toHaveBeenCalled();
+	});
+
 	it("computes viewport anchor and restores scroll position", () => {
 		const containerEl = document.createElement("div");
 		// Mock container bounding rect (viewport: y=100 to y=600)

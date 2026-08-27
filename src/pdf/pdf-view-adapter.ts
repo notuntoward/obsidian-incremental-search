@@ -177,6 +177,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		child?.pdfViewer?.findController ||
 		(view as any)?.viewer?.findController ||
 		(view as any)?.findController;
+	const findEventBus = findController?._eventBus || findController?.eventBus || eventBus;
 
 	return {
 		numPages,
@@ -393,13 +394,13 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 
 		on(event: string, handler: (...args: any[]) => void): () => void {
 			const unsubs: (() => void)[] = [];
-			if (eventBus && typeof eventBus.on === "function") {
+			if (findEventBus && typeof findEventBus.on === "function") {
 				try {
-					eventBus.on(event, handler);
+					findEventBus.on(event, handler);
 					unsubs.push(() => {
 						try {
-							if (typeof eventBus.off === "function") {
-								eventBus.off(event, handler);
+							if (typeof findEventBus.off === "function") {
+								findEventBus.off(event, handler);
 							}
 						} catch {
 							// Ignore
@@ -528,19 +529,9 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				}
 			}
 
-			if (eventBus && typeof eventBus.dispatch === "function") {
+			if (findEventBus && typeof findEventBus.dispatch === "function") {
 				try {
-					try {
-						eventBus.dispatch("highlightallchange", { highlightAll });
-					} catch {
-						// Ignore
-					}
-					try {
-						eventBus.dispatch("findhighlightallchange", { highlightAll });
-					} catch {
-						// Ignore
-					}
-					eventBus.dispatch("find", {
+					findEventBus.dispatch("find", {
 						type,
 						query,
 						phraseSearch,

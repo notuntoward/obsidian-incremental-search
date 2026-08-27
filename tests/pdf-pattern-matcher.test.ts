@@ -33,6 +33,25 @@ describe("PDF Pattern Matcher", () => {
 		expect(matches[0].chars).toHaveLength(3);
 	});
 
+	it("matches three-token PDF wildcards without promoting standalone tokens", () => {
+		const items: PdfTextItem[] = [
+			{ str: "Third, despite the advantages. Despite another result.", dir: "ltr" },
+		];
+		const model = buildPageTextModel(1, items);
+
+		const matches = findPageMatches(model, "third, despite a", {
+			spaceAsWildcard: true,
+		});
+
+		expect(matches).toHaveLength(1);
+		expect(model.normalizedText.slice(matches[0].start, matches[0].end)).toBe(
+			"Third, despite the a"
+		);
+		expect(matches[0].chars?.map((range) =>
+			model.normalizedText.slice(range.from, range.to)
+		)).toEqual(["Third,", "despite", "a"]);
+	});
+
 	it("respects maxGapChars limit for wildcard matches", () => {
 		const items: PdfTextItem[] = [
 			{ str: "alpha 12345 beta 1234567890 gamma", dir: "ltr" },

@@ -15,12 +15,12 @@ Designed for users who prefer home-row keyboard navigation—such as users of GN
 - **⚡ Instant In-Document Highlighting:** Matches highlight directly in your viewport in real time. The active match features a high-contrast outline, while secondary matches use an adaptive theme-matched fill and inset edge.
 - **🎨 Adaptive Theme & Legibility Protection:** Automatically derives secondary match colors from your active theme's background and accent luminance. If background tinting reduces text readability, it automatically falls back to a non-intrusive dotted underline.
 - **↔️ Directional Navigation from Cursor:** Search begins from your current cursor position. Forward and backward commands navigate through matches relative to where you are working.
-- **🔍 Smart Space-as-Wildcard Matching:** Type search terms separated by single spaces to match words across arbitrary distances, lines, or paragraphs. Extra spaces match literal spaces.
+- **🔍 Smart Space-as-Wildcard Matching:** Type search terms separated by single spaces to match ordered text fragments across flexible gaps. Extra spaces match literal spaces.
 - **🔤 Smart-Case Sensitivity:** Automatically searches case-insensitively when your query is all lowercase, and switches to case-sensitive matching the moment an uppercase character is typed.
 - **📊 Deep Context Support (Tables, Callouts & PDFs):**
   - **Live Preview Tables:** Highlights matching table cells and displays a floating Table Toast with row/column context.
   - **Callouts:** Searches and highlights content within both collapsed and expanded callouts.
-  - **PDF Documents:** Incremental search directly inside Obsidian's native PDF viewer with overlay highlights and page auto-scrolling.
+  - **PDF Documents:** Incremental search directly inside Obsidian's native PDF viewer using PDF.js-native highlight placement, match navigation, and page auto-scrolling.
 - **🔄 Search Memory & Double-Tap Recall:** Pressing a search hotkey twice consecutively on an empty search recalls your previous query and continues searching in that direction.
 - **👁️ On-Demand Secondary Highlighting:** Keep your screen minimal by showing only the active match, or press `Ctrl+Enter` (`Cmd+Enter` on macOS) during search to toggle highlighting for all other matches.
 - **🔗 Link Target Filtering:** Avoid false positives by searching only the visible text of Markdown links and aliased wikilinks, ignoring hidden URLs and destinations.
@@ -72,13 +72,15 @@ When **Space-as-wildcard matching** is enabled (default), spaces between words a
 
 | Spaces Typed | Behavior | Literal Spaces Required in Note | Example |
 | :--- | :--- | :--- | :--- |
-| **1 space** | `.*` (wildcard gap across words/lines) | 0 | `the KAN` matches `the original KAN` |
+| **1 space** | Flexible wildcard gap between ordered fragments | 0 | `the KAN` matches `the original KAN` |
 | **2 spaces** | Exact match requiring 1 literal space | 1 literal space | `the  KAN` matches `the KAN` |
 | **3 spaces** | Exact match requiring 2 literal spaces | 2 literal spaces | `the   KAN` matches `the  KAN` |
 | **N spaces** | Exact match requiring N − 1 spaces | N − 1 literal spaces | Matches exactly N − 1 spaces |
 
 > [!TIP]
 > When searching with wildcard spaces, non-current matches highlight only the matched words, keeping gaps clean and readable.
+
+In PDFs, wildcard tokens must begin at word boundaries and each flexible gap is bounded. This preserves incremental prefix matching such as `modalit` matching `modalities` while preventing false matches that begin inside another word or span unrelated paragraphs after PDF text normalization.
 
 ### 2. Smart-Case Sensitivity
 
@@ -91,7 +93,7 @@ Matching adapts automatically based on character case:
 - **Markdown Source & Live Preview:** Full text and headings.
 - **Markdown Tables:** Highlights cells with column and row awareness. When focusing a match inside a table, a toast popup previews the cell context.
 - **Callouts:** Highlights text inside callouts, including collapsed callout blocks.
-- **PDF Documents:** Direct overlay highlighting and page auto-scrolling in Obsidian's native PDF viewer.
+- **PDF Documents:** Native PDF.js highlight placement, current/secondary styling, forward/backward navigation, and page auto-scrolling in Obsidian's PDF viewer.
 - **Link Filtering:** When **Match only visible part of links** is enabled, raw URLs (`[label](https://example.com)`) and hidden wikilink destinations (`[[destination|alias]]`) are excluded from search results.
 
 ---
@@ -170,7 +172,7 @@ The engine measures the computed background luminance of the active viewport aga
 #### D. Context-Aware Specialized Behaviors
 - **Markdown Tables:** Highlights the targeted cell and spawns a floating **Table Toast** displaying parent row and column headers (e.g. `[Row 3, Col "Price"]: $45.00`).
 - **Callouts:** Searches collapsed callouts and triggers auto-expansion with highlighted inline spans (`.incsearch-callout-match.is-current`).
-- **PDF Documents:** Computes sub-pixel character bounds in viewport coordinates, renders a high-index overlay (`z-index: 3`), and automatically scrolls the target page into view.
+- **PDF Documents:** Supplies wildcard match ranges to Obsidian's PDF.js find controller, which owns text-layer placement, current-match selection, scrolling, and forward/backward navigation.
 
 ---
 
@@ -225,9 +227,8 @@ In wildcard mode (`the KAN`), secondary matches highlight **only the matched key
 #### E. Text Legibility Protection (WCAG AA 4.5:1)
 When **Enforce text legibility** is enabled, every composite color is verified against WCAG relative luminance equations. If a candidate background tint would reduce text contrast below **4.5:1**, the background fill is automatically suppressed (`background: transparent`) and replaced with a non-intrusive dotted underline (`text-decoration: underline dotted`).
 
-#### F. PDF Viewport Blending
-- **Light Themes:** Secondary PDF overlays use `mix-blend-mode: multiply` to replicate natural optical paper ink absorption.
-- **Dark Themes:** Uses `mix-blend-mode: screen` to render clean, radiant overlays over dark PDF pages.
+#### F. Native PDF Highlight Styling
+PDF matches retain PDF.js-native text-layer geometry. The plugin styles native secondary matches with the same adaptive fill and edge variables used in Markdown, while the selected match uses the transparent current-match outline. Adjacent PDF.js fragments on the same visual line are joined to avoid internal outline seams.
 
 ---
 
@@ -278,7 +279,7 @@ You can customize match highlighting using standard Obsidian CSS snippets. The p
 npm install
 
 # Automated Tests
-npm run test:run      # Run Vitest unit & integration test suite (170+ tests)
+npm run test:run      # Run Vitest unit & integration test suite (210+ tests)
 npm run test:coverage # Run test suite with code coverage
 npm run test:browser  # Run Playwright browser integration tests
 

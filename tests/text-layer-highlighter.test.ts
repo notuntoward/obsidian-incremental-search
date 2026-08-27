@@ -126,7 +126,7 @@ describe("text-layer-highlighter", () => {
 		expect(marks[1].textContent).toBe("apy");
 	});
 
-	it("supports spaceAsWildcard multi-token matching", () => {
+	it("supports spaceAsWildcard multi-token matching with a continuous full-span mark", () => {
 		const span1 = document.createElement("span");
 		span1.textContent = "group comparisons and other tests";
 		textLayer.appendChild(span1);
@@ -134,9 +134,84 @@ describe("text-layer-highlighter", () => {
 		injectSecondaryHighlights(textLayer, "group tests", false, true);
 
 		const marks = textLayer.querySelectorAll(`mark.${SECONDARY_CLASS}`);
+		expect(marks.length).toBe(1);
+		expect(marks[0].textContent).toBe("group comparisons and other tests");
+	});
+
+	it("expands the active match box to cover the full wildcard sequence", () => {
+		const span1 = document.createElement("span");
+		const nativeSelected = document.createElement("span");
+		nativeSelected.className = "highlight selected";
+		nativeSelected.textContent = "systematic";
+		span1.appendChild(document.createTextNode("The "));
+		span1.appendChild(nativeSelected);
+		span1.appendChild(document.createTextNode(" search identified 3340 records"));
+		textLayer.appendChild(span1);
+
+		injectSecondaryHighlights(textLayer, "systematic search", false, true);
+
+		const activeMarks = textLayer.querySelectorAll("mark.incsearch-pdf-match.is-current");
+		expect(activeMarks.length).toBeGreaterThan(0);
+		const activeText = Array.from(activeMarks)
+			.map((m) => m.textContent)
+			.join("");
+		expect(activeText).toBe("systematic search");
+	});
+
+	it("does not highlight standalone tokens outside of full wildcard sequences", () => {
+		const span1 = document.createElement("span");
+		span1.textContent = "systematic search found results. The search was thorough.";
+		textLayer.appendChild(span1);
+
+		injectSecondaryHighlights(textLayer, "systematic search", false, true);
+
+		const marks = textLayer.querySelectorAll(`mark.${SECONDARY_CLASS}`);
+		expect(marks.length).toBe(1);
+		expect(marks[0].textContent).toBe("systematic search");
+		// The standalone "search" at the end should NOT be highlighted
+	});
+
+	it("highlights second 'search' when it completes a wildcard sequence", () => {
+		const span1 = document.createElement("span");
+		span1.textContent = "systematic search found results. The systematic review was a search.";
+		textLayer.appendChild(span1);
+
+		injectSecondaryHighlights(textLayer, "systematic search", false, true);
+
+		const marks = textLayer.querySelectorAll(`mark.${SECONDARY_CLASS}`);
 		expect(marks.length).toBe(2);
-		expect(marks[0].textContent).toBe("group");
-		expect(marks[1].textContent).toBe("tests");
+		expect(marks[0].textContent).toBe("systematic search");
+		expect(marks[1].textContent).toBe("systematic review was a search");
+		// The second "search" is highlighted because it completes the wildcard sequence
+	});
+
+	it("marks non-active full wildcard matches as secondary", () => {
+		const span1 = document.createElement("span");
+		const nativeSelected = document.createElement("span");
+		nativeSelected.className = "highlight selected";
+		nativeSelected.textContent = "systematic";
+
+		const text = "systematic search is key. We need systematic search here too.";
+		const firstIdx = text.indexOf("systematic");
+		span1.appendChild(document.createTextNode(text.slice(0, firstIdx)));
+		span1.appendChild(nativeSelected);
+		span1.appendChild(
+			document.createTextNode(text.slice(firstIdx + "systematic".length))
+		);
+		textLayer.appendChild(span1);
+
+		injectSecondaryHighlights(textLayer, "systematic search", false, true);
+
+		const activeMarks = textLayer.querySelectorAll("mark.incsearch-pdf-match.is-current");
+		expect(activeMarks.length).toBeGreaterThan(0);
+		const activeText = Array.from(activeMarks)
+			.map((m) => m.textContent)
+			.join("");
+		expect(activeText).toBe("systematic search");
+
+		const secondaryMarks = textLayer.querySelectorAll(`mark.${SECONDARY_CLASS}`);
+		expect(secondaryMarks.length).toBe(1);
+		expect(secondaryMarks[0].textContent).toBe("systematic search");
 	});
 
 	it("clears secondary highlights and restores normalized DOM", () => {

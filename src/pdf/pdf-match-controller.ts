@@ -13,7 +13,7 @@ import { buildPageTextModel, mapNormalizedRangeToItemSpans } from "./text-model"
 import { findPageMatches } from "./pattern-matcher";
 import { computeMatchGeometry } from "./match-geometry";
 import { renderPageHighlights, clearAllPdfHighlights } from "./highlight-layer";
-import { injectSecondaryHighlights, clearSecondaryHighlights } from "./text-layer-highlighter";
+import { clearSecondaryHighlights } from "./text-layer-highlighter";
 
 /**
  * Determines whether a PDF match is positioned at or after the top edge of the visible viewport.
@@ -111,6 +111,109 @@ export function processPdfQuery(
 	return { processedQuery: query, phraseSearch: true };
 }
 
+/**
+ * Applies markdown's line-scoped wildcard semantics to PDF.js page text while
+ * preserving the page-relative offsets expected by the native find controller.
+ */
+export function findPdfWildcardMatches(
+	pageContent: string,
+	query: string,
+	caseSensitive: boolean
+) {
+	const tokens = parseWildcardQuery(query, caseSensitive);
+	if (tokens.length === 0) return [];
+	const haystack = caseSensitive ? pageContent : pageContent.toLowerCase();
+	const matches = [];
+	let lineStart = 0;
+	const findTokenStart = (token: string, from: number, lineEnd: number) => {
+		let tokenStart = haystack.indexOf(token, from);
+		while (tokenStart !== -1 && tokenStart < lineEnd) {
+			if (tokenStart === 0 || !/[\p{L}\p{N}_]/u.test(haystack[tokenStart - 1])) {
+				return tokenStart;
+			}
+			tokenStart = haystack.indexOf(token, tokenStart + 1);
+		}
+		return -1;
+	};
+
+	while (lineStart <= pageContent.length) {
+		const newlineIndex = pageContent.indexOf("\n", lineStart);
+		const lineEnd = newlineIndex === -1 ? pageContent.length : newlineIndex;
+		let firstTokenStart = findTokenStart(tokens[0], lineStart, lineEnd);
+		while (firstTokenStart !== -1 && firstTokenStart < lineEnd) {
+			const chars = [{ from: firstTokenStart, to: firstTokenStart + tokens[0].length }];
+			let previousEnd = chars[0].to;
+			let valid = true;
+
+			for (let i = 1; i < tokens.length; i++) {
+				const tokenStart = findTokenStart(tokens[i], previousEnd, lineEnd);
+				// PDF.js removes EOL markers during normalization. Bound each wildcard
+				// gap to prevent a token on one visual line consuming later paragraphs.
+				if (tokenStart === -1 || tokenStart >= lineEnd || tokenStart - previousEnd > 256) {
+					valid = false;
+					break;
+				}
+				const tokenEnd = tokenStart + tokens[i].length;
+				chars.push({ from: tokenStart, to: tokenEnd });
+				previousEnd = tokenEnd;
+			}
+
+			if (valid) {
+				matches.push({ from: firstTokenStart, to: previousEnd, chars });
+			}
+			firstTokenStart = findTokenStart(tokens[0], firstTokenStart + 1, lineEnd);
+		}
+		if (newlineIndex === -1) break;
+		lineStart = newlineIndex + 1;
+	}
+
+	const nonOverlappingMatches = [];
+	let previousEnd = -1;
+	for (const match of matches) {
+		if (match.from < previousEnd) continue;
+		nonOverlappingMatches.push(match);
+		previousEnd = match.to;
+	}
+	return nonOverlappingMatches;
+}
+
+/** Joins touching PDF.js fragments from the selected match on the same visual line. */
+export function joinNativeSelectedHighlightFragments(containerEl: HTMLElement) {
+	const fragments = Array.from(
+		containerEl.querySelectorAll<HTMLElement>(
+			".textLayer .highlight.selected, .text-layer .highlight.selected"
+		)
+	);
+	for (const fragment of fragments) {
+		fragment.classList.remove("incsearch-join-prev", "incsearch-join-next");
+	}
+
+	for (let i = 0; i < fragments.length - 1; i++) {
+		const current = fragments[i];
+		const next = fragments[i + 1];
+		const currentRect = current.getBoundingClientRect();
+		const nextRect = next.getBoundingClientRect();
+		const verticalOverlap =
+			Math.min(currentRect.bottom, nextRect.bottom) -
+			Math.max(currentRect.top, nextRect.top);
+		const minHeight = Math.min(currentRect.height, nextRect.height);
+		const edgeGap = Math.min(
+			Math.abs(nextRect.left - currentRect.right),
+			Math.abs(currentRect.left - nextRect.right)
+		);
+		const joinTolerance = Math.max(4, minHeight * 0.75);
+
+		if (
+			minHeight > 0 &&
+			verticalOverlap >= minHeight * 0.6 &&
+			edgeGap <= joinTolerance
+		) {
+			current.classList.add("incsearch-join-next");
+			next.classList.add("incsearch-join-prev");
+		}
+	}
+}
+
 export class PdfMatchController {
 	adapter: PdfViewAdapter;
 	settings: IncrementalSearchSettings;
@@ -154,6 +257,26 @@ export class PdfMatchController {
 		this.setupFindControllerHook();
 	}
 
+	private setupFindControllerHook() {
+		const findController = this.adapter.findController;
+		if (!findController || typeof findController.match !== "function") return;
+
+		this.originalMatch = findController.match;
+		findController.match = (query: any, pageContent: string, pageIndex: number) => {
+			if (this.usesPluginWildcardSearch()) {
+				return findPdfWildcardMatches(
+					pageContent,
+					this.state.query,
+					isCaseSensitive(this.state.query)
+				).map((match) => ({
+					index: match.from,
+					length: match.to - match.from,
+				}));
+			}
+			return this.originalMatch?.call(findController, query, pageContent, pageIndex);
+		};
+	}
+
 	captureViewportAnchor(): PdfViewportAnchor {
 		if (typeof this.adapter.getViewportAnchor === "function") {
 			return this.adapter.getViewportAnchor();
@@ -183,106 +306,69 @@ export class PdfMatchController {
 		};
 	}
 
-	private setupFindControllerHook() {
-		const fc = this.adapter.findController;
-		if (!fc) return;
-
-		if (typeof fc.match === "function") {
-			this.originalMatch = fc.match.bind(fc);
-		}
-
-		fc.match = (query: any, pageContent: string, pageIndex: number) => {
-			if (
-				this.settings.spaceAsWildcard &&
-				this.state.query &&
-				this.state.query.trim().length > 0
-			) {
-				const q = this.state.query;
-				// If query has space separation between words (wildcard gap or literal spaces)
-				if (q.includes(" ")) {
-					const caseSensitive = isCaseSensitive(q);
-					const wildcardMatches = findWildcardMatches(pageContent, q, 0, caseSensitive);
-					return wildcardMatches.map((m) => ({
-						index: m.from,
-						length: m.to - m.from,
-					}));
-				}
-			}
-
-			if (this.originalMatch) {
-				return this.originalMatch(query, pageContent, pageIndex);
-			}
-			return undefined;
-		};
-	}
-
 	private setupEventListeners() {
+		const refreshNativeFragmentJoins = () => {
+			window.requestAnimationFrame(() => {
+				joinNativeSelectedHighlightFragments(this.adapter.containerEl);
+			});
+		};
+
 		// Listen to PDF.js text layer rendering events (when DOM spans are mounted)
 		const unsubTextLayerRendered = this.adapter.on("textlayerrendered", (evt: any) => {
 			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
 			if (typeof pageNumber === "number") {
 				this.refreshPageHighlights(pageNumber);
-				if (this.state.query) {
-					this.scheduleSecondaryHighlightInjection(this.state.query);
-				}
 			}
+			refreshNativeFragmentJoins();
 		});
 		this.unsubscribers.push(unsubTextLayerRendered);
+
+		const unsubTextLayerMatches = this.adapter.on(
+			"updatetextlayermatches",
+			refreshNativeFragmentJoins
+		);
+		this.unsubscribers.push(unsubTextLayerMatches);
 
 		// Listen to PDF.js page rendering and zoom events
 		const unsubPageRendered = this.adapter.on("pagerendered", (evt: any) => {
 			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
 			if (typeof pageNumber === "number") {
 				this.refreshPageHighlights(pageNumber);
-				if (this.state.query) {
-					this.scheduleSecondaryHighlightInjection(this.state.query);
-				}
 			}
 		});
 		this.unsubscribers.push(unsubPageRendered);
 
 		const unsubPagesLoaded = this.adapter.on("pagesloaded", () => {
 			this.refreshAllVisibleHighlights();
-			if (this.state.query) {
-				this.scheduleSecondaryHighlightInjection(this.state.query);
-			}
 		});
 		this.unsubscribers.push(unsubPagesLoaded);
 
 		const unsubScale = this.adapter.on("scalechanging", () => {
 			this.refreshAllVisibleHighlights();
-			if (this.state.query) {
-				this.scheduleSecondaryHighlightInjection(this.state.query);
-			}
 		});
 		this.unsubscribers.push(unsubScale);
 
 		const unsubRotation = this.adapter.on("rotationchanging", () => {
 			this.refreshAllVisibleHighlights();
-			if (this.state.query) {
-				this.scheduleSecondaryHighlightInjection(this.state.query);
-			}
 		});
 		this.unsubscribers.push(unsubRotation);
 
 		const unsubScroll = this.adapter.on("scroll", () => {
 			this.refreshAllVisibleHighlights();
-			if (this.state.query) {
-				this.scheduleSecondaryHighlightInjection(this.state.query);
-			}
 		});
 		this.unsubscribers.push(unsubScroll);
 
 		// Listen to PDF.js native find controller match events
+		const clampIndex = (current: number, total: number) =>
+			Math.max(0, Math.min(current - 1, Math.max(0, total - 1)));
+
 		const unsubFindCount = this.adapter.on("updatefindmatchescount", (evt: any) => {
 			if (evt?.matchesCount) {
 				const { current, total } = evt.matchesCount;
-				this.state.activeIndex = Math.max(0, current - 1);
+				this.state.activeIndex = clampIndex(current, total);
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
-				if (this.state.query) {
-					this.scheduleSecondaryHighlightInjection(this.state.query);
-				}
+				refreshNativeFragmentJoins();
 			}
 		});
 		this.unsubscribers.push(unsubFindCount);
@@ -290,15 +376,20 @@ export class PdfMatchController {
 		const unsubFindState = this.adapter.on("updatefindcontrolstate", (evt: any) => {
 			if (evt?.matchesCount) {
 				const { current, total } = evt.matchesCount;
-				this.state.activeIndex = Math.max(0, current - 1);
+				this.state.activeIndex = clampIndex(current, total);
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
-				if (this.state.query) {
-					this.scheduleSecondaryHighlightInjection(this.state.query);
-				}
+				refreshNativeFragmentJoins();
 			}
 		});
 		this.unsubscribers.push(unsubFindState);
+	}
+
+	private usesPluginWildcardSearch(query = this.state.query): boolean {
+		if (!this.settings.spaceAsWildcard || !query || /^\/(.+)\/[a-z]*$/.test(query)) {
+			return false;
+		}
+		return parseWildcardQuery(query, isCaseSensitive(query)).length > 1;
 	}
 
 	/**
@@ -333,6 +424,7 @@ export class PdfMatchController {
 		this.state.direction = direction;
 		this.state.matches = [];
 		this.state.activeIndex = 0;
+		this.state.totalMatchesCount = undefined;
 		this.state.isScanning = query.length > 0;
 		this.state.scannedPages = 0;
 
@@ -372,8 +464,6 @@ export class PdfMatchController {
 				phraseSearch,
 				caseSensitive: isCaseSensitive(query),
 			});
-
-			this.scheduleSecondaryHighlightInjection(query, generation);
 
 			this.state.isScanning = false;
 			this.notifyStateChange();
@@ -472,7 +562,13 @@ export class PdfMatchController {
 		for (let i = 0; i < normalizedMatches.length; i++) {
 			const nm = normalizedMatches[i];
 			const itemSpans = mapNormalizedRangeToItemSpans(model, nm.start, nm.end);
-			const { rects } = computeMatchGeometry(pageEl, textLayerEl, itemSpans, model, viewport);
+			const { rects } = computeMatchGeometry(
+				pageEl,
+				textLayerEl,
+				itemSpans,
+				model,
+				viewport
+			);
 
 			const isDuplicate = newPdfMatches.some((m) => m.from === nm.start && m.to === nm.end);
 			if (!isDuplicate) {
@@ -513,9 +609,6 @@ export class PdfMatchController {
 		const highlightAll = this.shouldShowAllMatches();
 		if (highlightAll) {
 			this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
-			if (this.state.query) {
-				this.scheduleSecondaryHighlightInjection(this.state.query);
-			}
 		} else {
 			this.adapter.containerEl.classList.add("incsearch-pdf-hide-other-matches");
 		}
@@ -583,84 +676,6 @@ export class PdfMatchController {
 		}
 	}
 
-	/**
-	 * Inject inline highlight spans into visible text layers.
-	 * These are inline elements within the text layer's own spans,
-	 * so their geometry matches the text exactly — no coordinate math.
-	 */
-	injectSecondaryHighlightsOnVisiblePages(query = this.state.query) {
-		if (!query || query.trim().length === 0) return;
-		const caseSens = isCaseSensitive(query);
-		const spaceWildcard = this.settings.spaceAsWildcard;
-		const activeInfo = this.adapter.getActiveFindMatchInfo?.() ?? null;
-
-		// 1. Try visible pages via adapter
-		const visible = this.adapter.getVisiblePageNumbers();
-		const processedLayers = new Set<HTMLElement>();
-
-		for (const pageNum of visible) {
-			const textLayerEl = this.adapter.getTextLayerElement(pageNum);
-			if (textLayerEl) {
-				processedLayers.add(textLayerEl);
-				const isPageActive = Boolean(
-					activeInfo && activeInfo.pageIndex === pageNum - 1
-				);
-				const activeIdxOnPage = isPageActive
-					? activeInfo!.matchIndex
-					: activeInfo
-					? -1
-					: undefined;
-				injectSecondaryHighlights(
-					textLayerEl,
-					query,
-					caseSens,
-					spaceWildcard,
-					activeIdxOnPage
-				);
-			}
-		}
-
-		// 2. Also sweep any mounted textLayer elements in the container that weren't processed
-		const allTextLayers = this.adapter.containerEl.querySelectorAll(
-			".textLayer, .text-layer, [class*='textLayer'], [class*='text-layer']"
-		);
-		for (let i = 0; i < allTextLayers.length; i++) {
-			const el = allTextLayers[i] as HTMLElement;
-			if (
-				!processedLayers.has(el) &&
-				(el.offsetWidth > 0 || el.offsetHeight > 0 || el.children.length > 0)
-			) {
-				injectSecondaryHighlights(el, query, caseSens, spaceWildcard);
-			}
-		}
-	}
-
-	/**
-	 * Multi-stage secondary highlight injection: runs immediately, on the next animation frame,
-	 * and after micro-delays to handle PDF.js's asynchronous text layer rendering lifecycle.
-	 */
-	scheduleSecondaryHighlightInjection(query: string, generation = this.scanGeneration) {
-		if (!query || query.trim().length === 0) return;
-
-		// Pass 1: Immediate
-		this.injectSecondaryHighlightsOnVisiblePages(query);
-
-		// Pass 2: Next animation frame
-		window.requestAnimationFrame(() => {
-			if (this.scanGeneration !== generation) return;
-			this.injectSecondaryHighlightsOnVisiblePages(query);
-		});
-
-		// Pass 3: Micro-delays across PDF.js async rendering pipeline
-		const delays = [60, 180, 350, 600];
-		for (const delay of delays) {
-			window.setTimeout(() => {
-				if (this.scanGeneration !== generation) return;
-				this.injectSecondaryHighlightsOnVisiblePages(query);
-			}, delay);
-		}
-	}
-
 	getActiveMatch(): PdfMatch | null {
 		if (this.state.matches.length === 0) return null;
 		const index = Math.max(0, Math.min(this.state.activeIndex, this.state.matches.length - 1));
@@ -683,7 +698,6 @@ export class PdfMatchController {
 				phraseSearch,
 				caseSensitive: isCaseSensitive(this.state.query),
 			});
-			this.scheduleSecondaryHighlightInjection(this.state.query);
 			this.notifyStateChange();
 			return;
 		}

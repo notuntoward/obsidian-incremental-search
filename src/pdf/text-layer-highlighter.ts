@@ -1,4 +1,4 @@
-import { findWildcardMatches, parseWildcardQuery } from "../engine";
+import { findWildcardMatches } from "../engine";
 
 /**
  * Injects inline <mark> highlight elements directly into PDF.js .textLayer text nodes
@@ -9,7 +9,7 @@ import { findWildcardMatches, parseWildcardQuery } from "../engine";
  *    Using `<mark>` avoids CSS collisions with PDF.js's span rules.
  * 2. Because <mark> is an inline child of the exact text node positioned by PDF.js,
  *    its geometry, scale, rotation, font metrics, and zoom alignment are 100% exact
- *    by construction — requiring zero coordinate math or matrix transformations.
+ *    by construction â€” requiring zero coordinate math or matrix transformations.
  * 3. Rendering both the active match outline and secondary fills using the exact DOM
  *    character map eliminates PDF.js internal find-controller index drift (e.g. wrapping
  *    adjacent whitespace or shifted characters).
@@ -127,33 +127,14 @@ function findMatchIntervals(
 	const intervals: TextInterval[] = [];
 
 	if (spaceAsWildcard && query.includes(" ")) {
-		// Wildcard mode: query contains space separator(s)
-		const tokens = parseWildcardQuery(query, caseSensitive);
-
-		// 1. Find full wildcard matches (multi-token sequence spanning text)
+		// Wildcard mode: only highlight full wildcard sequences, matching the
+		// behavior in markdown mode. Standalone tokens are not secondary matches.
 		const wildcardMatches = findWildcardMatches(fullText, query, 0, caseSensitive);
 		for (const m of wildcardMatches) {
-			if (m.chars && m.chars.length > 0) {
-				for (const c of m.chars) {
-					intervals.push({ start: c.from, end: c.to });
-				}
-			} else {
-				intervals.push({ start: m.from, end: m.to });
-			}
-		}
-
-		// 2. Also highlight individual query word tokens across text
-		for (const token of tokens) {
-			if (token.length === 0) continue;
-			const target = caseSensitive ? token : token.toLowerCase();
-			const haystack = caseSensitive ? fullText : fullText.toLowerCase();
-			let pos = 0;
-			while (true) {
-				const idx = haystack.indexOf(target, pos);
-				if (idx === -1) break;
-				intervals.push({ start: idx, end: idx + target.length });
-				pos = idx + Math.max(1, target.length);
-			}
+			// Use the full match span so the active/current highlight box covers
+			// the entire wildcard sequence (e.g. "systematic search"), not just
+			// the first token.
+			intervals.push({ start: m.from, end: m.to });
 		}
 	} else {
 		// Exact substring search
