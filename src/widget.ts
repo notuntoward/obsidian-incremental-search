@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { App } from "obsidian";
+import { App, setIcon } from "obsidian";
 import { SearchDirection, IncrementalSearchSettings } from "./types";
 import {
 	searchSessionField,
@@ -314,7 +314,7 @@ export function showWidgetTableToast(
 	container.appendChild(document.createTextNode(after));
 	fragment.appendChild(container);
 
-	toast.innerHTML = "";
+	toast.textContent = "";
 	toast.appendChild(fragment);
 	toast.style.display = "block";
 }
@@ -397,7 +397,7 @@ export function renderSearchWidget(
 	tableIcon.className = "incsearch-table-icon";
 	tableIcon.setAttribute("aria-label", "In table");
 	tableIcon.style.display = "none";
-	tableIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon lucide-table"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>`;
+	setIcon(tableIcon, "table");
 
 	const input = document.createElement("input");
 	input.className = "incsearch-input";

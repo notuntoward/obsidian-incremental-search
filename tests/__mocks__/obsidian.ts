@@ -213,3 +213,11 @@ export function mockFileCache(overrides: Partial<CachedMetadataMock> = {}): Cach
     ...overrides,
   };
 }
+
+export function setIcon(parent: HTMLElement | any, _iconId: string): void {
+  if (parent) {
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "svg-icon lucide-" + _iconId;
+    parent.appendChild(iconSpan);
+  }
+}

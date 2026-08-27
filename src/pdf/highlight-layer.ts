@@ -34,7 +34,7 @@ export function renderPageHighlights(
 	highlightAll = true
 ) {
 	const overlay = getOrCreatePageOverlay(pageElement);
-	overlay.innerHTML = "";
+	overlay.textContent = "";
 
 	if (!matches || matches.length === 0) {
 		return;
