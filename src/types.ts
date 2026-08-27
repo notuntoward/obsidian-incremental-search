@@ -30,6 +30,27 @@ export interface MatchRange {
 	};
 }
 
+export interface SearchQueryOptions {
+	spaceAsWildcard?: boolean;
+	wildcard?: boolean;
+	fuzzy?: boolean;
+	caseSensitive?: boolean;
+	wholeWord?: boolean;
+	maxGapChars?: number;
+	regexMode?: boolean;
+}
+
+export interface CompiledQuery {
+	rawQuery: string;
+	type: "regex" | "wildcard" | "literal";
+	caseSensitive: boolean;
+	wholeWord: boolean;
+	maxGapChars?: number;
+	regex?: RegExp;
+	tokens?: string[];
+	needle?: string;
+}
+
 export interface SearchSessionState {
 	query: string;
 	direction: SearchDirection;

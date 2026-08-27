@@ -1,6 +1,6 @@
 import { EditorState } from "@codemirror/state";
 import { CachedMetadata, ReferenceCache } from "obsidian";
-import { MatchRange } from "./types";
+import { MatchRange, SearchQueryOptions, CompiledQuery } from "./types";
 
 /**
  * Determines case sensitivity using smart-case:
@@ -51,7 +51,321 @@ export function parseWildcardQuery(query: string, caseSensitive: boolean): strin
 export const parseFuzzyQuery = parseWildcardQuery;
 
 /**
- * This function delegates link-syntax and frontmatter parsing to Obsidian's MetadataCache.
+ * Checks if a match range aligns with whole-word boundaries in a text string.
+ */
+export function isWholeWord(text: string, start: number, end: number): boolean {
+	const prevChar = start > 0 ? text[start - 1] : " ";
+	const nextChar = end < text.length ? text[end] : " ";
+	const wordCharRegex = /\w/;
+	return !wordCharRegex.test(prevChar) && !wordCharRegex.test(nextChar);
+}
+
+/**
+ * Checks if gaps between wildcard tokens in a match exceed maxGapChars.
+ */
+export function isWithinMaxGap(
+	chars: { from: number; to: number }[] | undefined,
+	maxGapChars?: number
+): boolean {
+	if (!chars || chars.length <= 1 || maxGapChars === undefined || maxGapChars <= 0) {
+		return true;
+	}
+	for (let i = 0; i < chars.length - 1; i++) {
+		const gap = chars[i + 1].from - chars[i].to;
+		if (gap > maxGapChars) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Executes regular-expression matching on text with safety bounds.
+ */
+export function findRegexMatches(
+	text: string,
+	pattern: string,
+	flags: string,
+	offset = 0
+): MatchRange[] {
+	const results: MatchRange[] = [];
+	try {
+		const safeFlags = flags.includes("g") ? flags : flags + "g";
+		const regex = new RegExp(pattern, safeFlags);
+		let match: RegExpExecArray | null = null;
+		let count = 0;
+		const maxMatches = 5000;
+
+		while ((match = regex.exec(text)) !== null) {
+			if (match[0].length === 0) {
+				regex.lastIndex++;
+				continue;
+			}
+			results.push({
+				from: offset + match.index,
+				to: offset + match.index + match[0].length,
+			});
+			count++;
+			if (count >= maxMatches) break;
+		}
+	} catch {
+		// Invalid regex pattern
+		return [];
+	}
+	return results;
+}
+
+/**
+ * Compiles a raw query string and options into an optimized CompiledQuery object.
+ */
+export function compileQuery(
+	query: string,
+	options: SearchQueryOptions = {}
+): CompiledQuery | null {
+	if (!query || query.length === 0) return null;
+
+	const caseSensitive = options.caseSensitive ?? isCaseSensitive(query);
+	const wholeWord = Boolean(options.wholeWord);
+	const maxGapChars = options.maxGapChars;
+
+	// Check if query is formatted as /pattern/flags or explicit regexMode
+	const regexMatch = query.match(/^\/(.+)\/([a-z]*)$/);
+	if (options.regexMode || regexMatch) {
+		const pattern = regexMatch ? regexMatch[1] : query;
+		const rawFlags = regexMatch ? regexMatch[2] : caseSensitive ? "" : "i";
+		const safeFlags = rawFlags.includes("g") ? rawFlags : rawFlags + "g";
+		try {
+			const regex = new RegExp(pattern, safeFlags);
+			return {
+				rawQuery: query,
+				type: "regex",
+				caseSensitive,
+				wholeWord,
+				maxGapChars,
+				regex,
+			};
+		} catch {
+			return null;
+		}
+	}
+
+	const useWildcard = options.spaceAsWildcard ?? options.wildcard ?? options.fuzzy ?? true;
+	if (useWildcard) {
+		const tokens = parseWildcardQuery(query, caseSensitive);
+		if (tokens.length === 0) return null;
+		return {
+			rawQuery: query,
+			type: "wildcard",
+			caseSensitive,
+			wholeWord,
+			maxGapChars,
+			tokens,
+		};
+	}
+
+	return {
+		rawQuery: query,
+		type: "literal",
+		caseSensitive,
+		wholeWord,
+		maxGapChars,
+		needle: caseSensitive ? query : query.toLowerCase(),
+	};
+}
+
+/**
+ * Finds all space-as-wildcard matches in a string.
+ */
+export function findWildcardMatches(
+	text: string,
+	query: string,
+	offset = 0,
+	caseSensitive = false
+): MatchRange[] {
+	if (query.length === 0) return [];
+	const haystack = caseSensitive ? text : text.toLowerCase();
+	const tokens = parseWildcardQuery(query, caseSensitive);
+
+	if (tokens.length === 0) return [];
+	const results: MatchRange[] = [];
+
+	let searchStart = 0;
+	while (searchStart < haystack.length) {
+		let currentStart = searchStart;
+		const chars: { from: number; to: number }[] = [];
+		let matchValid = true;
+		let firstTokenIdx = -1;
+		let lastTokenEnd = -1;
+
+		for (let i = 0; i < tokens.length; i++) {
+			const token = tokens[i];
+			if (token.length === 0) continue;
+
+			const idx = haystack.indexOf(token, currentStart);
+			if (idx === -1) {
+				matchValid = false;
+				break;
+			}
+
+			if (firstTokenIdx === -1) {
+				firstTokenIdx = idx;
+			}
+
+			chars.push({ from: offset + idx, to: offset + idx + token.length });
+			currentStart = idx + token.length;
+			lastTokenEnd = currentStart;
+		}
+
+		if (matchValid && firstTokenIdx !== -1) {
+			results.push({
+				from: offset + firstTokenIdx,
+				to: offset + lastTokenEnd,
+				chars,
+			});
+			searchStart = firstTokenIdx + 1;
+		} else {
+			break;
+		}
+	}
+
+	return results;
+}
+
+export const findFuzzyMatches = findWildcardMatches;
+
+/**
+ * Finds all literal substring matches in a string.
+ */
+export function findLiteralMatches(
+	text: string,
+	query: string,
+	offset = 0,
+	caseSensitive = false
+): MatchRange[] {
+	const results: MatchRange[] = [];
+	const haystack = caseSensitive ? text : text.toLowerCase();
+	const needle = caseSensitive ? query : query.toLowerCase();
+	if (needle.length === 0) return results;
+
+	let idx = haystack.indexOf(needle);
+	while (idx !== -1) {
+		results.push({ from: offset + idx, to: offset + idx + needle.length });
+		idx = haystack.indexOf(needle, idx + needle.length);
+	}
+	return results;
+}
+
+/**
+ * Unified matching engine: finds all matches for a query against a string of text,
+ * applying regex, wildcard, or literal matching, as well as whole-word and max-gap post-filters.
+ */
+export function findMatchesInText(
+	text: string,
+	queryOrCompiled: string | CompiledQuery,
+	options: SearchQueryOptions = {},
+	offset = 0
+): MatchRange[] {
+	if (!text || text.length === 0) return [];
+	const compiled =
+		typeof queryOrCompiled === "string"
+			? compileQuery(queryOrCompiled, options)
+			: queryOrCompiled;
+
+	if (!compiled) return [];
+
+	let rawMatches: MatchRange[] = [];
+
+	if (compiled.type === "regex" && compiled.regex) {
+		const regex = new RegExp(compiled.regex.source, compiled.regex.flags);
+		let match: RegExpExecArray | null = null;
+		let count = 0;
+		const maxMatches = 5000;
+
+		while ((match = regex.exec(text)) !== null) {
+			if (match[0].length === 0) {
+				regex.lastIndex++;
+				continue;
+			}
+			rawMatches.push({
+				from: offset + match.index,
+				to: offset + match.index + match[0].length,
+			});
+			count++;
+			if (count >= maxMatches) break;
+		}
+	} else if (compiled.type === "wildcard" && compiled.tokens) {
+		const haystack = compiled.caseSensitive ? text : text.toLowerCase();
+		const tokens = compiled.tokens;
+		let searchStart = 0;
+
+		while (searchStart < haystack.length) {
+			let currentStart = searchStart;
+			const chars: { from: number; to: number }[] = [];
+			let matchValid = true;
+			let firstTokenIdx = -1;
+			let lastTokenEnd = -1;
+
+			for (let i = 0; i < tokens.length; i++) {
+				const token = tokens[i];
+				if (token.length === 0) continue;
+
+				const idx = haystack.indexOf(token, currentStart);
+				if (idx === -1) {
+					matchValid = false;
+					break;
+				}
+
+				if (firstTokenIdx === -1) {
+					firstTokenIdx = idx;
+				}
+
+				chars.push({ from: offset + idx, to: offset + idx + token.length });
+				currentStart = idx + token.length;
+				lastTokenEnd = currentStart;
+			}
+
+			if (matchValid && firstTokenIdx !== -1) {
+				rawMatches.push({
+					from: offset + firstTokenIdx,
+					to: offset + lastTokenEnd,
+					chars,
+				});
+				searchStart = firstTokenIdx + 1;
+			} else {
+				break;
+			}
+		}
+	} else if (compiled.type === "literal" && compiled.needle) {
+		const haystack = compiled.caseSensitive ? text : text.toLowerCase();
+		const needle = compiled.needle;
+		let idx = haystack.indexOf(needle);
+		while (idx !== -1) {
+			rawMatches.push({ from: offset + idx, to: offset + idx + needle.length });
+			idx = haystack.indexOf(needle, idx + needle.length);
+		}
+	}
+
+	// Apply post-filters
+	if (compiled.wholeWord || compiled.maxGapChars !== undefined) {
+		rawMatches = rawMatches.filter((m) => {
+			if (compiled.wholeWord && !isWholeWord(text, m.from - offset, m.to - offset)) {
+				return false;
+			}
+			if (
+				compiled.maxGapChars !== undefined &&
+				!isWithinMaxGap(m.chars, compiled.maxGapChars)
+			) {
+				return false;
+			}
+			return true;
+		});
+	}
+
+	return rawMatches;
+}
+
+/**
+ * Delegates link-syntax and frontmatter parsing to Obsidian's MetadataCache.
  * Frontmatter is always non-visible metadata and is always excluded.
  * Link destinations/URLs are excluded when filterHiddenLinks is true.
  */
@@ -142,89 +456,6 @@ function isMatchHidden(m: MatchRange, hiddenRanges: { from: number; to: number }
 	return checkOverlap(m.from, m.to);
 }
 
-/**
- * Finds all space-as-wildcard matches in a single line of text.
- * Sequential tokens are searched in order with wildcards in between.
- */
-export function findWildcardMatches(
-	text: string,
-	query: string,
-	offset: number,
-	caseSensitive: boolean
-): MatchRange[] {
-	if (query.length === 0) return [];
-	const haystack = caseSensitive ? text : text.toLowerCase();
-	const tokens = parseWildcardQuery(query, caseSensitive);
-
-	if (tokens.length === 0) return [];
-	const results: MatchRange[] = [];
-
-	let searchStart = 0;
-	while (searchStart < haystack.length) {
-		let currentStart = searchStart;
-		const chars: { from: number; to: number }[] = [];
-		let matchValid = true;
-		let firstTokenIdx = -1;
-		let lastTokenEnd = -1;
-
-		for (let i = 0; i < tokens.length; i++) {
-			const token = tokens[i];
-			if (token.length === 0) continue;
-
-			const idx = haystack.indexOf(token, currentStart);
-			if (idx === -1) {
-				matchValid = false;
-				break;
-			}
-
-			if (firstTokenIdx === -1) {
-				firstTokenIdx = idx;
-			}
-
-			chars.push({ from: offset + idx, to: offset + idx + token.length });
-			currentStart = idx + token.length;
-			lastTokenEnd = currentStart;
-		}
-
-		if (matchValid && firstTokenIdx !== -1) {
-			results.push({
-				from: offset + firstTokenIdx,
-				to: offset + lastTokenEnd,
-				chars,
-			});
-			searchStart = firstTokenIdx + 1;
-		} else {
-			break;
-		}
-	}
-
-	return results;
-}
-
-export const findFuzzyMatches = findWildcardMatches;
-
-/**
- * Finds all literal substring matches in a single line of text.
- */
-export function findLiteralMatches(
-	text: string,
-	query: string,
-	offset: number,
-	caseSensitive: boolean
-): MatchRange[] {
-	const results: MatchRange[] = [];
-	const haystack = caseSensitive ? text : text.toLowerCase();
-	const needle = caseSensitive ? query : query.toLowerCase();
-	if (needle.length === 0) return results;
-
-	let idx = haystack.indexOf(needle);
-	while (idx !== -1) {
-		results.push({ from: offset + idx, to: offset + idx + needle.length });
-		idx = haystack.indexOf(needle, idx + needle.length);
-	}
-	return results;
-}
-
 function findCellBoundaries(lineText: string, matchStart: number, matchEnd: number) {
 	let cellStart = 0;
 	let colIndex = 0;
@@ -258,12 +489,18 @@ export function computeMatches(
 	query: string,
 	spaceAsWildcard: boolean,
 	matchOnlyVisibleLinks: boolean,
-	linkCache?: CachedMetadata
+	linkCache?: CachedMetadata,
+	options?: SearchQueryOptions
 ): MatchRange[] {
 	if (!query) return [];
-	const caseSensitive = isCaseSensitive(query);
-	const results: MatchRange[] = [];
+	const searchOptions: SearchQueryOptions = {
+		spaceAsWildcard,
+		...options,
+	};
+	const compiled = compileQuery(query, searchOptions);
+	if (!compiled) return [];
 
+	const results: MatchRange[] = [];
 	const hiddenRanges = linkCache
 		? getHiddenRangesFromCache(linkCache, matchOnlyVisibleLinks)
 		: [];
@@ -280,12 +517,7 @@ export function computeMatches(
 	const doc = state.doc;
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
-		let lineMatches: MatchRange[] = [];
-		if (spaceAsWildcard) {
-			lineMatches = findWildcardMatches(line.text, query, line.from, caseSensitive);
-		} else {
-			lineMatches = findLiteralMatches(line.text, query, line.from, caseSensitive);
-		}
+		let lineMatches = findMatchesInText(line.text, compiled, searchOptions, line.from);
 
 		if (lineMatches.length > 0 && hiddenRanges.length > 0) {
 			lineMatches = lineMatches.filter((m) => !isMatchHidden(m, hiddenRanges));

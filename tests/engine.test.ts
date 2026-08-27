@@ -6,6 +6,11 @@ import {
   parseWildcardQuery,
   findWildcardMatches,
   findLiteralMatches,
+  findRegexMatches,
+  compileQuery,
+  findMatchesInText,
+  isWholeWord,
+  isWithinMaxGap,
   computeMatches,
 } from "../src/engine";
 
@@ -496,5 +501,109 @@ describe("engine: computeMatches", () => {
     expect(nonTableMatches[0].tableMatchData).toBeUndefined();
   });
 
+  it("supports regex pattern /regex/flags search in Markdown documents", () => {
+    const doc = "Order #1234 on 2026-08-27\nOrder #5678 on 2026-08-28";
+    const state = EditorState.create({ doc });
+
+    const matches = computeMatches(state, "/Order #\\d+/", false, false);
+    expect(matches).toHaveLength(2);
+    expect(doc.slice(matches[0].from, matches[0].to)).toBe("Order #1234");
+    expect(doc.slice(matches[1].from, matches[1].to)).toBe("Order #5678");
+  });
 });
+
+describe("engine: compileQuery", () => {
+  it("returns null for empty queries", () => {
+    expect(compileQuery("")).toBeNull();
+  });
+
+  it("compiles regex queries when enclosed in /pattern/flags", () => {
+    const compiled = compileQuery("/\\bword\\d+/i");
+    expect(compiled).not.toBeNull();
+    expect(compiled?.type).toBe("regex");
+    expect(compiled?.regex).toBeInstanceOf(RegExp);
+    expect(compiled?.regex?.source).toBe("\\bword\\d+");
+    expect(compiled?.regex?.flags).toContain("i");
+    expect(compiled?.regex?.flags).toContain("g");
+  });
+
+  it("compiles wildcard queries with space-as-wildcard tokens", () => {
+    const compiled = compileQuery("hello world", { spaceAsWildcard: true });
+    expect(compiled).not.toBeNull();
+    expect(compiled?.type).toBe("wildcard");
+    expect(compiled?.tokens).toEqual(["hello", "world"]);
+  });
+
+  it("compiles literal queries when spaceAsWildcard is false", () => {
+    const compiled = compileQuery("hello world", { spaceAsWildcard: false });
+    expect(compiled).not.toBeNull();
+    expect(compiled?.type).toBe("literal");
+    expect(compiled?.needle).toBe("hello world");
+  });
+
+  it("respects caseSensitive override option", () => {
+    const compiled = compileQuery("hello", { spaceAsWildcard: false, caseSensitive: true });
+    expect(compiled?.caseSensitive).toBe(true);
+  });
+});
+
+describe("engine: findMatchesInText", () => {
+  it("finds regex matches with whole-word post-filtering", () => {
+    const text = "cat concatenate catalog cat";
+    const allMatches = findMatchesInText(text, "cat", { spaceAsWildcard: false, wholeWord: false });
+    expect(allMatches).toHaveLength(4);
+
+    const wordMatches = findMatchesInText(text, "cat", { spaceAsWildcard: false, wholeWord: true });
+    expect(wordMatches).toHaveLength(2);
+    expect(wordMatches[0].from).toBe(0);
+    expect(wordMatches[1].from).toBe(24);
+  });
+
+  it("finds wildcard matches with maxGapChars limit", () => {
+    const text = "alpha 12345 beta 1234567890 gamma";
+    const matchesUnderLimit = findMatchesInText(text, "alpha beta gamma", {
+      spaceAsWildcard: true,
+      maxGapChars: 15,
+    });
+    expect(matchesUnderLimit).toHaveLength(1);
+
+    const matchesOverLimit = findMatchesInText(text, "alpha beta gamma", {
+      spaceAsWildcard: true,
+      maxGapChars: 8,
+    });
+    expect(matchesOverLimit).toHaveLength(0);
+  });
+});
+
+describe("engine: isWholeWord & isWithinMaxGap", () => {
+  it("isWholeWord checks character boundaries correctly", () => {
+    const text = "a cat in a hat";
+    expect(isWholeWord(text, 2, 5)).toBe(true); // "cat"
+    expect(isWholeWord("category", 0, 3)).toBe(false); // "cat" in category
+    expect(isWholeWord("scat", 1, 4)).toBe(false); // "cat" in scat
+  });
+
+  it("isWithinMaxGap checks token span gaps", () => {
+    const chars = [{ from: 0, to: 3 }, { from: 10, to: 15 }]; // gap is 7
+    expect(isWithinMaxGap(chars, 10)).toBe(true);
+    expect(isWithinMaxGap(chars, 5)).toBe(false);
+    expect(isWithinMaxGap(chars, undefined)).toBe(true);
+  });
+});
+
+describe("engine: findRegexMatches", () => {
+  it("handles regex patterns safely", () => {
+    const text = "apple 100, banana 200";
+    const matches = findRegexMatches(text, "\\w+ \\d+", "g");
+    expect(matches).toHaveLength(2);
+    expect(matches[0]).toEqual({ from: 0, to: 9 });
+    expect(matches[1]).toEqual({ from: 11, to: 21 });
+  });
+
+  it("returns empty array for invalid regex syntax without throwing", () => {
+    expect(() => findRegexMatches("some text", "[unclosed", "g")).not.toThrow();
+    expect(findRegexMatches("some text", "[unclosed", "g")).toEqual([]);
+  });
+});
+
 

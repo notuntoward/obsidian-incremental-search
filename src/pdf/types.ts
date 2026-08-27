@@ -1,4 +1,9 @@
-import { SearchDirection, MatchRange, AllMatchesDisplayMode } from "../types";
+import {
+	SearchDirection,
+	MatchRange,
+	AllMatchesDisplayMode,
+	SearchQueryOptions,
+} from "../types";
 
 export interface PdfTextItem {
 	str: string;
@@ -37,11 +42,10 @@ export interface MatchRect {
 	height: number;
 }
 
-export interface NormalizedMatch {
+export interface NormalizedMatch extends MatchRange {
 	pageNumber: number;
 	start: number;
 	end: number;
-	chars?: { from: number; to: number }[];
 }
 
 export interface PdfMatch {
@@ -54,15 +58,7 @@ export interface PdfMatch {
 	rects?: MatchRect[];
 }
 
-export interface PdfSearchOptions {
-	spaceAsWildcard?: boolean;
-	wildcard?: boolean;
-	fuzzy?: boolean;
-	caseSensitive?: boolean;
-	wholeWord?: boolean;
-	maxGapChars?: number;
-	regexMode?: boolean;
-}
+export type PdfSearchOptions = SearchQueryOptions;
 
 export interface PdfSessionState {
 	query: string;
