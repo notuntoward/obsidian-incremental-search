@@ -14,6 +14,7 @@ import { findPageMatches } from "./pattern-matcher";
 import { computeMatchGeometry } from "./match-geometry";
 import { renderPageHighlights, clearAllPdfHighlights } from "./highlight-layer";
 import { clearSecondaryHighlights } from "./text-layer-highlighter";
+import { applyPdfColors, clearPdfColors } from "../utils/colors";
 
 /**
  * Determines whether a PDF match is positioned at or after the top edge of the visible viewport.
@@ -535,6 +536,7 @@ export class PdfMatchController {
 
 		if (this.adapter.executeNativeFind) {
 			this.adapter.containerEl.classList.add("incsearch-active-pdf");
+			applyPdfColors(this.adapter.containerEl, this.settings);
 			if (query.length === 0) {
 				this.adapter.executeNativeFind({
 					query: "",
@@ -871,6 +873,7 @@ export class PdfMatchController {
 		this.scanGeneration++;
 		this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
 		this.adapter.containerEl.classList.remove("incsearch-active-pdf");
+		clearPdfColors(this.adapter.containerEl);
 		if (this.adapter.findController && this.originalMatch) {
 			this.adapter.findController.match = this.originalMatch;
 			this.originalMatch = undefined;

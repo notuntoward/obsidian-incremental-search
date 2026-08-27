@@ -20,7 +20,7 @@ Designed for users who prefer home-row keyboard navigation—such as users of GN
 - **📊 Deep Context Support (Tables, Callouts & PDFs):**
   - **Live Preview Tables:** Highlights matching table cells and displays a floating Table Toast with row/column context.
   - **Callouts:** Searches and highlights content within both collapsed and expanded callouts.
-  - **PDF Documents:** Incremental search directly inside Obsidian's native PDF viewer using PDF.js-native highlight placement, match navigation, and page auto-scrolling.
+  - **PDF Documents:** Incremental search directly inside Obsidian's native PDF viewer using PDF.js-native highlight placement, match navigation, and page auto-scrolling. Match colors automatically adapt to the PDF's actual page background (white, dark, or inverted) for consistent readability.
 - **🔄 Search Memory & Double-Tap Recall:** Pressing a search hotkey twice consecutively on an empty search recalls your previous query and continues searching in that direction.
 - **👁️ On-Demand Secondary Highlighting:** Keep your screen minimal by showing only the active match, or press `Ctrl+Enter` (`Cmd+Enter` on macOS) during search to toggle highlighting for all other matches.
 - **🔗 Link Target Filtering:** Avoid false positives by searching only the visible text of Markdown links and aliased wikilinks, ignoring hidden URLs and destinations.
@@ -229,6 +229,8 @@ When **Enforce text legibility** is enabled, every composite color is verified a
 
 #### F. Native PDF Highlight Styling
 PDF matches retain PDF.js-native text-layer geometry. The plugin styles native secondary matches with the same adaptive fill and edge variables used in Markdown, while the selected match uses the transparent current-match outline. Adjacent PDF.js fragments on the same visual line are joined to avoid internal outline seams.
+
+PDF page appearance is detected automatically: white canvas-rendered pages use light-theme color calculations even inside a dark Obsidian theme, while pages rendered with CSS `filter: invert(...)` (e.g. Minimal's PDF dark mode) use dark-theme calculations. This ensures match colors always contrast correctly against the actual PDF page.
 
 ---
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import IncrementalSearchPlugin from "../src/main";
 import { getActiveWidget } from "../src/widget";
+import * as colors from "../src/utils/colors";
+import { isPdfView, createPdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 
 (global as any).Event = class {};
 
@@ -430,6 +432,53 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
       registeredTab = tab;
     };
     plugin.onunload();
+  });
+
+  it("refreshes PDF colors on all open PDF leaves when settings change", () => {
+    const applySpy = vi.spyOn(colors, "applyPdfColors").mockImplementation(() => {});
+    const containerEl = document.createElement("div");
+    const mockPdfView = {
+      getViewType: () => "pdf",
+      contentEl: containerEl,
+      viewer: {
+        child: {
+          pdfViewer: {
+            pdfViewer: {
+              pdfDocument: { numPages: 1 },
+              pagesCount: 1,
+            },
+          },
+        },
+      },
+    };
+    const pdfLeaf = {
+      view: mockPdfView,
+      containerEl,
+    };
+    const markdownLeaf = {
+      view: { getViewType: () => "markdown" },
+      containerEl: document.createElement("div"),
+    };
+
+    plugin.app.workspace.iterateAllLeaves = (cb: any) => {
+      cb(pdfLeaf);
+      cb(markdownLeaf);
+    };
+
+    plugin.refreshAllPdfColors();
+
+    expect(applySpy).toHaveBeenCalledTimes(1);
+    expect(applySpy).toHaveBeenCalledWith(containerEl, plugin.settings);
+    applySpy.mockRestore();
+  });
+
+  it("skips PDF color refresh when iterateAllLeaves is unavailable", () => {
+    const applySpy = vi.spyOn(colors, "applyPdfColors").mockImplementation(() => {});
+    plugin.app.workspace.iterateAllLeaves = undefined;
+
+    expect(() => plugin.refreshAllPdfColors()).not.toThrow();
+    expect(applySpy).not.toHaveBeenCalled();
+    applySpy.mockRestore();
   });
 });
 

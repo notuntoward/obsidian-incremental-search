@@ -770,6 +770,30 @@ export function invalidateAppearanceCache(): void {
 }
 
 /**
+ * Computes secondary match colors for PDFs using the theme mode (light or dark)
+ * that best matches the PDF's appearance, but with the PDF's actual background
+ * and text colors for alpha/legibility calculations.
+ */
+export function computePdfSecondaryStyle(
+	background: RGBA,
+	text: RGBA,
+	settings?: Partial<IncrementalSearchSettings>
+): SecondaryStyle {
+	const measured = measureCurrentMatchAppearance();
+	const bgLum = relativeLuminance(background);
+	const isDark = bgLum < 0.35;
+	return buildSecondaryStyle(
+		{
+			...measured,
+			appBackground: background,
+			mode: isDark ? "dark" : "light",
+			normalText: text,
+		},
+		settings
+	);
+}
+
+/**
  * Computes or retrieves cached secondary match style and applies CSS custom properties.
  */
 export function getOrComputeSecondaryStyle(

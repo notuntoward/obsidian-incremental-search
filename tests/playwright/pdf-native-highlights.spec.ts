@@ -6,7 +6,7 @@ test("native PDF highlights match markdown current and secondary styling", async
 		<style>
 			:root {
 				--interactive-accent: #705dcf;
-				--incsearch-current-outline-resolved: #3f2d98;
+				--incsearch-current-outline-resolved: #705dcf;
 			}
 			.textLayer .highlight {
 				--highlight-bg-color: rgb(230 180 0);
@@ -55,6 +55,53 @@ test("native PDF highlights match markdown current and secondary styling", async
 	expect(styles.pdfCurrent.outlineStyle).toBe(styles.markdownCurrent.outlineStyle);
 	expect(styles.pdfCurrent.outlineWidth).toBe(styles.markdownCurrent.outlineWidth);
 	expect(styles.pdfCurrent.boxShadow).toBe("none");
+});
+
+test("PDF matches keep white-page contrast in dark theme", async ({ page }) => {
+	await page.setContent(`
+		<style>
+			:root {
+				--interactive-accent: #b9a5ff;
+				--incsearch-current-outline-resolved: #b9a5ff;
+			}
+		</style>
+		<body class="theme-dark">
+			<span id="markdown-secondary" class="incsearch-match-exact">markdown secondary</span>
+			<span id="markdown-current" class="incsearch-match-exact is-current">markdown current</span>
+			<div id="pdf" class="incsearch-active-pdf">
+				<mark id="pdf-secondary" class="incsearch-pdf-secondary">pdf secondary</mark>
+				<div class="textLayer">
+					<span id="pdf-current" class="highlight selected">pdf current</span>
+				</div>
+			</div>
+		</body>
+	`);
+	await page.addStyleTag({ path: path.resolve("styles.css") });
+	await page.evaluate(() => {
+		const pdf = document.getElementById("pdf")!;
+		pdf.style.setProperty("--incsearch-secondary-fill", "rgba(112, 93, 207, 0.22)");
+		pdf.style.setProperty("--incsearch-secondary-edge", "rgba(112, 93, 207, 0.50)");
+		pdf.style.setProperty("--incsearch-current-outline-resolved", "#2e3338");
+	});
+
+	const styles = await page.evaluate(() => {
+		const read = (id: string) => {
+			const style = getComputedStyle(document.getElementById(id)!);
+			return { backgroundColor: style.backgroundColor, outlineColor: style.outlineColor };
+		};
+		return {
+			markdownSecondary: read("markdown-secondary"),
+			markdownCurrent: read("markdown-current"),
+			pdfSecondary: read("pdf-secondary"),
+			pdfCurrent: read("pdf-current"),
+		};
+	});
+
+	expect(styles.markdownSecondary.backgroundColor).toBe("rgba(185, 165, 255, 0.38)");
+	expect(styles.markdownCurrent.outlineColor).toBe("rgb(185, 165, 255)");
+
+	expect(styles.pdfSecondary.backgroundColor).toBe("rgba(112, 93, 207, 0.22)");
+	expect(styles.pdfCurrent.outlineColor).toBe("rgb(46, 51, 56)");
 });
 
 test("native wildcard token highlight uses markdown secondary fill", async ({ page }) => {

@@ -11,6 +11,7 @@ import {
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
 import { PdfMatch, PdfViewportAnchor } from "../src/pdf/types";
+import * as colors from "../src/utils/colors";
 
 describe("processPdfQuery (Space-as-wildcard for PDF)", () => {
 	it("treats single space as multi-token wildcard words (phraseSearch: false)", () => {
@@ -325,6 +326,24 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 			type: "find",
 			highlightAll: false,
 		});
+	});
+
+	it("applies PDF colors on search and clears them on destroy", async () => {
+		const applySpy = vi.spyOn(colors, "applyPdfColors").mockImplementation(() => {});
+		const clearSpy = vi.spyOn(colors, "clearPdfColors").mockImplementation(() => {});
+
+		const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+		await controller.search("test");
+
+		expect(applySpy).toHaveBeenCalledTimes(1);
+		expect(applySpy).toHaveBeenCalledWith(containerEl, DEFAULT_SETTINGS);
+
+		controller.destroy();
+		expect(clearSpy).toHaveBeenCalledTimes(1);
+		expect(clearSpy).toHaveBeenCalledWith(containerEl);
+
+		applySpy.mockRestore();
+		clearSpy.mockRestore();
 	});
 
 	it("delegates to executeNativeFind when available with highlightAll: true", async () => {

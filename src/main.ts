@@ -24,7 +24,7 @@ import {
 	getActiveWidget,
 } from "./widget";
 import { IncrementalSearchSuggestModal } from "./modal";
-import { updateResolvedOutlineColor } from "./utils/colors";
+import { updateResolvedOutlineColor, applyPdfColors } from "./utils/colors";
 import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/adaptive-highlight";
 import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
@@ -59,6 +59,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			updateResolvedOutlineColor();
 			getOrComputeSecondaryStyle(this.settings);
+			this.refreshAllPdfColors();
 		});
 
 		this.registerEvent(
@@ -66,6 +67,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 				invalidateAppearanceCache();
 				updateResolvedOutlineColor();
 				getOrComputeSecondaryStyle(this.settings);
+				this.refreshAllPdfColors();
 			})
 		);
 
@@ -434,7 +436,23 @@ export default class IncrementalSearchPlugin extends Plugin {
 		invalidateAppearanceCache();
 		updateResolvedOutlineColor();
 		getOrComputeSecondaryStyle(this.settings);
+		this.refreshAllPdfColors();
 		await this.saveData(this.settings);
+	}
+
+	/**
+	 * Recomputes white-page-optimized match colors on every open PDF viewer so
+	 * searches are immediately ready after any theme or match-style change.
+	 */
+	refreshAllPdfColors() {
+		this.app.workspace.iterateAllLeaves?.((leaf: any) => {
+			if (leaf?.view && isPdfView(leaf.view)) {
+				const adapter = createPdfViewAdapter(leaf.view);
+				if (adapter?.containerEl) {
+					applyPdfColors(adapter.containerEl, this.settings);
+				}
+			}
+		});
 	}
 }
 

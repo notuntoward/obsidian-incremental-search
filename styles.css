@@ -349,7 +349,7 @@ mark.incsearch-pdf-secondary,
 }
 
 ::highlight(incsearch-pdf-current-token) {
-  background-color: var(--incsearch-secondary-fill);
+  background-color: var(--incsearch-pdf-secondary-fill, var(--incsearch-secondary-fill));
 }
 
 /* PDF.js can split one selected match at text-span boundaries. Clip only the
