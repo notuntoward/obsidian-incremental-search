@@ -143,7 +143,19 @@ export function buildHighlightDecorations(
 
 	// Sort by start position; for equal start positions, place enclosing spans first
 	positions.sort((a, b) => a.from - b.from || b.to - a.to);
-	const builder = positions.map((p) => p.mark.range(p.from, p.to));
+
+	// Deduplicate positions with identical boundaries and decoration classes
+	const uniquePositions: { from: number; to: number; mark: Decoration }[] = [];
+	const seenKeys = new Set<string>();
+	for (const p of positions) {
+		const key = `${p.from}:${p.to}:${(p.mark.spec as any)?.class ?? ""}`;
+		if (!seenKeys.has(key)) {
+			seenKeys.add(key);
+			uniquePositions.push(p);
+		}
+	}
+
+	const builder = uniquePositions.map((p) => p.mark.range(p.from, p.to));
 	return Decoration.set(builder, true);
 }
 

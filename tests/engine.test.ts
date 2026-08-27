@@ -148,6 +148,15 @@ describe("engine: findWildcardMatches", () => {
     expect(matches[1].from).toBe(12);
     expect(matches[1].to).toBe(15);
   });
+
+  it("tightens wildcard matches non-greedily to the closest preceding token", () => {
+    const text = "enough studies yet to make a judgement, I think... improvement among exercise types. I would have thought that resistance+cardio would have been better!";
+    const matches = findWildcardMatches(text, "i would", 0, false);
+    // Should match "I would" and "cardio would" instead of matching from every 'i' in the text
+    expect(matches).toHaveLength(2);
+    expect(text.slice(matches[0].from, matches[0].to)).toBe("I would");
+    expect(text.slice(matches[1].from, matches[1].to)).toBe("io would");
+  });
 });
 
 describe("engine: findLiteralMatches", () => {

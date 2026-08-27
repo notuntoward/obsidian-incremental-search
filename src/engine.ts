@@ -175,27 +175,30 @@ export function compileQuery(
 
 /**
  * Finds all space-as-wildcard matches in a string.
+ * Sequential tokens are searched in order; earlier tokens are tightened (non-greedy)
+ * to minimize gaps, and the search advances past the match to prevent overlapping duplicates.
  */
 export function findWildcardMatches(
 	text: string,
-	query: string,
+	queryOrTokens: string | string[],
 	offset = 0,
 	caseSensitive = false
 ): MatchRange[] {
-	if (query.length === 0) return [];
+	if (!text || text.length === 0) return [];
 	const haystack = caseSensitive ? text : text.toLowerCase();
-	const tokens = parseWildcardQuery(query, caseSensitive);
+	const tokens = Array.isArray(queryOrTokens)
+		? queryOrTokens
+		: parseWildcardQuery(queryOrTokens, caseSensitive);
 
 	if (tokens.length === 0) return [];
 	const results: MatchRange[] = [];
 
 	let searchStart = 0;
 	while (searchStart < haystack.length) {
+		// 1. Forward pass: find the earliest occurrence of all tokens in sequence
 		let currentStart = searchStart;
-		const chars: { from: number; to: number }[] = [];
-		let matchValid = true;
-		let firstTokenIdx = -1;
-		let lastTokenEnd = -1;
+		const tokenPositions: number[] = [];
+		let matchFound = true;
 
 		for (let i = 0; i < tokens.length; i++) {
 			const token = tokens[i];
@@ -203,29 +206,46 @@ export function findWildcardMatches(
 
 			const idx = haystack.indexOf(token, currentStart);
 			if (idx === -1) {
-				matchValid = false;
+				matchFound = false;
 				break;
 			}
-
-			if (firstTokenIdx === -1) {
-				firstTokenIdx = idx;
-			}
-
-			chars.push({ from: offset + idx, to: offset + idx + token.length });
+			tokenPositions.push(idx);
 			currentStart = idx + token.length;
-			lastTokenEnd = currentStart;
 		}
 
-		if (matchValid && firstTokenIdx !== -1) {
-			results.push({
-				from: offset + firstTokenIdx,
-				to: offset + lastTokenEnd,
-				chars,
-			});
-			searchStart = firstTokenIdx + 1;
-		} else {
+		if (!matchFound || tokenPositions.length === 0) {
 			break;
 		}
+
+		// 2. Backward tightening pass: minimize gaps by finding the latest occurrence of each earlier token
+		// that still occurs before the subsequent token (non-greedy / shortest match)
+		for (let i = tokenPositions.length - 2; i >= 0; i--) {
+			const token = tokens[i];
+			const nextTokenPos = tokenPositions[i + 1];
+			const prevTokenEnd = i > 0 ? tokenPositions[i - 1] + tokens[i - 1].length : searchStart;
+			const latestIdx = haystack.lastIndexOf(token, nextTokenPos - token.length);
+			if (latestIdx !== -1 && latestIdx >= prevTokenEnd) {
+				tokenPositions[i] = latestIdx;
+			}
+		}
+
+		const firstTokenIdx = tokenPositions[0];
+		const lastTokenIdx = tokenPositions[tokenPositions.length - 1];
+		const lastTokenEnd = lastTokenIdx + tokens[tokens.length - 1].length;
+
+		const chars: { from: number; to: number }[] = tokenPositions.map((pos, idx) => ({
+			from: offset + pos,
+			to: offset + pos + tokens[idx].length,
+		}));
+
+		results.push({
+			from: offset + firstTokenIdx,
+			to: offset + lastTokenEnd,
+			chars,
+		});
+
+		// Advance past the last matched token to avoid overlapping/duplicate matches
+		searchStart = lastTokenEnd;
 	}
 
 	return results;
@@ -294,47 +314,12 @@ export function findMatchesInText(
 			if (count >= maxMatches) break;
 		}
 	} else if (compiled.type === "wildcard" && compiled.tokens) {
-		const haystack = compiled.caseSensitive ? text : text.toLowerCase();
-		const tokens = compiled.tokens;
-		let searchStart = 0;
-
-		while (searchStart < haystack.length) {
-			let currentStart = searchStart;
-			const chars: { from: number; to: number }[] = [];
-			let matchValid = true;
-			let firstTokenIdx = -1;
-			let lastTokenEnd = -1;
-
-			for (let i = 0; i < tokens.length; i++) {
-				const token = tokens[i];
-				if (token.length === 0) continue;
-
-				const idx = haystack.indexOf(token, currentStart);
-				if (idx === -1) {
-					matchValid = false;
-					break;
-				}
-
-				if (firstTokenIdx === -1) {
-					firstTokenIdx = idx;
-				}
-
-				chars.push({ from: offset + idx, to: offset + idx + token.length });
-				currentStart = idx + token.length;
-				lastTokenEnd = currentStart;
-			}
-
-			if (matchValid && firstTokenIdx !== -1) {
-				rawMatches.push({
-					from: offset + firstTokenIdx,
-					to: offset + lastTokenEnd,
-					chars,
-				});
-				searchStart = firstTokenIdx + 1;
-			} else {
-				break;
-			}
-		}
+		rawMatches = findWildcardMatches(
+			text,
+			compiled.tokens,
+			offset,
+			compiled.caseSensitive
+		);
 	} else if (compiled.type === "literal" && compiled.needle) {
 		const haystack = compiled.caseSensitive ? text : text.toLowerCase();
 		const needle = compiled.needle;

@@ -739,4 +739,46 @@ describe("session: callout and fold auto-expansion and restoration", () => {
 
     document.body.removeChild(tableEl);
   });
+
+  it("buildHighlightDecorations deduplicates identical decoration ranges", () => {
+    const session: SearchSessionState = {
+      query: "i would",
+      direction: "forward",
+      matches: [
+        {
+          from: 0,
+          to: 20,
+          chars: [
+            { from: 0, to: 1 },
+            { from: 15, to: 20 },
+          ],
+        },
+        {
+          from: 5,
+          to: 20,
+          chars: [
+            { from: 5, to: 6 },
+            { from: 15, to: 20 },
+          ],
+        },
+      ],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+      allMatchesDisplayMode: "always",
+    };
+
+    const deco = buildHighlightDecorations(session, [{ from: 0, to: 100 }]);
+    expect(deco).toBeDefined();
+
+    // Verify through iterator that { from: 15, to: 20 } mark only appears once, not duplicated
+    let count15to20 = 0;
+    const iter = deco.iter();
+    while (iter.value !== null) {
+      if (iter.from === 15 && iter.to === 20) {
+        count15to20++;
+      }
+      iter.next();
+    }
+    expect(count15to20).toBe(1);
+  });
 });
