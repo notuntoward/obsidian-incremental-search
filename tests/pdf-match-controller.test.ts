@@ -6,7 +6,7 @@ import {
 	isMatchAtOrBeforeBottom,
 	findInitialPdfActiveIndex,
 	findPdfWildcardMatches,
-	joinNativeSelectedHighlightFragments,
+	renderNativeCurrentMatchEnvelope,
 } from "../src/pdf/pdf-match-controller";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
@@ -71,33 +71,124 @@ describe("findPdfWildcardMatches", () => {
 	});
 });
 
-describe("joinNativeSelectedHighlightFragments", () => {
-	it("joins touching same-line fragments but preserves real line breaks", () => {
+describe("renderNativeCurrentMatchEnvelope", () => {
+	it("keeps multiline boxes separate when their outlines do not touch", () => {
 		const container = document.createElement("div");
-		container.innerHTML = `<div class="textLayer">
-			<span id="a" class="highlight begin selected"></span>
-			<span id="b" class="highlight middle selected"></span>
-			<span id="c" class="highlight end selected"></span>
-		</div>`;
+		container.innerHTML = `<div class="page" data-page-number="2"><div class="textLayer">
+			<span id="a" class="highlight begin selected">plugin</span>
+			<span id="b" class="highlight end selected"> something like isearch an</span>
+		</div></div>`;
+		const page = container.querySelector<HTMLElement>(".page")!;
 		const a = container.querySelector<HTMLElement>("#a")!;
 		const b = container.querySelector<HTMLElement>("#b")!;
-		const c = container.querySelector<HTMLElement>("#c")!;
+		page.getBoundingClientRect = () => ({
+			left: 0, right: 800, top: 0, bottom: 1000, width: 800, height: 1000,
+		} as DOMRect);
 		a.getBoundingClientRect = () => ({
-			left: 10, right: 50, top: 10, bottom: 30, width: 40, height: 20,
+			left: 640, right: 780, top: 100, bottom: 125, width: 140, height: 25,
 		} as DOMRect);
 		b.getBoundingClientRect = () => ({
-			left: 60, right: 100, top: 10, bottom: 30, width: 40, height: 20,
+			left: 65, right: 630, top: 127, bottom: 152, width: 565, height: 25,
 		} as DOMRect);
-		c.getBoundingClientRect = () => ({
-			left: 10, right: 60, top: 35, bottom: 55, width: 50, height: 20,
+		const createRange = vi.spyOn(document, "createRange").mockReturnValue({
+			setStart: vi.fn(),
+			setEnd: vi.fn(),
+			getClientRects: () => [{
+				left: 100, right: 150, top: 100, bottom: 125, width: 50, height: 25,
+			} as DOMRect],
+		} as unknown as Range);
+
+		renderNativeCurrentMatchEnvelope(container, "plugin some like isearch an");
+
+		const overlay = page.querySelector(".incsearch-pdf-native-current-overlay");
+		expect(overlay).not.toBeNull();
+		const envelopePath = overlay?.querySelector(".incsearch-pdf-native-current-envelope path");
+		expect(envelopePath).not.toBeNull();
+		expect(envelopePath?.getAttribute("d")?.match(/M /g)).toHaveLength(2);
+		expect(envelopePath?.getAttribute("d")?.match(/Z/g)).toHaveLength(2);
+		expect(overlay?.querySelectorAll(".incsearch-pdf-native-current-tokens rect")).toHaveLength(5);
+		expect(page.classList.contains("incsearch-pdf-native-envelope-active")).toBe(true);
+		createRange.mockRestore();
+	});
+
+	it("merges neighboring line boxes only when their outlines touch", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="page" data-page-number="2"><div class="textLayer">
+			<span id="first" class="highlight begin selected">plugin</span>
+			<span id="second" class="highlight end selected"> some like isearch and</span>
+		</div></div>`;
+		const page = container.querySelector<HTMLElement>(".page")!;
+		const first = container.querySelector<HTMLElement>("#first")!;
+		const second = container.querySelector<HTMLElement>("#second")!;
+		page.getBoundingClientRect = () => ({
+			left: 0, right: 800, top: 0, bottom: 1000, width: 800, height: 1000,
+		} as DOMRect);
+		first.getBoundingClientRect = () => ({
+			left: 640, right: 780, top: 100, bottom: 125, width: 140, height: 25,
+		} as DOMRect);
+		second.getBoundingClientRect = () => ({
+			left: 65, right: 650, top: 127, bottom: 152, width: 585, height: 25,
 		} as DOMRect);
 
-		joinNativeSelectedHighlightFragments(container);
+		renderNativeCurrentMatchEnvelope(container, "plugin some like isearch and");
 
-		expect(a.classList.contains("incsearch-join-next")).toBe(true);
-		expect(b.classList.contains("incsearch-join-prev")).toBe(true);
-		expect(b.classList.contains("incsearch-join-next")).toBe(false);
-		expect(c.classList.contains("incsearch-join-prev")).toBe(false);
+		const path = container.querySelector(".incsearch-pdf-native-current-envelope path");
+		expect(path?.getAttribute("d")?.match(/M /g)).toHaveLength(1);
+		expect(path?.getAttribute("d")?.match(/Z/g)).toHaveLength(1);
+		expect(path?.getAttribute("d")).toBe(
+			"M 638 99 L 782 99 L 782 126 L 652 126 L 652 153 L 63 153 L 63 126 L 638 126 L 638 99 Z"
+		);
+	});
+
+	it("keeps a later line separate from an earlier touching group", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="page" data-page-number="4"><div class="textLayer">
+			<span id="first" class="highlight begin selected">first</span>
+			<span id="second" class="highlight middle selected"> second</span>
+			<span id="third" class="highlight end selected"> third</span>
+		</div></div>`;
+		const page = container.querySelector<HTMLElement>(".page")!;
+		const first = container.querySelector<HTMLElement>("#first")!;
+		const second = container.querySelector<HTMLElement>("#second")!;
+		const third = container.querySelector<HTMLElement>("#third")!;
+		page.getBoundingClientRect = () => ({
+			left: 0, right: 800, top: 0, bottom: 1000, width: 800, height: 1000,
+		} as DOMRect);
+		first.getBoundingClientRect = () => ({
+			left: 500, right: 780, top: 100, bottom: 125, width: 280, height: 25,
+		} as DOMRect);
+		second.getBoundingClientRect = () => ({
+			left: 65, right: 510, top: 127, bottom: 152, width: 445, height: 25,
+		} as DOMRect);
+		third.getBoundingClientRect = () => ({
+			left: 65, right: 400, top: 158, bottom: 183, width: 335, height: 25,
+		} as DOMRect);
+
+		renderNativeCurrentMatchEnvelope(container, "first second third");
+
+		const path = container.querySelector(".incsearch-pdf-native-current-envelope path");
+		expect(path?.getAttribute("d")?.match(/M /g)).toHaveLength(2);
+		expect(path?.getAttribute("d")?.match(/Z/g)).toHaveLength(2);
+	});
+
+	it("does not segment literal double-space queries into wildcard tokens", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="page" data-page-number="3"><div class="textLayer">
+			<span id="selected" class="highlight selected">and meta</span>
+		</div></div>`;
+		const page = container.querySelector<HTMLElement>(".page")!;
+		const selected = container.querySelector<HTMLElement>("#selected")!;
+		page.getBoundingClientRect = () => ({
+			left: 0, right: 800, top: 0, bottom: 1000, width: 800, height: 1000,
+		} as DOMRect);
+		selected.getBoundingClientRect = () => ({
+			left: 100, right: 200, top: 100, bottom: 125, width: 100, height: 25,
+		} as DOMRect);
+
+		renderNativeCurrentMatchEnvelope(container, "and  meta");
+
+		expect(container.querySelectorAll(".incsearch-pdf-native-current-tokens rect")).toHaveLength(0);
+		expect(container.querySelectorAll(".incsearch-pdf-native-current-envelope path")).toHaveLength(1);
 	});
 });
 
@@ -240,7 +331,7 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 		expect(containerEl.classList.contains("incsearch-active-pdf")).toBe(false);
 		expect(nativeFindCommands[nativeFindCommands.length - 1]).toEqual({
 			query: "",
-			type: "",
+			type: "find",
 			highlightAll: false,
 		});
 	});
@@ -374,6 +465,31 @@ describe("PDF Match Controller", () => {
 		expect(controller.state.query).toBe("graph");
 		expect(controller.state.matches).toHaveLength(1);
 		expect(controller.state.matches[0].pageNumber).toBe(3);
+	});
+
+	it("removes generated and native current boxes immediately on accept", () => {
+		const page = pageElements.get(1)!;
+		page.classList.add("incsearch-pdf-native-envelope-active");
+		const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		overlay.classList.add("incsearch-pdf-native-current-overlay");
+		page.appendChild(overlay);
+		const selected = document.createElement("span");
+		selected.className = "highlight selected";
+		page.querySelector(".textLayer")?.appendChild(selected);
+		const executeNativeFind = vi.fn();
+		mockAdapter.executeNativeFind = executeNativeFind;
+		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+
+		controller.accept();
+
+		expect(containerEl.querySelector(".incsearch-pdf-native-current-overlay")).toBeNull();
+		expect(containerEl.querySelector(".highlight.selected")).toBeNull();
+		expect(page.classList.contains("incsearch-pdf-native-envelope-active")).toBe(false);
+		expect(executeNativeFind).toHaveBeenCalledWith({
+			query: "",
+			type: "find",
+			highlightAll: false,
+		});
 	});
 
 	it("orders matches on a page in top-to-bottom visual order when items are scrambled in stream order", async () => {
@@ -787,4 +903,3 @@ describe("PDF Match Controller", () => {
 		});
 	});
 });
-

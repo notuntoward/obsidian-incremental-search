@@ -85,4 +85,13 @@ export function clearPageHighlights(pageElement: HTMLElement) {
 export function clearAllPdfHighlights(containerEl: HTMLElement) {
 	const overlays = containerEl.querySelectorAll(`.${OVERLAY_CLASS}`);
 	overlays.forEach((el) => el.remove());
+	containerEl
+		.querySelectorAll(".incsearch-pdf-native-current-overlay")
+		.forEach((el) => el.remove());
+	containerEl
+		.querySelectorAll(".incsearch-pdf-native-envelope-active")
+		.forEach((el) => el.classList.remove("incsearch-pdf-native-envelope-active"));
+	containerEl.querySelectorAll(".highlight.selected").forEach((el) => {
+		el.classList.remove("selected");
+	});
 }

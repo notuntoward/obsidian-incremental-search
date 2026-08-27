@@ -348,25 +348,35 @@ mark.incsearch-pdf-secondary,
   border-radius: var(--radius-s, 4px) !important;
 }
 
-/* PDF.js can split one selected match at text-span boundaries. Clip only the
-   touching internal edges; fragments on different visual lines remain boxed. */
-.incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-next,
-.incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-next {
-  clip-path: inset(-4px 0 -4px -4px);
-  border-top-right-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
+.incsearch-active-pdf .incsearch-pdf-native-envelope-active .textLayer .highlight.selected,
+.incsearch-active-pdf .incsearch-pdf-native-envelope-active .text-layer .highlight.selected {
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
 }
 
-.incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-prev,
-.incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-prev {
-  clip-path: inset(-4px -4px -4px 0);
-  border-top-left-radius: 0 !important;
-  border-bottom-left-radius: 0 !important;
+.incsearch-pdf-native-current-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
 }
 
-.incsearch-active-pdf .textLayer .highlight.selected.incsearch-join-prev.incsearch-join-next,
-.incsearch-active-pdf .text-layer .highlight.selected.incsearch-join-prev.incsearch-join-next {
-  clip-path: inset(-4px 0);
+.incsearch-pdf-native-current-envelope path {
+  fill: none;
+  stroke: var(--incsearch-current-outline-resolved, var(--interactive-accent));
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.incsearch-pdf-native-current-tokens rect {
+  fill: var(--incsearch-secondary-fill);
+  stroke: var(--incsearch-secondary-edge, transparent);
+  stroke-width: 1px;
 }
 
 .incsearch-active-pdf.incsearch-secondary-style-underline .textLayer .highlight:not(.selected),
