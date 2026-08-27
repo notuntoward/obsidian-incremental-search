@@ -13,6 +13,16 @@ import { PdfMatchController } from "./pdf/pdf-match-controller";
 
 let activeWidgetEl: HTMLDivElement | null = null;
 let activeKeyCleanup: (() => void) | null = null;
+let focusGuardUntil = 0;
+
+/**
+ * Arms a focus-guard that prevents the blur handler from closing the session
+ * for `durationMs` milliseconds.  If something steals focus within that
+ * window the guard re-focuses the input instead of tearing down the widget.
+ */
+export function setFocusGuard(durationMs = 200) {
+	focusGuardUntil = Date.now() + durationMs;
+}
 
 export function getActiveWidget(): HTMLDivElement | null {
 	return activeWidgetEl;
@@ -232,6 +242,10 @@ export function renderWidget(
 		window.setTimeout(() => {
 			if (document.activeElement === input) return;
 			if (el.contains(document.activeElement)) return;
+			if (Date.now() < focusGuardUntil) {
+				input.focus();
+				return;
+			}
 			const session = view.state.field(searchSessionField, false);
 			if (session) {
 				closeSession(view, plugin);
@@ -307,10 +321,16 @@ export function renderWidget(
 		}
 	});
 
+	setFocusGuard();
 	input.focus();
 	const len = input.value.length;
 	input.setSelectionRange(len, len);
 	updateCounter();
+	window.requestAnimationFrame(() => {
+		if (activeWidgetEl && document.activeElement !== input) {
+			input.focus();
+		}
+	});
 }
 
 /**
@@ -392,6 +412,10 @@ export function renderPdfWidget(
 		window.setTimeout(() => {
 			if (document.activeElement === input) return;
 			if (el.contains(document.activeElement)) return;
+			if (Date.now() < focusGuardUntil) {
+				input.focus();
+				return;
+			}
 			if (input.value) {
 				plugin.settings.lastQuery = input.value;
 				void plugin.saveSettings();
@@ -482,8 +506,14 @@ export function renderPdfWidget(
 		}
 	});
 
+	setFocusGuard();
 	input.focus();
 	const len = input.value.length;
 	input.setSelectionRange(len, len);
 	updateCounter();
+	window.requestAnimationFrame(() => {
+		if (activeWidgetEl && document.activeElement !== input) {
+			input.focus();
+		}
+	});
 }

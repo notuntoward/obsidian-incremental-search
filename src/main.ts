@@ -22,6 +22,7 @@ import {
 	removeAllWidgets,
 	removeWidget,
 	getActiveWidget,
+	setFocusGuard,
 } from "./widget";
 import { IncrementalSearchSuggestModal } from "./modal";
 import { updateResolvedOutlineColor, applyPdfColors } from "./utils/colors";
@@ -290,7 +291,15 @@ export default class IncrementalSearchPlugin extends Plugin {
 				const widget = getActiveWidget();
 				if (widget) {
 					const input = widget.querySelector<HTMLInputElement>(".incsearch-input");
-					input?.focus();
+					if (input) {
+						setFocusGuard();
+						input.focus();
+						window.requestAnimationFrame(() => {
+							if (getActiveWidget() && document.activeElement !== input) {
+								input.focus();
+							}
+						});
+					}
 				}
 			}
 			updatePdfWidgetCounter(this.pdfController);
@@ -361,7 +370,15 @@ export default class IncrementalSearchPlugin extends Plugin {
 				const widget = getActiveWidget();
 				if (widget) {
 					const input = widget.querySelector<HTMLInputElement>(".incsearch-input");
-					input?.focus();
+					if (input) {
+						setFocusGuard();
+						input.focus();
+						window.requestAnimationFrame(() => {
+							if (getActiveWidget() && document.activeElement !== input) {
+								input.focus();
+							}
+						});
+					}
 				}
 			}
 			updateWidgetCounter(view);

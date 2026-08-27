@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   updateWidgetCounter,
   removeWidget,
@@ -6,6 +6,7 @@ import {
   getActiveWidget,
   renderWidget,
   renderPdfWidget,
+  setFocusGuard,
 } from "../src/widget";
 import { SearchSessionState } from "../src/types";
 
@@ -362,3 +363,211 @@ describe("widget: counter & lifecycle", () => {
     expect(ctrlEnterEvent.defaultPrevented).toBe(true);
   });
 });
+
+describe("widget: focus-guard regression", () => {
+  let sessionState: SearchSessionState | null = null;
+  let mockView: any;
+  let mockPlugin: any;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+
+    sessionState = {
+      query: "word",
+      direction: "forward",
+      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+
+    mockView = {
+      state: {
+        field: () => sessionState,
+        doc: {
+          lines: 1,
+          line: () => ({ text: "word ... word", from: 0, to: 13, length: 13 }),
+        },
+      },
+      dispatch: (tr: any) => {
+        if (tr.effects) {
+          const effects = Array.isArray(tr.effects) ? tr.effects : [tr.effects];
+          for (const eff of effects) {
+            if (eff?.value !== undefined && (eff.value === null || eff.value.matches !== undefined)) {
+              sessionState = eff.value;
+            }
+          }
+        }
+      },
+      dom: { parentElement: document.createElement("div") },
+      focus: () => {},
+    };
+
+    mockPlugin = {
+      settings: {
+        spaceAsWildcard: false,
+        lastQuery: "",
+        usePopupModal: false,
+        matchOnlyVisibleLinks: false,
+        allMatchesDisplayMode: "off",
+        searchExitBehavior: "emacs",
+      },
+      saveSettings: async () => {},
+      app: {
+        workspace: { getActiveFile: () => null },
+        metadataCache: { getFileCache: () => null },
+      },
+    };
+  });
+
+  afterEach(() => {
+    removeAllWidgets();
+    vi.useRealTimers();
+  });
+
+  it("setFocusGuard is exported and callable", () => {
+    // Should not throw; arms the guard for 200 ms (default)
+    expect(() => setFocusGuard()).not.toThrow();
+    // Custom duration should also work
+    expect(() => setFocusGuard(500)).not.toThrow();
+  });
+
+  it("blur during focus-guard window re-focuses input instead of closing session", () => {
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+    expect(widget).not.toBeNull();
+
+    // Arm the guard so the widget believes it was just focused programmatically
+    setFocusGuard(200);
+
+    // Mock input.focus so we can observe re-focus calls
+    let focusCallCount = 0;
+    const origFocus = input.focus.bind(input);
+    input.focus = () => { focusCallCount++; origFocus(); };
+
+    // Dispatch a blur event while the guard is still live (< 200 ms elapsed)
+    input.dispatchEvent(new FocusEvent("blur"));
+
+    // Advance time past the blur handler's 100 ms debounce, but still within the 200 ms guard
+    vi.advanceTimersByTime(100);
+
+    // Guard should have re-focused the input rather than closing the session
+    expect(focusCallCount).toBeGreaterThan(0);
+    expect(getActiveWidget()).not.toBeNull();
+    expect(sessionState).not.toBeNull();
+  });
+
+  it("blur after focus-guard expires closes the session normally", () => {
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+    expect(widget).not.toBeNull();
+
+    // Arm a very short guard (1 ms) that will have expired by the time the blur handler fires
+    setFocusGuard(1);
+
+    // Advance time past the guard duration so it has expired
+    vi.advanceTimersByTime(5);
+
+    // Dispatch blur and advance past the 100 ms debounce
+    input.dispatchEvent(new FocusEvent("blur"));
+    vi.advanceTimersByTime(110);
+
+    // Guard has expired → session should be closed
+    expect(getActiveWidget()).toBeNull();
+    expect(sessionState).toBeNull();
+  });
+
+  it("renderWidget arms the focus-guard on initial render", () => {
+    // Patch Date.now so we can observe that the guard is set to a future time
+    const before = Date.now();
+    renderWidget(mockView, mockPlugin, "", "forward");
+
+    // Simulate an immediate blur (e.g. from a CM dispatch stealing focus)
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    let refocused = false;
+    const origFocus = input.focus.bind(input);
+    input.focus = () => { refocused = true; origFocus(); };
+
+    input.dispatchEvent(new FocusEvent("blur"));
+    // Advance time inside the blur debounce but before guard expires
+    vi.advanceTimersByTime(100);
+
+    // The guard should have been active and re-focused the input
+    expect(refocused).toBe(true);
+    expect(getActiveWidget()).not.toBeNull();
+    void before; // suppress unused warning
+  });
+
+  it("PDF widget: blur during focus-guard window re-focuses instead of calling onClose", () => {
+    const mockController: any = {
+      adapter: { containerEl: document.createElement("div") },
+      state: {
+        matches: [{ id: "m1" }],
+        activeIndex: 0,
+        direction: "forward",
+        isScanning: false,
+        query: "test",
+      },
+      search: async () => {},
+      onStateChange: null,
+    };
+
+    let closed = false;
+    renderPdfWidget(mockController, mockPlugin, "test", "forward", () => {
+      closed = true;
+    });
+
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+    expect(widget).not.toBeNull();
+
+    // Guard was armed by renderPdfWidget; immediately dispatch blur
+    let refocused = false;
+    const origFocus = input.focus.bind(input);
+    input.focus = () => { refocused = true; origFocus(); };
+
+    input.dispatchEvent(new FocusEvent("blur"));
+    // Advance to just inside the blur debounce window (100 ms), within the 200 ms guard
+    vi.advanceTimersByTime(100);
+
+    expect(refocused).toBe(true);
+    expect(closed).toBe(false);
+    expect(getActiveWidget()).not.toBeNull();
+  });
+
+  it("PDF widget: blur after focus-guard expires calls onClose", () => {
+    const mockController: any = {
+      adapter: { containerEl: document.createElement("div") },
+      state: {
+        matches: [],
+        activeIndex: 0,
+        direction: "forward",
+        isScanning: false,
+        query: "",
+      },
+      search: async () => {},
+      onStateChange: null,
+    };
+
+    let closed = false;
+    renderPdfWidget(mockController, mockPlugin, "", "forward", () => {
+      closed = true;
+    });
+
+    const widget = getActiveWidget();
+    const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
+
+    // Manually expire the guard
+    setFocusGuard(1);
+    vi.advanceTimersByTime(5); // guard is now expired
+
+    input.dispatchEvent(new FocusEvent("blur"));
+    vi.advanceTimersByTime(110); // past the 100 ms debounce
+
+    expect(closed).toBe(true);
+  });
+});
+
