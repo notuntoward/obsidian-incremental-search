@@ -27,6 +27,7 @@ import {
 import { IncrementalSearchSuggestModal } from "./modal";
 import { updateResolvedOutlineColor, applyPdfColors } from "./utils/colors";
 import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/adaptive-highlight";
+import { logDebug, describeElement } from "./utils/logger";
 import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
 import { clearAllPdfHighlights } from "./pdf/highlight-layer";
@@ -45,6 +46,7 @@ export * from "./pdf/highlight-layer";
 export * from "./pdf/pdf-view-adapter";
 export * from "./pdf/pdf-match-controller";
 export * from "./utils/adaptive-highlight";
+export * from "./utils/logger";
 
 export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;
@@ -77,6 +79,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 			if (!target) return;
 
 			const activeWidget = getActiveWidget();
+			logDebug(
+				"main",
+				`handleLeafInteraction (${evt.type}) target=${describeElement(target)}, activeWidget=${describeElement(activeWidget)}`
+			);
+
 			if (activeWidget && activeWidget.contains(target)) {
 				return;
 			}
@@ -88,9 +95,17 @@ export default class IncrementalSearchPlugin extends Plugin {
 				if (leaf.containerEl === leafEl) {
 					this.lastInteractedLeaf = leaf;
 					if (this.app.workspace.activeLeaf !== leaf) {
+						logDebug(
+							"main",
+							`handleLeafInteraction setting activeLeaf to ${describeElement(leafEl)}`
+						);
 						this.app.workspace.setActiveLeaf(leaf, { focus: true });
 					}
 					if (activeWidget && !leafEl.contains(activeWidget)) {
+						logDebug(
+							"main",
+							`handleLeafInteraction removing widget because click was outside widget leaf (${describeElement(leafEl)})`
+						);
 						const input = activeWidget.querySelector("input");
 						if (input) {
 							input.blur();
@@ -114,16 +129,22 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
+				logDebug(
+					"main",
+					`active-leaf-change: leaf=${describeElement((leaf as any)?.containerEl)}, isPdf=${isPdfView(leaf?.view)}`
+				);
 				if (leaf) {
 					this.lastInteractedLeaf = leaf;
 				}
 				if (this.pdfController && leaf?.view !== this.activePdfView) {
+					logDebug("main", "active-leaf-change: destroying pdfController and removing widget");
 					this.pdfController.destroy();
 					this.pdfController = null;
 					this.activePdfView = null;
 					removeWidget();
 				}
 				if (leaf?.view && isPdfView(leaf.view)) {
+					logDebug("main", "active-leaf-change: PDF view active, removing widget");
 					removeWidget();
 					// Clear any residue highlights left behind by previous sessions
 					const adapter = createPdfViewAdapter(leaf.view);
@@ -158,6 +179,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 
 	onunload() {
+		logDebug("main", "onunload called, sweeping widgets");
 		if (this.pdfController) {
 			this.pdfController.destroy();
 			this.pdfController = null;
@@ -170,6 +192,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 	private getActiveTarget():
 		{ type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
 		const activeEl = document.activeElement;
+		logDebug("main", `getActiveTarget: activeElement=${describeElement(activeEl)}`);
 
 		// 1. If document.activeElement is inside a specific workspace leaf, use that leaf
 		if (activeEl && activeEl !== document.body) {
@@ -181,9 +204,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 			});
 			if (focusedLeaf?.view) {
 				if (isPdfView(focusedLeaf.view)) {
+					logDebug("main", "getActiveTarget [1]: activeElement in focused leaf -> PDF view");
 					return { type: "pdf", view: focusedLeaf.view };
 				}
 				if (focusedLeaf.view.editor) {
+					logDebug("main", "getActiveTarget [1]: activeElement in focused leaf -> Editor view");
 					return { type: "editor", editor: focusedLeaf.view.editor };
 				}
 			}
@@ -192,9 +217,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 		// 2. If the user recently clicked/interacted with a specific leaf
 		if (this.lastInteractedLeaf?.view) {
 			if (isPdfView(this.lastInteractedLeaf.view)) {
+				logDebug("main", "getActiveTarget [2]: lastInteractedLeaf -> PDF view");
 				return { type: "pdf", view: this.lastInteractedLeaf.view };
 			}
 			if (this.lastInteractedLeaf.view.editor) {
+				logDebug("main", "getActiveTarget [2]: lastInteractedLeaf -> Editor view");
 				return { type: "editor", editor: this.lastInteractedLeaf.view.editor };
 			}
 		}
@@ -210,9 +237,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 			});
 			if (activeLeafObj?.view) {
 				if (isPdfView(activeLeafObj.view)) {
+					logDebug("main", "getActiveTarget [3]: mod-active leaf -> PDF view");
 					return { type: "pdf", view: activeLeafObj.view };
 				}
 				if (activeLeafObj.view.editor) {
+					logDebug("main", "getActiveTarget [3]: mod-active leaf -> Editor view");
 					return { type: "editor", editor: activeLeafObj.view.editor };
 				}
 			}
@@ -225,25 +254,34 @@ export default class IncrementalSearchPlugin extends Plugin {
 		const activeView = activeLeaf?.view;
 
 		if (activeView && isPdfView(activeView)) {
+			logDebug("main", "getActiveTarget [4]: workspace.activeLeaf -> PDF view");
 			return { type: "pdf", view: activeView };
 		}
 		if (activeView?.editor) {
+			logDebug("main", "getActiveTarget [4]: workspace.activeLeaf -> Editor view");
 			return { type: "editor", editor: activeView.editor };
 		}
 
 		// 5. Fallback to activeLeaf on workspace
 		const fallbackView = this.app.workspace.getActiveViewOfType(View as any);
 		if (fallbackView && isPdfView(fallbackView)) {
+			logDebug("main", "getActiveTarget [5]: getActiveViewOfType -> PDF view");
 			return { type: "pdf", view: fallbackView };
 		}
 		if ((fallbackView as any)?.editor) {
+			logDebug("main", "getActiveTarget [5]: getActiveViewOfType -> Editor view");
 			return { type: "editor", editor: (fallbackView as any).editor };
 		}
 
+		logDebug("main", "getActiveTarget: no active target found (returning null)");
 		return null;
 	}
 
 	handleCommand(checking: boolean, direction: SearchDirection, explicitEditor?: Editor): boolean {
+		logDebug(
+			"main",
+			`handleCommand: direction=${direction}, checking=${checking}, explicitEditor=${Boolean(explicitEditor)}`
+		);
 		if (explicitEditor) {
 			if (!checking) {
 				this.invoke(explicitEditor, direction);
@@ -252,6 +290,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 
 		const target = this.getActiveTarget();
+		logDebug("main", `handleCommand: target=${target?.type ?? "null"}`);
 		if (!target) return false;
 
 		if (target.type === "pdf") {
@@ -272,10 +311,12 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 
 	invokePdf(view: any, direction: SearchDirection) {
+		logDebug("main", `invokePdf: direction=${direction}, hasController=${Boolean(this.pdfController)}`);
 		this.activePdfView = view;
 
 		if (this.pdfController) {
 			if (this.pdfController.state.query === "" && this.settings.lastQuery) {
+				logDebug("main", `invokePdf: double-tap recall query="${this.settings.lastQuery}"`);
 				void this.pdfController.search(this.settings.lastQuery, direction);
 				const widget = getActiveWidget();
 				if (widget) {
@@ -287,6 +328,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					}
 				}
 			} else {
+				logDebug("main", `invokePdf: advancing in direction ${direction}`);
 				this.pdfController.advance(direction);
 				const widget = getActiveWidget();
 				if (widget) {
@@ -296,6 +338,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 						input.focus();
 						window.requestAnimationFrame(() => {
 							if (getActiveWidget() && document.activeElement !== input) {
+								logDebug("main", "invokePdf RAF: refocusing input");
 								input.focus();
 							}
 						});
@@ -309,7 +352,10 @@ export default class IncrementalSearchPlugin extends Plugin {
 		removeWidget();
 
 		const adapter = createPdfViewAdapter(view);
-		if (!adapter) return;
+		if (!adapter) {
+			logDebug("main", "invokePdf: createPdfViewAdapter returned null");
+			return;
+		}
 
 		this.pdfController = new PdfMatchController(adapter, this.settings, direction, () => {
 			if (this.pdfController) {
@@ -317,18 +363,29 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}
 		});
 
-		const startingQuery = "";
+		const startingQuery =
+			typeof window !== "undefined"
+				? window.getSelection()?.toString().trim() ?? ""
+				: "";
+		logDebug("main", `invokePdf: rendering PDF widget with startingQuery="${startingQuery}"`);
 		renderPdfWidget(this.pdfController, this, startingQuery, direction, () => {
+			logDebug("main", "invokePdf: onClose callback triggered");
 			this.pdfController?.destroy();
 			this.pdfController = null;
 			this.activePdfView = null;
 			removeWidget();
 		});
+
+		if (startingQuery) {
+			void this.pdfController.search(startingQuery, direction);
+		}
 	}
 
 	invoke(editor: Editor, direction: SearchDirection) {
+		logDebug("main", `invoke (markdown): direction=${direction}`);
 		// If switching to markdown while a PDF search was active, clean up PDF controller
 		if (this.pdfController) {
+			logDebug("main", "invoke: cleaning up PDF controller");
 			this.pdfController.destroy();
 			this.pdfController = null;
 			this.activePdfView = null;
@@ -337,11 +394,16 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 		// @ts-expect-error CodeMirror view is attached to editor.cm in Obsidian runtime
 		const view: EditorView | undefined = editor.cm;
-		if (!view) return;
+		if (!view) {
+			logDebug("main", "invoke: editor.cm view is undefined");
+			return;
+		}
 
 		const session = view.state.field(searchSessionField, false);
 		if (session) {
+			logDebug("main", `invoke: existing session found (query="${session.query}", activeIndex=${session.activeIndex})`);
 			if (session.query === "" && this.settings.lastQuery) {
+				logDebug("main", `invoke: double-tap recall query="${this.settings.lastQuery}"`);
 				const activeFile = this.app.workspace.getActiveFile();
 				const linkCache = activeFile
 					? (this.app.metadataCache.getFileCache(activeFile) ?? undefined)
@@ -366,6 +428,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					}
 				}
 			} else {
+				logDebug("main", `invoke: advancing existing session in direction ${direction}`);
 				advance(view, direction);
 				const widget = getActiveWidget();
 				if (widget) {
@@ -375,6 +438,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 						input.focus();
 						window.requestAnimationFrame(() => {
 							if (getActiveWidget() && document.activeElement !== input) {
+								logDebug("main", "invoke RAF: refocusing input");
 								input.focus();
 							}
 						});
@@ -385,8 +449,22 @@ export default class IncrementalSearchPlugin extends Plugin {
 			return;
 		}
 
-		const sel = view.state.selection.main;
-		const startingQuery = "";
+		const sel = view.state?.selection?.main;
+		let selectedText = "";
+		if (sel && !sel.empty && sel.from !== undefined && sel.to !== undefined) {
+			if (typeof view.state.sliceDoc === "function") {
+				selectedText = view.state.sliceDoc(sel.from, sel.to);
+			} else if (typeof (view.state.doc as any)?.sliceString === "function") {
+				selectedText = (view.state.doc as any).sliceString(sel.from, sel.to);
+			} else if (typeof view.state.doc?.toString === "function") {
+				selectedText = view.state.doc.toString().slice(sel.from, sel.to);
+			}
+		}
+		const startingQuery = selectedText;
+		logDebug(
+			"main",
+			`invoke: creating new markdown session from cursor [${sel.anchor}, ${sel.head}], startingQuery="${startingQuery}"`
+		);
 
 		view.dispatch({
 			effects: setSession.of({
@@ -401,6 +479,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		});
 
 		if (this.settings.usePopupModal) {
+			logDebug("main", "invoke: opening modal search dialog");
 			const modal = new IncrementalSearchSuggestModal(
 				this.app,
 				this,
@@ -412,20 +491,26 @@ export default class IncrementalSearchPlugin extends Plugin {
 			if (startingQuery) {
 				modal.inputEl.value = startingQuery;
 				modal.inputEl.dispatchEvent(new Event("input"));
+				modal.inputEl.select();
 			}
 		} else {
 			if (startingQuery) {
+				const activeFile = this.app.workspace.getActiveFile();
+				const linkCache = activeFile
+					? (this.app.metadataCache.getFileCache(activeFile) ?? undefined)
+					: undefined;
 				recomputeQuery(
 					view,
 					startingQuery,
 					direction,
 					this.settings.spaceAsWildcard,
 					this.settings.matchOnlyVisibleLinks,
-					undefined,
+					linkCache,
 					false,
 					this.settings.allMatchesDisplayMode
 				);
 			}
+			logDebug("main", "invoke: rendering floating search widget");
 			renderWidget(view, this, startingQuery, direction);
 		}
 	}

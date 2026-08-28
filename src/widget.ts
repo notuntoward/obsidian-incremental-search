@@ -10,6 +10,7 @@ import {
 	toggleDemandHighlights,
 } from "./session";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
+import { logDebug, describeElement } from "./utils/logger";
 
 let activeWidgetEl: HTMLDivElement | null = null;
 let activeKeyCleanup: (() => void) | null = null;
@@ -101,9 +102,11 @@ export function createMarkdownSessionController(
 			toggleDemandHighlights(view);
 		},
 		accept() {
+			logDebug("widget", "createMarkdownSessionController: accept called");
 			commitMatch(view, plugin);
 		},
 		cancel() {
+			logDebug("widget", "createMarkdownSessionController: cancel called");
 			cancelSession(view, plugin);
 		},
 	};
@@ -174,6 +177,7 @@ export function createPdfSessionController(
 			controller.toggleDemandHighlights();
 		},
 		accept() {
+			logDebug("widget", "createPdfSessionController: accept called");
 			saveQueryIfNeeded();
 			if (typeof controller.accept === "function") {
 				controller.accept();
@@ -181,6 +185,7 @@ export function createPdfSessionController(
 			onClose();
 		},
 		cancel() {
+			logDebug("widget", "createPdfSessionController: cancel called");
 			saveQueryIfNeeded();
 			if (typeof controller.cancel === "function") {
 				controller.cancel();
@@ -190,8 +195,8 @@ export function createPdfSessionController(
 		get onStateChange() {
 			return controller.onStateChange
 				? () => {
-						controller.onStateChange?.(controller.state);
-					}
+					controller.onStateChange?.(controller.state);
+				}
 				: null;
 		},
 		set onStateChange(cb: (() => void) | null | undefined) {
@@ -207,6 +212,7 @@ export function createPdfSessionController(
  */
 export function setFocusGuard(durationMs = 200) {
 	focusGuardUntil = Date.now() + durationMs;
+	logDebug("widget", `setFocusGuard: armed for ${durationMs}ms (until ${focusGuardUntil})`);
 }
 
 export function getActiveWidget(): HTMLDivElement | null {
@@ -331,6 +337,7 @@ export function hideWidgetTableToast() {
  * Removes the currently active widget element from the DOM.
  */
 export function removeWidget(_view?: EditorView) {
+	logDebug("widget", `removeWidget called: activeWidgetEl=${describeElement(activeWidgetEl)}`);
 	if (activeKeyCleanup) {
 		activeKeyCleanup();
 		activeKeyCleanup = null;
@@ -345,6 +352,7 @@ export function removeWidget(_view?: EditorView) {
  * Sweeps all widget elements from the document (used during plugin unload/reload).
  */
 export function removeAllWidgets() {
+	logDebug("widget", "removeAllWidgets called");
 	if (activeKeyCleanup) {
 		activeKeyCleanup();
 		activeKeyCleanup = null;
@@ -364,6 +372,10 @@ export function renderSearchWidget(
 	initialQuery: string,
 	initialDirection: SearchDirection
 ) {
+	logDebug(
+		"widget",
+		`renderSearchWidget: container=${describeElement(controller.containerEl)}, initialQuery="${initialQuery}", initialDir=${initialDirection}`
+	);
 	removeWidget();
 
 	const onGlobalKeyDown = (evt: KeyboardEvent) => {
@@ -374,6 +386,7 @@ export function renderSearchWidget(
 			evt.code === "NumpadEnter" ||
 			evt.keyCode === 13;
 		if (isCtrlOrMeta && isEnter) {
+			logDebug("widget", "globalKeyDown: Ctrl+Enter demand highlights toggle");
 			evt.preventDefault();
 			evt.stopPropagation();
 			evt.stopImmediatePropagation();
@@ -430,20 +443,48 @@ export function renderSearchWidget(
 	};
 
 	input.addEventListener("input", () => {
+		logDebug("widget", `input event: value="${input.value}"`);
 		adjustInputSize();
 		controller.onInput(input.value);
 		updateCounter();
 	});
 
-	input.addEventListener("blur", () => {
+	input.addEventListener("blur", (evt) => {
+		const related = evt.relatedTarget as HTMLElement | null;
+		const activeNow = document.activeElement;
+		logDebug(
+			"widget",
+			`input blur event fired! relatedTarget=${describeElement(related)}, activeElementNow=${describeElement(activeNow)}`
+		);
 		window.setTimeout(() => {
-			if (document.activeElement === input) return;
-			if (el.contains(document.activeElement)) return;
-			if (Date.now() < focusGuardUntil) {
+			const activeEl = document.activeElement;
+			const now = Date.now();
+			const guardRemaining = focusGuardUntil - now;
+			logDebug(
+				"widget",
+				`blur timeout (100ms): activeElement=${describeElement(activeEl)}, inWidget=${el.contains(activeEl)}, guardRemaining=${guardRemaining}ms`
+			);
+			if (activeEl === input) {
+				logDebug("widget", "blur timeout: activeElement is input, keeping widget");
+				return;
+			}
+			if (el.contains(activeEl)) {
+				logDebug("widget", "blur timeout: activeElement inside widget, keeping widget");
+				return;
+			}
+			if (now < focusGuardUntil) {
+				logDebug(
+					"widget",
+					`blur timeout: focusGuard active (${guardRemaining}ms remaining), refocusing input`
+				);
 				input.focus();
 				return;
 			}
-			controller.cancel();
+			logDebug(
+				"widget",
+				`blur timeout: focus lost to ${describeElement(activeEl)} after guard expired, calling controller.accept()`
+			);
+			controller.accept();
 		}, 100);
 	});
 
@@ -455,6 +496,11 @@ export function renderSearchWidget(
 			evt.code === "Enter" ||
 			evt.code === "NumpadEnter" ||
 			evt.keyCode === 13;
+
+		logDebug(
+			"widget",
+			`input keydown: key="${evt.key}", code="${evt.code}", ctrl=${evt.ctrlKey}, meta=${evt.metaKey}, shift=${evt.shiftKey}`
+		);
 
 		if (isCtrlOrMeta && (keyLower === "s" || keyLower === "r")) {
 			evt.preventDefault();
@@ -515,13 +561,27 @@ export function renderSearchWidget(
 	});
 
 	setFocusGuard();
+	logDebug("widget", `renderSearchWidget: focusing input, activeElement before=${describeElement(document.activeElement)}`);
 	input.focus();
-	const len = input.value.length;
-	input.setSelectionRange(len, len);
+	logDebug("widget", `renderSearchWidget: focused input, activeElement after=${describeElement(document.activeElement)}`);
+	if (initialQuery.length > 0) {
+		input.select();
+	} else {
+		const len = input.value.length;
+		input.setSelectionRange(len, len);
+	}
 	updateCounter();
 	window.requestAnimationFrame(() => {
+		logDebug(
+			"widget",
+			`renderSearchWidget RAF: activeWidgetEl=${describeElement(activeWidgetEl)}, activeElement=${describeElement(document.activeElement)}`
+		);
 		if (activeWidgetEl && document.activeElement !== input) {
+			logDebug("widget", "renderSearchWidget RAF: refocusing input");
 			input.focus();
+			if (initialQuery.length > 0) {
+				input.select();
+			}
 		}
 	});
 }

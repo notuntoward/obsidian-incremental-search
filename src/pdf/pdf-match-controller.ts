@@ -15,6 +15,9 @@ import { computeMatchGeometry } from "./match-geometry";
 import { renderPageHighlights, clearAllPdfHighlights } from "./highlight-layer";
 import { clearSecondaryHighlights } from "./text-layer-highlighter";
 import { applyPdfColors, clearPdfColors } from "../utils/colors";
+import { logDebug, describeElement } from "../utils/logger";
+import { getScrollContainer } from "./pdf-view-adapter";
+import { isOffScreenVertically, isPageCompletelyOffScreen } from "../utils/scroll";
 
 /**
  * Determines whether a PDF match is positioned at or after the top edge of the visible viewport.
@@ -184,9 +187,9 @@ interface CssHighlightRegistry {
 function getCssHighlightApi(doc: Document) {
 	const view = doc.defaultView as
 		| (Window & {
-				CSS?: typeof CSS & { highlights?: CssHighlightRegistry };
-				Highlight?: new (...ranges: Range[]) => unknown;
-		  })
+			CSS?: typeof CSS & { highlights?: CssHighlightRegistry };
+			Highlight?: new (...ranges: Range[]) => unknown;
+		})
 		| null;
 	const registry = view?.CSS?.highlights;
 	return { Highlight: view?.Highlight, registry };
@@ -308,6 +311,11 @@ export class PdfMatchController {
 	unsubscribers: (() => void)[] = [];
 	onStateChange?: (state: PdfSessionState) => void;
 	originalMatch?: (query: any, pageContent: string, pageIndex: number) => any;
+	originalPdfViewerScrollPageIntoView?: (...args: any[]) => any;
+	originalScrollMatchIntoView?: (params: any) => any;
+	originalViewerScrollIntoViews: Map<any, (...args: any[]) => any> = new Map();
+	originalElementScrollIntoView?: typeof HTMLElement.prototype.scrollIntoView;
+	cleanupScrollProperty?: () => void;
 
 	constructor(
 		adapter: PdfViewAdapter,
@@ -337,26 +345,263 @@ export class PdfMatchController {
 
 		this.setupEventListeners();
 		this.setupFindControllerHook();
+		this.setupScrollInterception();
+	}
+
+	private setupScrollInterception() {
+		const scrollContainer = getScrollContainer(this.adapter.containerEl);
+		if (scrollContainer) {
+			const origScrollTo = scrollContainer.scrollTo;
+			const origScrollBy = scrollContainer.scrollBy;
+			const origScroll = scrollContainer.scroll;
+
+			if (origScrollTo) {
+				scrollContainer.scrollTo = function (...args: any[]) {
+					logDebug("pdf", `scrollContainer.scrollTo called with args=${JSON.stringify(args)}`, new Error().stack);
+					return origScrollTo.apply(this, args as any);
+				};
+			}
+
+			if (origScrollBy) {
+				scrollContainer.scrollBy = function (...args: any[]) {
+					logDebug("pdf", `scrollContainer.scrollBy called with args=${JSON.stringify(args)}`, new Error().stack);
+					return origScrollBy.apply(this, args as any);
+				};
+			}
+
+			if (origScroll) {
+				scrollContainer.scroll = function (...args: any[]) {
+					logDebug("pdf", `scrollContainer.scroll called with args=${JSON.stringify(args)}`, new Error().stack);
+					return origScroll.apply(this, args as any);
+				};
+			}
+
+			const protoDesc =
+				Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop") ||
+				Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
+			if (protoDesc && protoDesc.set && protoDesc.get) {
+				const origSet = protoDesc.set;
+				const origGet = protoDesc.get;
+				try {
+					Object.defineProperty(scrollContainer, "scrollTop", {
+						configurable: true,
+						get() {
+							return origGet.call(this);
+						},
+						set(val: number) {
+							const currentVal = origGet.call(this);
+							const stack = new Error().stack || "";
+
+							// Suppress internal PDF.js page-switch / pageDiv scroll routines during active search
+							if (
+								stack.includes("_resetCurrentPageView") ||
+								stack.includes("_setCurrentPageNumber") ||
+								stack.includes("currentPageNumber") ||
+								stack.includes("_updatePage") ||
+								stack.includes("_scrollIntoView")
+							) {
+								logDebug(
+									"pdf",
+									`scrollContainer.scrollTop SETTER suppressed (page-switch routine): requested=${val}, current=${currentVal}`
+								);
+								return;
+							}
+
+							logDebug(
+								"pdf",
+								`scrollContainer.scrollTop SETTER applied: val=${val}, current=${currentVal}`
+							);
+							origSet.call(this, val);
+						},
+					});
+				} catch {
+					// Ignore if property is non-configurable
+				}
+			}
+
+			this.cleanupScrollProperty = () => {
+				try {
+					delete (scrollContainer as any).scrollTop;
+				} catch {}
+				if (origScrollTo) scrollContainer.scrollTo = origScrollTo;
+				if (origScrollBy) scrollContainer.scrollBy = origScrollBy;
+				if (origScroll) scrollContainer.scroll = origScroll;
+			};
+		}
 	}
 
 	private setupFindControllerHook() {
-		const findController = this.adapter.findController;
-		if (!findController || typeof findController.match !== "function") return;
+		const container = this.adapter.containerEl;
 
-		this.originalMatch = findController.match;
-		findController.match = (query: any, pageContent: string, pageIndex: number) => {
-			if (this.usesPluginWildcardSearch()) {
-				return findPdfWildcardMatches(
-					pageContent,
-					this.state.query,
-					isCaseSensitive(this.state.query)
-				).map((match) => ({
-					index: match.from,
-					length: match.to - match.from,
-				}));
+		// 1. Intercept DOM scrollIntoView calls inside this PDF container
+		const originalElementScrollIntoView = HTMLElement.prototype.scrollIntoView;
+		this.originalElementScrollIntoView = originalElementScrollIntoView;
+		HTMLElement.prototype.scrollIntoView = function (
+			this: HTMLElement,
+			arg?: boolean | ScrollIntoViewOptions
+		) {
+			if (container && container.contains(this) && this !== container) {
+				const scrollContainer = getScrollContainer(container, this);
+				if (scrollContainer) {
+					const containerRect = scrollContainer.getBoundingClientRect();
+					const targetRect = this.getBoundingClientRect();
+
+					if (targetRect.height > 0 || targetRect.width > 0) {
+						const isOffScreen = isOffScreenVertically(targetRect, containerRect);
+						logDebug(
+							"pdf",
+							`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: target=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+						);
+						if (!isOffScreen) {
+							logDebug(
+								"pdf",
+								`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: already on-screen, suppressing scroll`
+							);
+							return;
+						}
+						logDebug(
+							"pdf",
+							`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: off-screen, centering vertically`
+						);
+						return originalElementScrollIntoView.call(this, {
+							block: "center",
+							inline: "nearest",
+							behavior: "smooth",
+						});
+					}
+				}
 			}
-			return this.originalMatch?.call(findController, query, pageContent, pageIndex);
+			return originalElementScrollIntoView.call(this, arg);
 		};
+
+		// 2. Intercept PDF.js findController matching
+		const findController = this.adapter.findController;
+		logDebug("pdf", "PDF objects inspection:", {
+			hasFindController: Boolean(findController),
+			findControllerKeys: findController ? Object.keys(findController).slice(0, 30) : [],
+			hasPdfViewer: Boolean(this.adapter.pdfViewer),
+			pdfViewerKeys: this.adapter.pdfViewer ? Object.keys(this.adapter.pdfViewer).slice(0, 30) : [],
+			hasFindEventBus: Boolean(findController?._eventBus || findController?.eventBus),
+			hasLinkService: Boolean(findController?._linkService || findController?.linkService),
+			hasPdfViewerOnFindController: Boolean(findController?._pdfViewer || findController?.pdfViewer),
+		});
+		if (findController && typeof findController.match === "function") {
+			this.originalMatch = findController.match;
+			findController.match = (query: any, pageContent: string, pageIndex: number) => {
+				if (this.usesPluginWildcardSearch()) {
+					return findPdfWildcardMatches(
+						pageContent,
+						this.state.query,
+						isCaseSensitive(this.state.query)
+					).map((match) => ({
+						index: match.from,
+						length: match.to - match.from,
+					}));
+				}
+				return this.originalMatch?.call(findController, query, pageContent, pageIndex);
+			};
+		}
+
+		// 3. Intercept PDFFindController.scrollMatchIntoView
+		if (findController && typeof findController.scrollMatchIntoView === "function") {
+			this.originalScrollMatchIntoView = findController.scrollMatchIntoView;
+			findController.scrollMatchIntoView = (params: any) => {
+				logDebug("pdf", "findController.scrollMatchIntoView called:", params);
+				const scrollContainer = getScrollContainer(this.adapter.containerEl);
+				const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+				if (!scrollContainer || !containerRect) return;
+
+				const pageIndex = typeof params?.pageIndex === "number" ? params.pageIndex : -1;
+				const pageEl = pageIndex >= 0 ? this.adapter.getPageElement(pageIndex + 1) : null;
+				const matchesOnPage = pageEl?.querySelectorAll(".highlight");
+				const matchIndex = typeof params?.matchIndex === "number" ? params.matchIndex : -1;
+
+				const targetEl =
+					params?.element ||
+					pageEl?.querySelector(".highlight.selected, .highlight.is-selected, .incsearch-pdf-match.is-current") ||
+					(matchesOnPage && matchIndex >= 0 && matchesOnPage[matchIndex]) ||
+					this.adapter.containerEl.querySelector(
+						".highlight.selected, .highlight.is-selected, .incsearch-pdf-match.is-current"
+					) as HTMLElement | null;
+
+				if (targetEl && typeof targetEl.getBoundingClientRect === "function") {
+					const hlRect = targetEl.getBoundingClientRect();
+					if (hlRect.height > 0 || hlRect.width > 0) {
+						const isOffScreen = isOffScreenVertically(hlRect, containerRect);
+						logDebug(
+							"pdf",
+							`findController.scrollMatchIntoView: match=[${hlRect.top.toFixed(1)}, ${hlRect.bottom.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+						);
+						if (!isOffScreen) {
+							logDebug("pdf", "findController.scrollMatchIntoView: match is already on-screen, skipping scroll!");
+							return;
+						}
+						logDebug("pdf", "findController.scrollMatchIntoView: match is off-screen, centering match!");
+						targetEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+						return;
+					}
+				}
+
+				if (pageEl && typeof pageEl.getBoundingClientRect === "function") {
+					const pageBounds = pageEl.getBoundingClientRect();
+					const isPageOffScreen = isPageCompletelyOffScreen(pageBounds, containerRect);
+					logDebug(
+						"pdf",
+						`findController.scrollMatchIntoView (page fallback): pageBounds=[${pageBounds.top.toFixed(1)}, ${pageBounds.bottom.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isPageOffScreen=${isPageOffScreen}`
+					);
+					if (!isPageOffScreen) {
+						logDebug("pdf", "findController.scrollMatchIntoView: page is already partially on-screen, skipping scroll!");
+						return;
+					}
+					logDebug("pdf", "findController.scrollMatchIntoView: page is completely off-screen, centering page!");
+					pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+					return;
+				}
+
+				return this.originalScrollMatchIntoView?.call(findController, params);
+			};
+		}
+
+		// 4. Intercept PDFViewer._scrollIntoView
+		const candidateViewers = [
+			findController?._pdfViewer,
+			this.adapter.pdfViewer,
+			(findController as any)?._linkService?.pdfViewer,
+			(this.adapter as any).view?.viewer?.child?.pdfViewer?.pdfViewer,
+			(this.adapter as any).view?.viewer?.child?.pdfViewer,
+		].filter(Boolean);
+
+		const allViewersAndPrototypes: any[] = [];
+		for (const pv of candidateViewers) {
+			allViewersAndPrototypes.push(pv);
+			const proto = Object.getPrototypeOf(pv);
+			if (proto && proto !== Object.prototype) {
+				allViewersAndPrototypes.push(proto);
+			}
+		}
+
+		for (const pv of allViewersAndPrototypes) {
+			if (pv && typeof pv._scrollIntoView === "function" && !this.originalViewerScrollIntoViews.has(pv)) {
+				const origScrollIntoView = pv._scrollIntoView;
+				this.originalViewerScrollIntoViews.set(pv, origScrollIntoView);
+				pv._scrollIntoView = (params: any) => {
+					logDebug("pdf", "pdfViewer._scrollIntoView called (suppressed during search):", params);
+					// Suppress pageDiv scrolling during search; match positioning is handled by scrollMatchIntoView
+					return;
+				};
+			}
+		}
+
+		// 5. Intercept PDF.js viewer scrollPageIntoView
+		const pdfViewer = findController?._pdfViewer || this.adapter.pdfViewer;
+		if (pdfViewer && typeof pdfViewer.scrollPageIntoView === "function") {
+			this.originalPdfViewerScrollPageIntoView = pdfViewer.scrollPageIntoView;
+			pdfViewer.scrollPageIntoView = (params: any) => {
+				logDebug("pdf", "pdfViewer.scrollPageIntoView called (suppressed during search):", params);
+				// Suppress pageDiv scrolling during search; match positioning is handled by scrollMatchIntoView
+				return;
+			};
+		}
 	}
 
 	captureViewportAnchor(): PdfViewportAnchor {
@@ -389,6 +634,20 @@ export class PdfMatchController {
 	}
 
 	private setupEventListeners() {
+		const globalScrollListener = (evt: Event) => {
+			const target = evt.target as HTMLElement;
+			if (target && typeof target.scrollTop === "number") {
+				logDebug(
+					"pdf",
+					`GLOBAL scroll captured on ${describeElement(target)}: scrollTop=${target.scrollTop}, scrollLeft=${target.scrollLeft}`
+				);
+			}
+		};
+		window.addEventListener("scroll", globalScrollListener, { capture: true, passive: true });
+		this.unsubscribers.push(() => {
+			window.removeEventListener("scroll", globalScrollListener, { capture: true } as any);
+		});
+
 		const refreshNativeFragmentJoins = () => {
 			window.requestAnimationFrame(() => {
 				decorateNativeSelectedHighlightFragments(
@@ -837,10 +1096,12 @@ export class PdfMatchController {
 	}
 
 	accept() {
+		logDebug("pdf", "PdfMatchController accept called");
 		this.destroy();
 	}
 
 	cancel() {
+		logDebug("pdf", "PdfMatchController cancel called");
 		if (typeof this.adapter.restoreScrollPosition === "function" && this.originScrollPosition) {
 			this.adapter.restoreScrollPosition(this.originScrollPosition);
 		} else if (this.originPageNumber) {
@@ -850,13 +1111,35 @@ export class PdfMatchController {
 	}
 
 	destroy() {
+		logDebug("pdf", "PdfMatchController destroy called");
 		this.scanGeneration++;
 		this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
 		this.adapter.containerEl.classList.remove("incsearch-active-pdf");
 		clearPdfColors(this.adapter.containerEl);
+		if (this.cleanupScrollProperty) {
+			this.cleanupScrollProperty();
+			this.cleanupScrollProperty = undefined;
+		}
+		if (this.originalElementScrollIntoView) {
+			HTMLElement.prototype.scrollIntoView = this.originalElementScrollIntoView;
+			this.originalElementScrollIntoView = undefined;
+		}
 		if (this.adapter.findController && this.originalMatch) {
 			this.adapter.findController.match = this.originalMatch;
 			this.originalMatch = undefined;
+		}
+		if (this.adapter.findController && this.originalScrollMatchIntoView) {
+			this.adapter.findController.scrollMatchIntoView = this.originalScrollMatchIntoView;
+			this.originalScrollMatchIntoView = undefined;
+		}
+		for (const [pv, orig] of this.originalViewerScrollIntoViews.entries()) {
+			pv._scrollIntoView = orig;
+		}
+		this.originalViewerScrollIntoViews.clear();
+		const pdfViewer = this.adapter.findController?._pdfViewer || this.adapter.pdfViewer;
+		if (pdfViewer && this.originalPdfViewerScrollPageIntoView) {
+			pdfViewer.scrollPageIntoView = this.originalPdfViewerScrollPageIntoView;
+			this.originalPdfViewerScrollPageIntoView = undefined;
 		}
 		if (this.adapter.executeNativeFind) {
 			this.adapter.executeNativeFind({

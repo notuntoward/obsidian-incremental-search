@@ -11,6 +11,7 @@ import {
 } from "./types";
 import { computeMatches } from "./engine";
 import { removeWidget, showWidgetTableToast, hideWidgetTableToast } from "./widget";
+import { logDebug } from "./utils/logger";
 
 interface AutoFoldedRange {
 	from: number;
@@ -528,8 +529,8 @@ export function restoreAutoUnfoldedStructures(view: EditorView, keepMatchPos?: n
 		const toReFold =
 			typeof keepMatchPos === "number"
 				? autoUnfoldedFoldRanges.filter(
-						(r) => keepMatchPos < r.from || keepMatchPos >= r.to
-					)
+					(r) => keepMatchPos < r.from || keepMatchPos >= r.to
+				)
 				: autoUnfoldedFoldRanges;
 
 		if (toReFold.length > 0) {
@@ -566,9 +567,9 @@ export function applyLivePreviewHighlights(view: EditorView, match: MatchRange) 
 	const session = view.state.field(searchSessionField, false);
 	const highlightAll = session
 		? shouldShowAllMatches(
-				session.allMatchesDisplayMode ?? "on-demand",
-				session.isDemandPeekActive ?? false
-			)
+			session.allMatchesDisplayMode ?? "on-demand",
+			session.isDemandPeekActive ?? false
+		)
 		: true;
 
 	const calloutRange = getCalloutRangeAtPos(view, match.from);
@@ -727,11 +728,11 @@ function highlightCellMatches(
 			let nextMatch = cellMatches[matchIndexInCell];
 			const matchText = nextMatch.match.tableMatchData
 				? nextMatch.match.tableMatchData.cellText
-						.slice(
-							nextMatch.match.tableMatchData.matchStartInCell,
-							nextMatch.match.tableMatchData.matchEndInCell
-						)
-						.trim()
+					.slice(
+						nextMatch.match.tableMatchData.matchStartInCell,
+						nextMatch.match.tableMatchData.matchEndInCell
+					)
+					.trim()
 				: "";
 
 			if (!matchText) {
@@ -747,11 +748,11 @@ function highlightCellMatches(
 					nextMatch = cellMatches[matchIndexInCell];
 					const currentMatchText = nextMatch.match.tableMatchData
 						? nextMatch.match.tableMatchData.cellText
-								.slice(
-									nextMatch.match.tableMatchData.matchStartInCell,
-									nextMatch.match.tableMatchData.matchEndInCell
-								)
-								.trim()
+							.slice(
+								nextMatch.match.tableMatchData.matchStartInCell,
+								nextMatch.match.tableMatchData.matchEndInCell
+							)
+							.trim()
 						: matchText;
 
 					const before = text.slice(lastPos, idx);
@@ -772,11 +773,11 @@ function highlightCellMatches(
 						const subsequentMatch = cellMatches[matchIndexInCell];
 						const subText = subsequentMatch.match.tableMatchData
 							? subsequentMatch.match.tableMatchData.cellText
-									.slice(
-										subsequentMatch.match.tableMatchData.matchStartInCell,
-										subsequentMatch.match.tableMatchData.matchEndInCell
-									)
-									.trim()
+								.slice(
+									subsequentMatch.match.tableMatchData.matchStartInCell,
+									subsequentMatch.match.tableMatchData.matchEndInCell
+								)
+								.trim()
 							: matchText;
 						idx = text.toLowerCase().indexOf(subText.toLowerCase(), lastPos);
 					} else {
@@ -932,17 +933,25 @@ export function recomputeQuery(
 		matchOnlyVisibleLinks,
 		linkCache
 	);
-	const cursorPos = session.originSelection.head;
+	const anchor = session.originSelection.anchor;
+	const head = session.originSelection.head;
+	const hasSelection = anchor !== head;
+	logDebug(
+		"session",
+		`recomputeQuery: query="${query}", matchesCount=${allMatches.length}, anchor=${anchor}, head=${head}, hasSelection=${hasSelection}`
+	);
 
 	let activeIndex = 0;
 	if (allMatches.length > 0) {
 		if (direction === "forward") {
-			const idx = allMatches.findIndex((m) => m.from >= cursorPos);
+			const startPos = hasSelection ? Math.max(anchor, head) : head;
+			const idx = allMatches.findIndex((m) => m.from >= startPos);
 			activeIndex = idx === -1 ? 0 : idx;
 		} else {
+			const startPos = hasSelection ? Math.min(anchor, head) : head;
 			let idx = -1;
 			for (let i = allMatches.length - 1; i >= 0; i--) {
-				if (allMatches[i].to <= cursorPos) {
+				if (allMatches[i].to <= startPos) {
 					idx = i;
 					break;
 				}
@@ -982,6 +991,7 @@ export function commitMatch(
 ) {
 	try {
 		const session = view.state.field(searchSessionField, false);
+		logDebug("session", `commitMatch: hasSession=${Boolean(session)}, matches=${session?.matches?.length ?? 0}`);
 		if (!session || session.matches.length === 0) {
 			closeSession(view, plugin);
 			view.focus();
@@ -989,6 +999,7 @@ export function commitMatch(
 		}
 
 		const m = session.matches[session.activeIndex];
+		logDebug("session", `commitMatch: committing match [${m.from}, ${m.to}]`);
 		saveSessionQuery(session, plugin);
 
 		view.dispatch({
@@ -1022,6 +1033,10 @@ export function cancelSession(
 ) {
 	try {
 		const session = view.state.field(searchSessionField, false);
+		logDebug(
+			"session",
+			`cancelSession: hasSession=${Boolean(session)}, originSelection=[${session?.originSelection?.anchor}, ${session?.originSelection?.head}]`
+		);
 		if (session) {
 			saveSessionQuery(session, plugin);
 			view.dispatch({
@@ -1063,6 +1078,7 @@ export function closeSession(
 	shouldFocus = false
 ) {
 	const session = view.state.field(searchSessionField, false);
+	logDebug("session", `closeSession: hasSession=${Boolean(session)}, shouldFocus=${shouldFocus}`);
 	saveSessionQuery(session, plugin);
 
 	view.dispatch({ effects: setSession.of(null) });

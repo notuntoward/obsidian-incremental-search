@@ -11,6 +11,7 @@ import {
 	restoreAutoUnfoldedStructures,
 	toggleDemandHighlights,
 } from "./session";
+import { logDebug } from "./utils/logger";
 
 export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> };
@@ -103,6 +104,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	}
 
 	onOpen() {
+		logDebug("modal", "IncrementalSearchSuggestModal opened");
 		super.onOpen();
 		this.scope.register(["Mod"], "Enter", (evt) => {
 			evt.preventDefault();
@@ -151,6 +153,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	}
 
 	onClose() {
+		logDebug("modal", `IncrementalSearchSuggestModal onClose: chosen=${this.chosen}`);
 		super.onClose();
 		if (this.modalKeyCleanup) {
 			this.modalKeyCleanup();
@@ -165,8 +168,10 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 		// (e.g. mouse click after blur, or specific Obsidian ENTER handlers), it can set this.chosen = true
 		window.setTimeout(() => {
 			if (this.chosen) {
+				logDebug("modal", "onClose timeout: chosen is true, skipping cancellation");
 				return;
 			}
+			logDebug("modal", "onClose timeout: restoring origin selection and clearing session");
 
 			const session = this.cm.state.field(searchSessionField, false);
 			if (session) {
@@ -208,6 +213,7 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 	onChooseSuggestion(index: number, _evt: MouseEvent | KeyboardEvent) {
 		this.chosen = true;
+		logDebug("modal", `onChooseSuggestion: index=${index}`);
 		const session = this.cm.state.field(searchSessionField, false);
 		if (session && session.matches[index]) {
 			const match = session.matches[index];

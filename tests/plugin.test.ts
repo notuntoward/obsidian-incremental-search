@@ -84,6 +84,38 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(currentSession.direction).toBe("forward");
   });
 
+  it("pre-populates query and starts search from active selection when search is invoked", () => {
+    currentSession = null;
+
+    const mockEditor = {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 4, from: 0, to: 4, empty: false } },
+          sliceDoc: (from: number, to: number) => "test text".slice(from, to),
+          field: () => currentSession,
+          doc: {
+            toString: () => "test text and more test text",
+            lines: 1,
+            line: (_i: number) => ({ text: "test text and more test text", from: 0, to: 28, length: 28 }),
+          },
+        },
+        dispatch: (args: any) => {
+          dispatches.push(args);
+          if (args.effects && args.effects.value && args.effects.value.query !== undefined) {
+            currentSession = args.effects.value;
+          }
+        },
+        dom: { parentElement: document.createElement("div") },
+      },
+    };
+
+    plugin.handleCommand(false, "forward", mockEditor as any);
+
+    expect(currentSession).not.toBeNull();
+    expect(currentSession.query).toBe("test");
+    expect(currentSession.originSelection).toEqual({ anchor: 0, head: 4 });
+  });
+
   it("advances the session if one is already active with query", () => {
     currentSession = {
       query: "test",

@@ -201,7 +201,7 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 			getTextLayerElement: () => null,
 			getPageViewport: () => ({ width: 600, height: 800 }),
 			getVisiblePageNumbers: () => [1],
-			on: (_event: string, _handler: any) => () => {},
+			on: (_event: string, _handler: any) => () => { },
 			scrollToRect: vi.fn(),
 			scrollPageIntoView: vi.fn(),
 			executeNativeFind: (cmd: any) => {
@@ -329,8 +329,8 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 	});
 
 	it("applies PDF colors on search and clears them on destroy", async () => {
-		const applySpy = vi.spyOn(colors, "applyPdfColors").mockImplementation(() => {});
-		const clearSpy = vi.spyOn(colors, "clearPdfColors").mockImplementation(() => {});
+		const applySpy = vi.spyOn(colors, "applyPdfColors").mockImplementation(() => { });
+		const clearSpy = vi.spyOn(colors, "clearPdfColors").mockImplementation(() => { });
 
 		const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
 		await controller.search("test");
@@ -421,7 +421,7 @@ describe("PDF Match Controller", () => {
 			},
 			getPageViewport: () => ({ width: 600, height: 800 }),
 			getVisiblePageNumbers: () => [1], // Page 1 visible initially
-			on: (_event: string, _handler: any) => () => {},
+			on: (_event: string, _handler: any) => () => { },
 			scrollToRect: vi.fn(),
 			scrollPageIntoView: vi.fn(),
 		};
@@ -543,7 +543,7 @@ describe("PDF Match Controller", () => {
 		mockAdapter.on = (event: string, handler: any) => {
 			if (!listeners.has(event)) listeners.set(event, []);
 			listeners.get(event)!.push(handler);
-			return () => {};
+			return () => { };
 		};
 
 		// Page 2 has unrendered textLayer initially (0 children in textLayer)
@@ -910,6 +910,111 @@ describe("PDF Match Controller", () => {
 				scrollLeft: 20,
 				pageNumber: 2,
 			});
+		});
+	});
+
+	describe("PDF Viewport Scroll Interception & Page Boundary Handling", () => {
+		it("suppresses scrollMatchIntoView when match is already fully on-screen", () => {
+			mockAdapter.containerEl.getBoundingClientRect = () => ({
+				top: 100,
+				bottom: 600,
+				left: 0,
+				right: 800,
+				height: 500,
+				width: 800,
+			} as DOMRect);
+
+			const matchEl = document.createElement("span");
+			matchEl.className = "highlight selected";
+			const scrollIntoViewSpy = vi.fn();
+			matchEl.scrollIntoView = scrollIntoViewSpy;
+			// Match [200, 220] - fully inside [100, 600]
+			matchEl.getBoundingClientRect = () => ({
+				top: 200,
+				bottom: 220,
+				left: 50,
+				right: 150,
+				height: 20,
+				width: 100,
+			} as DOMRect);
+			mockAdapter.containerEl.appendChild(matchEl);
+
+			const findController = {
+				scrollMatchIntoView: vi.fn(),
+			};
+			mockAdapter.findController = findController;
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+
+			// Trigger intercepted scrollMatchIntoView with on-screen match
+			findController.scrollMatchIntoView({ element: matchEl, pageIndex: 0, matchIndex: 0 });
+
+			expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+			controller.destroy();
+		});
+
+		it("centers match vertically when match is partially or fully off-screen", () => {
+			mockAdapter.containerEl.getBoundingClientRect = () => ({
+				top: 100,
+				bottom: 600,
+				left: 0,
+				right: 800,
+				height: 500,
+				width: 800,
+			} as DOMRect);
+
+			const matchEl = document.createElement("span");
+			matchEl.className = "highlight selected";
+			const scrollIntoViewSpy = vi.fn();
+			matchEl.scrollIntoView = scrollIntoViewSpy;
+			// Match [590, 610] - clipped at bottom edge (bottom 610 > 600)
+			matchEl.getBoundingClientRect = () => ({
+				top: 590,
+				bottom: 610,
+				left: 50,
+				right: 150,
+				height: 20,
+				width: 100,
+			} as DOMRect);
+			mockAdapter.containerEl.appendChild(matchEl);
+
+			const findController = {
+				scrollMatchIntoView: vi.fn(),
+			};
+			mockAdapter.findController = findController;
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+
+			// Trigger intercepted scrollMatchIntoView with clipped match
+			findController.scrollMatchIntoView({ element: matchEl, pageIndex: 0, matchIndex: 0 });
+
+			expect(scrollIntoViewSpy).toHaveBeenCalledWith({
+				block: "center",
+				inline: "nearest",
+				behavior: "smooth",
+			});
+			controller.destroy();
+		});
+
+		it("suppresses pdfViewer._scrollIntoView and scrollPageIntoView during search", () => {
+			const origScrollIntoView = vi.fn();
+			const origScrollPageIntoView = vi.fn();
+			const pdfViewer = {
+				_scrollIntoView: origScrollIntoView,
+				scrollPageIntoView: origScrollPageIntoView,
+			};
+			mockAdapter.pdfViewer = pdfViewer;
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+
+			// Call during active search
+			pdfViewer._scrollIntoView({ pageNumber: 5 });
+			pdfViewer.scrollPageIntoView({ pageNumber: 5 });
+
+			expect(origScrollIntoView).not.toHaveBeenCalled();
+			expect(origScrollPageIntoView).not.toHaveBeenCalled();
+
+			controller.destroy();
 		});
 	});
 });

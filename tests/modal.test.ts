@@ -33,7 +33,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
       workspace: {
         activeLeaf: {
           view: {
-            setEphemeralState: () => {},
+            setEphemeralState: () => { },
           },
         },
         getActiveFile: () => null,
@@ -44,7 +44,7 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     };
     mockPlugin = {
       settings: { spaceAsWildcard: true, lastQuery: "", usePopupModal: true, doubleTapWindowMs: 600 },
-      saveSettings: async () => {},
+      saveSettings: async () => { },
     };
 
     mockEditor = {

@@ -50,12 +50,12 @@ describe("widget: counter & lifecycle", () => {
       dom: {
         parentElement: document.createElement("div"),
       },
-      focus: () => {},
+      focus: () => { },
     };
 
     mockPlugin = {
       settings: { spaceAsWildcard: true, lastQuery: "", usePopupModal: false, doubleTapWindowMs: 600, matchOnlyVisibleLinks: true },
-      saveSettings: async () => {},
+      saveSettings: async () => { },
       app: {
         workspace: {
           getActiveFile: () => null,
@@ -196,7 +196,7 @@ describe("widget: counter & lifecycle", () => {
       advance: (dir: string) => {
         advancedDir = dir;
       },
-      search: async () => {},
+      search: async () => { },
     };
 
     let closed = false;
@@ -286,7 +286,7 @@ describe("widget: counter & lifecycle", () => {
       advance: (dir: string) => {
         advancedDir = dir;
       },
-      search: async () => {},
+      search: async () => { },
       accept: () => {
         accepted = true;
       },
@@ -352,13 +352,13 @@ describe("widget: counter & lifecycle", () => {
       adapter: { containerEl: document.createElement("div") },
       settings: { allMatchesDisplayMode: "on-demand" },
       state: { matches: [{ id: "m1" }], activeIndex: 0, direction: "forward", isScanning: false, query: "test", isDemandPeekActive: false },
-      search: async () => {},
+      search: async () => { },
       toggleDemandHighlights: () => {
         toggled = true;
       },
     };
 
-    renderPdfWidget(mockController, mockPlugin, "test", "forward", () => {});
+    renderPdfWidget(mockController, mockPlugin, "test", "forward", () => { });
     const widget = getActiveWidget();
     const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
 
@@ -404,7 +404,7 @@ describe("widget: focus-guard regression", () => {
         }
       },
       dom: { parentElement: document.createElement("div") },
-      focus: () => {},
+      focus: () => { },
     };
 
     mockPlugin = {
@@ -416,7 +416,7 @@ describe("widget: focus-guard regression", () => {
         allMatchesDisplayMode: "off",
         searchExitBehavior: "emacs",
       },
-      saveSettings: async () => {},
+      saveSettings: async () => { },
       app: {
         workspace: { getActiveFile: () => null },
         metadataCache: { getFileCache: () => null },
@@ -516,7 +516,7 @@ describe("widget: focus-guard regression", () => {
         isScanning: false,
         query: "test",
       },
-      search: async () => {},
+      search: async () => { },
       onStateChange: null,
     };
 
@@ -553,7 +553,7 @@ describe("widget: focus-guard regression", () => {
         isScanning: false,
         query: "",
       },
-      search: async () => {},
+      search: async () => { },
       onStateChange: null,
     };
 
@@ -586,7 +586,7 @@ describe("widget: unified SearchSessionController & adapters", () => {
     const mockPlugin: any = {
       app: { workspace: { getActiveFile: () => null }, metadataCache: { getFileCache: () => null } },
       settings: { spaceAsWildcard: true, matchOnlyVisibleLinks: true, allMatchesDisplayMode: "off" },
-      saveSettings: async () => {},
+      saveSettings: async () => { },
     };
 
     const ctrl = createMarkdownSessionController(mockView, mockPlugin);
@@ -635,16 +635,16 @@ describe("widget: unified SearchSessionController & adapters", () => {
         query: "pdf query",
         totalMatchesCount: undefined,
       },
-      search: async () => {},
-      advance: () => {},
-      toggleDemandHighlights: () => {},
+      search: async () => { },
+      advance: () => { },
+      toggleDemandHighlights: () => { },
       accept: () => { accepted = true; },
       cancel: () => { cancelled = true; },
       onStateChange: null,
     };
     const mockPlugin: any = {
       settings: { lastQuery: "" },
-      saveSettings: async () => {},
+      saveSettings: async () => { },
     };
 
     const ctrl = createPdfSessionController(mockController, mockPlugin, () => { closed = true; });
@@ -767,11 +767,11 @@ describe("widget: unified SearchSessionController & adapters", () => {
         direction: "backward",
         inTable: true,
       }),
-      onInput: () => {},
-      advance: () => {},
-      toggleDemandHighlights: () => {},
-      accept: () => {},
-      cancel: () => {},
+      onInput: () => { },
+      advance: () => { },
+      toggleDemandHighlights: () => { },
+      accept: () => { },
+      cancel: () => { },
     };
 
     renderSearchWidget(mockCtrl, { searchExitBehavior: "emacs" } as any, "", "backward");

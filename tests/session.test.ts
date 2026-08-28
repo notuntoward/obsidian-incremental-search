@@ -169,6 +169,58 @@ describe("session: recomputeQuery directional cursor placement", () => {
     expect(sessionState?.matches).toHaveLength(2);
     expect(sessionState?.activeIndex).toBe(1);
   });
+
+  it("excludes the active selection in forward search and jumps to next match", () => {
+    const text = "cat ...   cat ...   cat";
+    // Active selection on first "cat" from 0 to 3
+    const view = createEditorView(text, 0, "forward");
+    if (sessionState) {
+      sessionState.originSelection = { anchor: 0, head: 3 };
+    }
+    recomputeQuery(view, "cat", "forward", true, true);
+
+    expect(sessionState?.matches).toHaveLength(3);
+    expect(sessionState?.activeIndex).toBe(1); // jumps to second "cat" at index 10
+  });
+
+  it("excludes reverse active selection in forward search and jumps to next match", () => {
+    const text = "cat ...   cat ...   cat";
+    // Reverse selection on first "cat" from anchor 3 to head 0
+    const view = createEditorView(text, 0, "forward");
+    if (sessionState) {
+      sessionState.originSelection = { anchor: 3, head: 0 };
+    }
+    recomputeQuery(view, "cat", "forward", true, true);
+
+    expect(sessionState?.matches).toHaveLength(3);
+    expect(sessionState?.activeIndex).toBe(1); // jumps to second "cat" at index 10
+  });
+
+  it("excludes the active selection in backward search and jumps to previous match", () => {
+    const text = "cat ...   cat ...   cat";
+    // Active selection on third "cat" from 20 to 23
+    const view = createEditorView(text, 23, "backward");
+    if (sessionState) {
+      sessionState.originSelection = { anchor: 20, head: 23 };
+    }
+    recomputeQuery(view, "cat", "backward", true, true);
+
+    expect(sessionState?.matches).toHaveLength(3);
+    expect(sessionState?.activeIndex).toBe(1); // jumps to second "cat" at index 10
+  });
+
+  it("excludes reverse active selection in backward search and jumps to previous match", () => {
+    const text = "cat ...   cat ...   cat";
+    // Reverse selection on third "cat" from anchor 23 to head 20
+    const view = createEditorView(text, 20, "backward");
+    if (sessionState) {
+      sessionState.originSelection = { anchor: 23, head: 20 };
+    }
+    recomputeQuery(view, "cat", "backward", true, true);
+
+    expect(sessionState?.matches).toHaveLength(3);
+    expect(sessionState?.activeIndex).toBe(1); // jumps to second "cat" at index 10
+  });
 });
 
 describe("session: termination & query persistence", () => {

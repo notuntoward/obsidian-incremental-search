@@ -1,4 +1,11 @@
 import { MatchRect, PdfTextItem, PdfViewportAnchor, PdfScrollPosition } from "./types";
+import {
+	isOffScreenVertically,
+	isOffScreenHorizontally,
+	isPageCompletelyOffScreen,
+	computeVerticalCenterDelta,
+} from "../utils/scroll";
+import { logDebug, describeElement } from "../utils/logger";
 
 export interface PdfPageProxyAdapter {
 	pageNumber: number;
@@ -21,6 +28,7 @@ export interface PdfViewAdapter {
 	scrollToRect(pageNumber: number, rect?: MatchRect): void;
 	scrollPageIntoView(pageNumber: number): void;
 	findController?: any;
+	pdfViewer?: any;
 	getActiveFindMatchInfo?(): { pageIndex: number; matchIndex: number } | null;
 	executeNativeFind?(command: {
 		query: string;
@@ -124,7 +132,7 @@ function resolveViewerComponents(view: any): {
 /**
  * Finds the actual scrollable element containing the PDF pages.
  */
-function getScrollContainer(containerEl: HTMLElement, pageEl?: HTMLElement | null): HTMLElement {
+export function getScrollContainer(containerEl: HTMLElement, pageEl?: HTMLElement | null): HTMLElement {
 	let cur = pageEl?.parentElement || containerEl.querySelector(".page")?.parentElement;
 	while (cur && cur !== document.body && cur !== document.documentElement) {
 		if (cur.scrollHeight > cur.clientHeight) {
@@ -183,6 +191,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		numPages,
 		containerEl,
 		findController,
+		pdfViewer,
 
 		async getPage(pageNumber: number): Promise<PdfPageProxyAdapter | null> {
 			if (pageNumber < 1 || pageNumber > numPages) return null;
@@ -421,45 +430,93 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		},
 
 		scrollPageIntoView(pageNumber: number) {
+			const pageEl = this.getPageElement(pageNumber);
+			const scrollContainer = getScrollContainer(containerEl, pageEl);
+			const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+
+			logDebug(
+				"pdf",
+				`adapter.scrollPageIntoView: page=${pageNumber}, hasPageEl=${Boolean(pageEl)}, scrollContainer=${describeElement(scrollContainer)}`
+			);
+
+			if (pageEl && scrollContainer && containerRect) {
+				const pageBounds = pageEl.getBoundingClientRect();
+				const isOffScreen = isPageCompletelyOffScreen(pageBounds, containerRect);
+				logDebug(
+					"pdf",
+					`adapter.scrollPageIntoView: pageBounds=[${pageBounds.top.toFixed(1)}, ${pageBounds.bottom.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+				);
+				if (!isOffScreen) {
+					logDebug("pdf", `adapter.scrollPageIntoView: page ${pageNumber} is already on-screen, skipping scroll`);
+					return;
+				}
+				logDebug("pdf", `adapter.scrollPageIntoView: page ${pageNumber} is off-screen, centering page`);
+				pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+				return;
+			}
+
 			try {
 				if (typeof pdfViewer.scrollPageIntoView === "function") {
+					logDebug("pdf", `adapter.scrollPageIntoView: delegating to pdfViewer.scrollPageIntoView`);
 					pdfViewer.scrollPageIntoView({ pageNumber });
+					return;
 				} else if (typeof pdfViewer.currentPageNumber === "number") {
+					logDebug("pdf", `adapter.scrollPageIntoView: setting pdfViewer.currentPageNumber=${pageNumber}`);
 					pdfViewer.currentPageNumber = pageNumber;
 				}
-			} catch {
-				// Ignore
+			} catch (e) {
+				logDebug("pdf", "adapter.scrollPageIntoView: error in pdfViewer scroll", e);
 			}
 
 			const child = (view as any)?.viewer?.child || (view as any)?.child;
 			try {
 				if (typeof child?.scrollToPage === "function") {
+					logDebug("pdf", `adapter.scrollPageIntoView: delegating to child.scrollToPage`);
 					child.scrollToPage(pageNumber);
+					return;
 				} else if (typeof child?.goToPage === "function") {
+					logDebug("pdf", `adapter.scrollPageIntoView: delegating to child.goToPage`);
 					child.goToPage(pageNumber);
 				}
-			} catch {
-				// Ignore
-			}
-
-			const pageEl = this.getPageElement(pageNumber);
-			if (pageEl && typeof pageEl.scrollIntoView === "function") {
-				pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+			} catch (e) {
+				logDebug("pdf", "adapter.scrollPageIntoView: error in child scroll", e);
 			}
 		},
 
 		scrollToRect(pageNumber: number, rect?: MatchRect) {
 			const pageEl = this.getPageElement(pageNumber);
+			const scrollContainer = getScrollContainer(containerEl, pageEl);
+			const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+
+			logDebug(
+				"pdf",
+				`adapter.scrollToRect: page=${pageNumber}, hasPageEl=${Boolean(pageEl)}, hasRect=${Boolean(rect)}, scrollContainer=${describeElement(scrollContainer)}`
+			);
+
 			if (!pageEl) {
 				this.scrollPageIntoView(pageNumber);
 				return;
 			}
 
-			// 1. If an active match element is present in DOM, scroll it directly into center
+			// 1. If an active match element is present in DOM
 			const currentHighlight = pageEl.querySelector(
-				".incsearch-pdf-match.is-current"
+				".incsearch-pdf-match.is-current, .highlight.selected"
 			) as HTMLElement | null;
+
 			if (currentHighlight && typeof currentHighlight.scrollIntoView === "function") {
+				if (containerRect && typeof currentHighlight.getBoundingClientRect === "function") {
+					const hlRect = currentHighlight.getBoundingClientRect();
+					const isOffScreen = isOffScreenVertically(hlRect, containerRect);
+					logDebug(
+						"pdf",
+						`adapter.scrollToRect: hlRect=[${hlRect.top.toFixed(1)}, ${hlRect.bottom.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+					);
+					if (!isOffScreen) {
+						logDebug("pdf", "adapter.scrollToRect: highlight is already on-screen, skipping scroll");
+						return;
+					}
+				}
+				logDebug("pdf", "adapter.scrollToRect: scrolling highlight into center");
 				currentHighlight.scrollIntoView({
 					block: "center",
 					inline: "nearest",
@@ -469,22 +526,33 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			}
 
 			// 2. Otherwise calculate scroll offset relative to the scroll container
-			const scrollContainer = getScrollContainer(containerEl, pageEl);
-			if (rect && scrollContainer) {
-				const containerRect = scrollContainer.getBoundingClientRect();
+			if (rect && scrollContainer && containerRect) {
 				const pageBounds = pageEl.getBoundingClientRect();
+				const targetTop = pageBounds.top + rect.top;
+				const targetBottom = targetTop + rect.height;
+				const isOffScreen = isOffScreenVertically(
+					{ top: targetTop, bottom: targetBottom, left: 0, right: 0 },
+					containerRect
+				);
 
-				const targetY = pageBounds.top + rect.top + rect.height / 2;
+				logDebug(
+					"pdf",
+					`adapter.scrollToRect: rectTarget=[${targetTop.toFixed(1)}, ${targetBottom.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+				);
+
+				if (!isOffScreen) {
+					logDebug("pdf", "adapter.scrollToRect: rect is already on-screen, skipping scroll");
+					return;
+				}
+
+				const targetY = targetTop + rect.height / 2;
 				const deltaY = targetY - (containerRect.top + containerRect.height / 2);
-
-				const targetX = pageBounds.left + rect.left + rect.width / 2;
-				const deltaX = targetX - (containerRect.left + containerRect.width / 2);
+				logDebug("pdf", `adapter.scrollToRect: scrolling container by deltaY=${deltaY.toFixed(1)}`);
 
 				if (typeof scrollContainer.scrollBy === "function") {
-					scrollContainer.scrollBy({ top: deltaY, left: deltaX, behavior: "smooth" });
+					scrollContainer.scrollBy({ top: deltaY, behavior: "smooth" });
 				} else {
 					scrollContainer.scrollTop += deltaY;
-					scrollContainer.scrollLeft += deltaX;
 				}
 			} else {
 				pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
@@ -509,6 +577,11 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				phraseSearch = true,
 				entireWord = false,
 			} = command;
+
+			logDebug(
+				"pdf",
+				`adapter.executeNativeFind: query="${query}", type="${type}", findPrevious=${findPrevious}, highlightAll=${highlightAll}`
+			);
 			const child = (view as any)?.viewer?.child || (view as any)?.child;
 			const findController =
 				pdfViewer?.findController ||

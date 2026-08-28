@@ -162,7 +162,7 @@ describe("PDF View Adapter", () => {
 			height: 500,
 			x: 0,
 			y: 100,
-			toJSON: () => {},
+			toJSON: () => { },
 		});
 
 		const page1El = document.createElement("div");
@@ -178,7 +178,7 @@ describe("PDF View Adapter", () => {
 			height: 1000,
 			x: 0,
 			y: -200,
-			toJSON: () => {},
+			toJSON: () => { },
 		});
 		containerEl.appendChild(page1El);
 

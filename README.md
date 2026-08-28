@@ -16,13 +16,12 @@ Inspired by GNU Emacs `isearch` and `swiper`, for anyone who'd rather keep their
 - [In-search controls](#in-search-controls)
 - [Settings](#settings)
 - [Customizing highlight colors](#customizing-highlight-colors)
-- [Development](#development)
-- [Developer notes: highlight color engine](#developer-notes-highlight-color-engine)
+- [Architecture & Theory](doc/ARCHITECTURE_AND_THEORY.md)
 
 ## Quick start
 
 1. Run **Incremental Search: Forward** or **Incremental Search: Backward** from the Command Palette (assign a hotkey — see below).
-2. Start typing. Matches highlight as you go, starting from your cursor.
+2. Start typing. Matches highlight as you go, starting from your cursor. If you start search with text already selected, it automatically searches for that selection and jumps to the next occurrence.
 3. Press the same hotkey again to jump to the next match, or press `Enter` to land the cursor there and close the search.
 
 Works in notes (source and Live Preview), tables, callouts, and PDFs.
@@ -32,6 +31,8 @@ Works in notes (source and Live Preview), tables, callouts, and PDFs.
 Type a few words and the plugin finds them nearby, in order — you don't need the exact phrase.
 
 For example, searching `the KAN` matches text like *"the original KAN"* — the words don't need to be adjacent.
+
+**Search from active selection:** If text is selected when you start a search, the plugin immediately uses that selection as the search query and jumps to the next occurrence (for forward search) or previous occurrence (for backward search), excluding the active selection itself.
 
 **Need an exact match?** Wrap any part of your search in double quotes. Searching `"the KAN"` matches only that exact phrase, with no words in between.
 
