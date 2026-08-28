@@ -75,7 +75,6 @@ Once a search is active, these keys control navigation and how the search sessio
 | `Esc` | Cancel, restore original position | Accept match, close search |
 | `Ctrl+G` | Not bound by default | Not bound by default |
 | `Ctrl+Enter` / `Cmd+Enter` | Toggle highlighting of other matches — only when "Highlight all matches" is set to *On demand* | Same as Emacs-style |
-| Double-tap the search hotkey (once assigned) | Recall last query, continue searching | Recall last query, continue searching |
 | Click outside / switch tab | Dismiss, keep current cursor position | Dismiss, keep current cursor position |
 
 ## Settings
