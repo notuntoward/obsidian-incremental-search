@@ -198,7 +198,10 @@ function computeDomRangeGeometry(
 			const targetSnippet = item.str.slice(span.startOffset, span.endOffset);
 			if (targetSnippet && pageDomMapping.text.length > 0) {
 				const foundIdx = pageDomMapping.text.indexOf(targetSnippet);
-				if (foundIdx !== -1 && foundIdx + targetSnippet.length <= pageDomMapping.chars.length) {
+				if (
+					foundIdx !== -1 &&
+					foundIdx + targetSnippet.length <= pageDomMapping.chars.length
+				) {
 					const startChar = pageDomMapping.chars[foundIdx];
 					const endChar = pageDomMapping.chars[foundIdx + targetSnippet.length - 1];
 					try {

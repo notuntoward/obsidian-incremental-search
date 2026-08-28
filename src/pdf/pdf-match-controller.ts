@@ -116,11 +116,7 @@ export function processPdfQuery(
  * Applies markdown's line-scoped wildcard semantics to PDF.js page text while
  * preserving the page-relative offsets expected by the native find controller.
  */
-export function findPdfWildcardMatches(
-	pageContent: string,
-	query: string,
-	caseSensitive: boolean
-) {
+export function findPdfWildcardMatches(pageContent: string, query: string, caseSensitive: boolean) {
 	const tokens = parseWildcardQuery(query, caseSensitive);
 	if (tokens.length === 0) return [];
 	const haystack = caseSensitive ? pageContent : pageContent.toLowerCase();
@@ -186,10 +182,12 @@ interface CssHighlightRegistry {
 }
 
 function getCssHighlightApi(doc: Document) {
-	const view = doc.defaultView as (Window & {
-		CSS?: typeof CSS & { highlights?: CssHighlightRegistry };
-		Highlight?: new (...ranges: Range[]) => unknown;
-	}) | null;
+	const view = doc.defaultView as
+		| (Window & {
+				CSS?: typeof CSS & { highlights?: CssHighlightRegistry };
+				Highlight?: new (...ranges: Range[]) => unknown;
+		  })
+		| null;
 	const registry = view?.CSS?.highlights;
 	return { Highlight: view?.Highlight, registry };
 }
@@ -250,10 +248,7 @@ function highlightNativeSelectedTokens(fragments: HTMLElement[], query: string) 
 }
 
 /** Styles selected PDF.js fragments without replacing their native geometry. */
-export function decorateNativeSelectedHighlightFragments(
-	containerEl: HTMLElement,
-	query = ""
-) {
+export function decorateNativeSelectedHighlightFragments(containerEl: HTMLElement, query = "") {
 	clearNativeSelectedTokenHighlights(containerEl.ownerDocument);
 	const fragments = Array.from(
 		containerEl.querySelectorAll<HTMLElement>(
@@ -275,8 +270,7 @@ export function decorateNativeSelectedHighlightFragments(
 		const currentRect = current.getBoundingClientRect();
 		const nextRect = next.getBoundingClientRect();
 		const verticalOverlap =
-			Math.min(currentRect.bottom, nextRect.bottom) -
-			Math.max(currentRect.top, nextRect.top);
+			Math.min(currentRect.bottom, nextRect.bottom) - Math.max(currentRect.top, nextRect.top);
 		const minHeight = Math.min(currentRect.height, nextRect.height);
 		const edgeGap = Math.min(
 			Math.abs(nextRect.left - currentRect.right),
@@ -284,11 +278,7 @@ export function decorateNativeSelectedHighlightFragments(
 		);
 		const joinTolerance = Math.max(4, minHeight * 0.75);
 
-		if (
-			minHeight > 0 &&
-			verticalOverlap >= minHeight * 0.6 &&
-			edgeGap <= joinTolerance
-		) {
+		if (minHeight > 0 && verticalOverlap >= minHeight * 0.6 && edgeGap <= joinTolerance) {
 			current.classList.add("incsearch-join-next");
 			next.classList.add("incsearch-join-prev");
 			continue;
@@ -296,8 +286,7 @@ export function decorateNativeSelectedHighlightFragments(
 
 		const verticalGap = nextRect.top - currentRect.bottom;
 		const horizontalOverlap =
-			Math.min(currentRect.right, nextRect.right) -
-			Math.max(currentRect.left, nextRect.left);
+			Math.min(currentRect.right, nextRect.right) - Math.max(currentRect.left, nextRect.left);
 		if (verticalGap >= 0 && verticalGap <= 4 && horizontalOverlap >= 0) {
 			current.classList.add("incsearch-line-join-next");
 			next.classList.add("incsearch-line-join-prev");
@@ -659,13 +648,7 @@ export class PdfMatchController {
 		for (let i = 0; i < normalizedMatches.length; i++) {
 			const nm = normalizedMatches[i];
 			const itemSpans = mapNormalizedRangeToItemSpans(model, nm.start, nm.end);
-			const { rects } = computeMatchGeometry(
-				pageEl,
-				textLayerEl,
-				itemSpans,
-				model,
-				viewport
-			);
+			const { rects } = computeMatchGeometry(pageEl, textLayerEl, itemSpans, model, viewport);
 
 			const isDuplicate = newPdfMatches.some((m) => m.from === nm.start && m.to === nm.end);
 			if (!isDuplicate) {
@@ -858,10 +841,7 @@ export class PdfMatchController {
 	}
 
 	cancel() {
-		if (
-			typeof this.adapter.restoreScrollPosition === "function" &&
-			this.originScrollPosition
-		) {
+		if (typeof this.adapter.restoreScrollPosition === "function" && this.originScrollPosition) {
 			this.adapter.restoreScrollPosition(this.originScrollPosition);
 		} else if (this.originPageNumber) {
 			this.adapter.scrollPageIntoView(this.originPageNumber);

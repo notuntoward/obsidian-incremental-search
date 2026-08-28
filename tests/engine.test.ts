@@ -6,7 +6,6 @@ import {
   parseWildcardQuery,
   findWildcardMatches,
   findLiteralMatches,
-  findRegexMatches,
   compileQuery,
   findMatchesInText,
   isWholeWord,
@@ -70,6 +69,70 @@ describe("engine: parseWildcardQuery (space-as-wildcard)", () => {
     expect(parseWildcardQuery(" hello ", false)).toEqual(["hello"]);
     expect(parseWildcardQuery("  hello", false)).toEqual([" hello"]);
     expect(parseWildcardQuery("hello  ", false)).toEqual(["hello "]);
+  });
+
+  it("handles pure literal phrases in double quotes", () => {
+    expect(parseWildcardQuery('"foo bar"', false)).toEqual(["foo bar"]);
+    expect(parseWildcardQuery('"the KAN"', false)).toEqual(["the kan"]);
+    expect(parseWildcardQuery('"the KAN"', true)).toEqual(["the KAN"]);
+  });
+
+  it("handles composable queries with wildcard-gapped terms around quoted literal segment", () => {
+    expect(parseWildcardQuery('foo "bar baz" qux', false)).toEqual(["foo", "bar baz", "qux"]);
+    expect(parseWildcardQuery('start "middle phrase" end', false)).toEqual(["start", "middle phrase", "end"]);
+  });
+
+  it("preserves multiple internal spaces inside quotes literally", () => {
+    expect(parseWildcardQuery('"foo  bar"', false)).toEqual(["foo  bar"]);
+    expect(parseWildcardQuery('"a   b    c"', false)).toEqual(["a   b    c"]);
+  });
+
+  it("handles quoted phrases containing an escaped quote (\\\")", () => {
+    expect(parseWildcardQuery('"she said \\"hi\\" once"', false)).toEqual(['she said "hi" once']);
+    expect(parseWildcardQuery('"\\"nested\\""', false)).toEqual(['"nested"']);
+  });
+
+  it("handles unterminated quotes permissively for incremental typing", () => {
+    expect(parseWildcardQuery('foo "unterminated', false)).toEqual(["foo", "unterminated"]);
+    expect(parseWildcardQuery('"unterminated phrase with spaces', false)).toEqual(["unterminated phrase with spaces"]);
+  });
+
+  it("treats slash-wrapped path-like queries as normal literal text", () => {
+    expect(parseWildcardQuery("/var/bin/", false)).toEqual(["/var/bin/"]);
+    expect(parseWildcardQuery("/usr/local/bin /etc", false)).toEqual(["/usr/local/bin", "/etc"]);
+  });
+
+  it("concatenates adjacent unquoted and quoted tokens without spaces", () => {
+    expect(parseWildcardQuery('foo"bar"', false)).toEqual(["foobar"]);
+    expect(parseWildcardQuery('"foo"bar', false)).toEqual(["foobar"]);
+    expect(parseWildcardQuery('prefix"middle"suffix', false)).toEqual(["prefixmiddlesuffix"]);
+  });
+
+  it("handles query containing only an opening quote or empty quotes", () => {
+    expect(parseWildcardQuery('"', false)).toEqual([]);
+    expect(parseWildcardQuery('""', false)).toEqual([]);
+    expect(parseWildcardQuery('foo "" bar', false)).toEqual(["foo", "bar"]);
+    expect(parseWildcardQuery('foo "', false)).toEqual(["foo"]);
+  });
+
+  it("preserves non-quote backslashes inside quotes literally", () => {
+    expect(parseWildcardQuery('"C:\\\\Windows\\\\System32"', false)).toEqual(["c:\\\\windows\\\\system32"]);
+    expect(parseWildcardQuery('"\\n \\t"', false)).toEqual(["\\n \\t"]);
+    expect(parseWildcardQuery('"foo\\\\\\"bar"', false)).toEqual(['foo\\\\"bar']);
+  });
+
+  it("handles multiple adjacent or separated quoted sections", () => {
+    expect(parseWildcardQuery('"first" "second" "third"', false)).toEqual(["first", "second", "third"]);
+    expect(parseWildcardQuery('"first"  "second"', false)).toEqual(["first second"]);
+  });
+
+  it("preserves regex special characters inside quotes literally", () => {
+    expect(parseWildcardQuery('"[a-z]+ (foo|bar) ^.*$"', false)).toEqual(["[a-z]+ (foo|bar) ^.*$"]);
+  });
+
+  it("respects case sensitivity for smart-case queries with quotes", () => {
+    expect(parseWildcardQuery('foo "Bar"', true)).toEqual(["foo", "Bar"]);
+    expect(parseWildcardQuery('foo "Bar"', false)).toEqual(["foo", "bar"]);
   });
 });
 
@@ -156,6 +219,93 @@ describe("engine: findWildcardMatches", () => {
     expect(matches).toHaveLength(2);
     expect(text.slice(matches[0].from, matches[0].to)).toBe("I would");
     expect(text.slice(matches[1].from, matches[1].to)).toBe("io would");
+  });
+
+  it("matches exact quoted phrase without matching unquoted occurrences across gaps", () => {
+    const text = "the original KAN and the KAN paper";
+    // Unquoted "the KAN" matches at "the original KAN" (first)
+    const wildcardMatches = findWildcardMatches(text, "the KAN", 0, false);
+    expect(wildcardMatches[0].from).toBe(0);
+    expect(wildcardMatches[0].to).toBe(16);
+
+    // Quoted '"the KAN"' matches only the literal phrase at index 21
+    const quotedMatches = findWildcardMatches(text, '"the KAN"', 0, false);
+    expect(quotedMatches).toHaveLength(1);
+    expect(quotedMatches[0].from).toBe(21);
+    expect(quotedMatches[0].to).toBe(28);
+  });
+
+  it("matches composable queries with wildcard gaps around quoted segment", () => {
+    const text = "alpha 123 bar baz 456 omega";
+    const matches = findWildcardMatches(text, 'alpha "bar baz" omega', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(0);
+    expect(matches[0].to).toBe(27);
+    expect(matches[0].chars).toEqual([
+      { from: 0, to: 5 },   // "alpha"
+      { from: 10, to: 17 }, // "bar baz"
+      { from: 22, to: 27 }, // "omega"
+    ]);
+  });
+
+  it("preserves multiple spaces inside quoted phrases during matching", () => {
+    const text = "hello  world and hello world";
+    const matches = findWildcardMatches(text, '"hello  world"', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(0);
+    expect(matches[0].to).toBe(12);
+  });
+
+  it("matches quoted phrases containing escaped quotes", () => {
+    const text = 'He said, "Hello world" to everyone.';
+    const matches = findWildcardMatches(text, '"\\"Hello world\\""', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(9);
+    expect(matches[0].to).toBe(22);
+  });
+
+  it("matches unterminated quotes in-progress for incremental typing", () => {
+    const text = "first second third and fourth";
+    const matches = findWildcardMatches(text, 'first "second th', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(0);
+    expect(matches[0].to).toBe(15); // "first second th"
+  });
+
+  it("matches quoted literal containing special regex symbols without errors", () => {
+    const text = "const regex = /[a-z]+ (foo|bar)/;";
+    const matches = findWildcardMatches(text, '"/[a-z]+ (foo|bar)/"', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(14);
+    expect(matches[0].to).toBe(32);
+  });
+
+  it("matches quoted literal containing literal backslashes", () => {
+    const text = "Directory C:\\Windows\\System32 and C:\\Program Files";
+    const matches = findWildcardMatches(text, '"C:\\Windows\\System32"', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(10);
+    expect(matches[0].to).toBe(29);
+  });
+
+  it("matches multiple quoted segments in sequence with wildcard gaps", () => {
+    const text = "the quick brown fox jumps over the lazy dog";
+    const matches = findWildcardMatches(text, '"quick brown" "lazy dog"', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(4);
+    expect(matches[0].to).toBe(43);
+    expect(matches[0].chars).toEqual([
+      { from: 4, to: 15 },
+      { from: 35, to: 43 },
+    ]);
+  });
+
+  it("matches exact quoted phrase inside Markdown formatting", () => {
+    const text = "Here is some **bold and strong** text in markdown.";
+    const matches = findWildcardMatches(text, '"bold and strong"', 0, false);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].from).toBe(15);
+    expect(matches[0].to).toBe(30);
   });
 });
 
@@ -510,14 +660,13 @@ describe("engine: computeMatches", () => {
     expect(nonTableMatches[0].tableMatchData).toBeUndefined();
   });
 
-  it("supports regex pattern /regex/flags search in Markdown documents", () => {
+  it("supports exact quoted search in Markdown documents", () => {
     const doc = "Order #1234 on 2026-08-27\nOrder #5678 on 2026-08-28";
     const state = EditorState.create({ doc });
 
-    const matches = computeMatches(state, "/Order #\\d+/", false, false);
-    expect(matches).toHaveLength(2);
+    const matches = computeMatches(state, '"Order #1234"', true, false);
+    expect(matches).toHaveLength(1);
     expect(doc.slice(matches[0].from, matches[0].to)).toBe("Order #1234");
-    expect(doc.slice(matches[1].from, matches[1].to)).toBe("Order #5678");
   });
 });
 
@@ -526,14 +675,18 @@ describe("engine: compileQuery", () => {
     expect(compileQuery("")).toBeNull();
   });
 
-  it("compiles regex queries when enclosed in /pattern/flags", () => {
-    const compiled = compileQuery("/\\bword\\d+/i");
+  it("compiles double-quoted queries as wildcard queries with literal tokens", () => {
+    const compiled = compileQuery('foo "bar baz" qux');
     expect(compiled).not.toBeNull();
-    expect(compiled?.type).toBe("regex");
-    expect(compiled?.regex).toBeInstanceOf(RegExp);
-    expect(compiled?.regex?.source).toBe("\\bword\\d+");
-    expect(compiled?.regex?.flags).toContain("i");
-    expect(compiled?.regex?.flags).toContain("g");
+    expect(compiled?.type).toBe("wildcard");
+    expect(compiled?.tokens).toEqual(["foo", "bar baz", "qux"]);
+  });
+
+  it("compiles slash-wrapped path-like queries as normal wildcard queries", () => {
+    const compiled = compileQuery("/var/bin/");
+    expect(compiled).not.toBeNull();
+    expect(compiled?.type).toBe("wildcard");
+    expect(compiled?.tokens).toEqual(["/var/bin/"]);
   });
 
   it("compiles wildcard queries with space-as-wildcard tokens", () => {
@@ -557,7 +710,7 @@ describe("engine: compileQuery", () => {
 });
 
 describe("engine: findMatchesInText", () => {
-  it("finds regex matches with whole-word post-filtering", () => {
+  it("finds literal matches with whole-word post-filtering", () => {
     const text = "cat concatenate catalog cat";
     const allMatches = findMatchesInText(text, "cat", { spaceAsWildcard: false, wholeWord: false });
     expect(allMatches).toHaveLength(4);
@@ -597,21 +750,6 @@ describe("engine: isWholeWord & isWithinMaxGap", () => {
     expect(isWithinMaxGap(chars, 10)).toBe(true);
     expect(isWithinMaxGap(chars, 5)).toBe(false);
     expect(isWithinMaxGap(chars, undefined)).toBe(true);
-  });
-});
-
-describe("engine: findRegexMatches", () => {
-  it("handles regex patterns safely", () => {
-    const text = "apple 100, banana 200";
-    const matches = findRegexMatches(text, "\\w+ \\d+", "g");
-    expect(matches).toHaveLength(2);
-    expect(matches[0]).toEqual({ from: 0, to: 9 });
-    expect(matches[1]).toEqual({ from: 11, to: 21 });
-  });
-
-  it("returns empty array for invalid regex syntax without throwing", () => {
-    expect(() => findRegexMatches("some text", "[unclosed", "g")).not.toThrow();
-    expect(findRegexMatches("some text", "[unclosed", "g")).toEqual([]);
   });
 });
 

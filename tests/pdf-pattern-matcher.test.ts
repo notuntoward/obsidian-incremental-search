@@ -72,16 +72,39 @@ describe("PDF Pattern Matcher", () => {
 		expect(rejectedMatches).toHaveLength(0);
 	});
 
-	it("finds regex matches safely", () => {
+	it("finds quoted literal matches safely", () => {
 		const items: PdfTextItem[] = [
 			{ str: "Order #12345 placed on 2026-08-25, Order #67890", dir: "ltr" },
 		];
 		const model = buildPageTextModel(1, items);
 
-		const matches = findPageMatches(model, "/Order #\\d+/", { spaceAsWildcard: false });
-		expect(matches).toHaveLength(2);
+		const matches = findPageMatches(model, '"Order #12345"', { spaceAsWildcard: true });
+		expect(matches).toHaveLength(1);
 		expect(model.normalizedText.slice(matches[0].start, matches[0].end)).toBe("Order #12345");
-		expect(model.normalizedText.slice(matches[1].start, matches[1].end)).toBe("Order #67890");
+	});
+
+	it("finds composable quoted wildcard matches in PDF text", () => {
+		const items: PdfTextItem[] = [
+			{ str: "The quick brown fox jumps over the lazy dog", dir: "ltr" },
+		];
+		const model = buildPageTextModel(1, items);
+
+		const matches = findPageMatches(model, 'quick "brown fox" dog', { spaceAsWildcard: true });
+		expect(matches).toHaveLength(1);
+		expect(matches[0].start).toBe(4);
+		expect(matches[0].end).toBe(43);
+		expect(matches[0].chars).toHaveLength(3);
+	});
+
+	it("preserves exact spaces in quoted PDF searches", () => {
+		const items: PdfTextItem[] = [
+			{ str: "double  space and single space", dir: "ltr" },
+		];
+		const model = buildPageTextModel(1, items);
+
+		const matches = findPageMatches(model, '"double  space"', { spaceAsWildcard: true });
+		expect(matches).toHaveLength(1);
+		expect(model.normalizedText.slice(matches[0].start, matches[0].end)).toBe("double  space");
 	});
 
 	it("handles whole-word matching option", () => {

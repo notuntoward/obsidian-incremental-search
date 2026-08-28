@@ -37,16 +37,14 @@ export interface SearchQueryOptions {
 	caseSensitive?: boolean;
 	wholeWord?: boolean;
 	maxGapChars?: number;
-	regexMode?: boolean;
 }
 
 export interface CompiledQuery {
 	rawQuery: string;
-	type: "regex" | "wildcard" | "literal";
+	type: "wildcard" | "literal";
 	caseSensitive: boolean;
 	wholeWord: boolean;
 	maxGapChars?: number;
-	regex?: RegExp;
 	tokens?: string[];
 	needle?: string;
 }

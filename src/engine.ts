@@ -12,32 +12,94 @@ export function isCaseSensitive(query: string): boolean {
 }
 
 /**
- * Parses a wildcard query string into literal string tokens according to
- * Emacs space-as-wildcard rules:
- * - 1 space: Wildcard separator (unbounded gap between tokens)
- * - 2 spaces: Exactly 1 literal space required
- * - 3 spaces: Exactly 2 literal spaces required
- * - N spaces: Exactly N - 1 literal spaces required
+ * Splits a query into unquoted and quoted segments.
+ * Inside quotes:
+ * - \" is an escaped literal quote.
+ * - Any other backslash is a literal backslash.
+ * - All spaces are literal.
+ * - Unterminated quotes at end-of-input are treated permissively as in-progress literal tokens.
+ */
+interface QueryChunk {
+	type: "quoted" | "unquoted";
+	text: string;
+}
+
+export function splitIntoChunks(query: string): QueryChunk[] {
+	const chunks: QueryChunk[] = [];
+	let i = 0;
+	let currentUnquoted = "";
+
+	while (i < query.length) {
+		if (query[i] === '"') {
+			if (currentUnquoted.length > 0) {
+				chunks.push({ type: "unquoted", text: currentUnquoted });
+				currentUnquoted = "";
+			}
+			// Scan quoted segment
+			i++; // skip opening quote
+			let quotedContent = "";
+			while (i < query.length) {
+				if (query[i] === "\\" && i + 1 < query.length && query[i + 1] === '"') {
+					quotedContent += '"';
+					i += 2;
+				} else if (query[i] === '"') {
+					i++; // skip closing quote
+					break;
+				} else {
+					quotedContent += query[i];
+					i++;
+				}
+			}
+			chunks.push({ type: "quoted", text: quotedContent });
+		} else {
+			currentUnquoted += query[i];
+			i++;
+		}
+	}
+
+	if (currentUnquoted.length > 0) {
+		chunks.push({ type: "unquoted", text: currentUnquoted });
+	}
+
+	return chunks;
+}
+
+/**
+ * Parses a query string into literal string tokens according to
+ * Emacs space-as-wildcard rules and composable double-quoted literal segments:
+ * - Double-quoted segments ("...") are matched literally with all internal spaces preserved.
+ * - Outside quotes:
+ *   - 1 space: Wildcard separator (unbounded gap between tokens)
+ *   - 2 spaces: Exactly 1 literal space required
+ *   - 3 spaces: Exactly 2 literal spaces required
+ *   - N spaces: Exactly N - 1 literal spaces required
  */
 export function parseWildcardQuery(query: string, caseSensitive: boolean): string[] {
 	if (query.length === 0) return [];
 
+	const chunks = splitIntoChunks(query);
 	const tokens: string[] = [];
-	const parts = query.split(/( +)/);
 	let currentToken = "";
 
-	for (const part of parts) {
-		if (part.startsWith(" ")) {
-			if (part.length === 1) {
-				if (currentToken.length > 0) {
-					tokens.push(caseSensitive ? currentToken : currentToken.toLowerCase());
-					currentToken = "";
+	for (const chunk of chunks) {
+		if (chunk.type === "quoted") {
+			currentToken += chunk.text;
+		} else {
+			const parts = chunk.text.split(/( +)/);
+			for (const part of parts) {
+				if (part.startsWith(" ")) {
+					if (part.length === 1) {
+						if (currentToken.length > 0) {
+							tokens.push(caseSensitive ? currentToken : currentToken.toLowerCase());
+							currentToken = "";
+						}
+					} else {
+						currentToken += " ".repeat(part.length - 1);
+					}
+				} else if (part.length > 0) {
+					currentToken += part;
 				}
-			} else {
-				currentToken += " ".repeat(part.length - 1);
 			}
-		} else if (part.length > 0) {
-			currentToken += part;
 		}
 	}
 
@@ -80,42 +142,6 @@ export function isWithinMaxGap(
 }
 
 /**
- * Executes regular-expression matching on text with safety bounds.
- */
-export function findRegexMatches(
-	text: string,
-	pattern: string,
-	flags: string,
-	offset = 0
-): MatchRange[] {
-	const results: MatchRange[] = [];
-	try {
-		const safeFlags = flags.includes("g") ? flags : flags + "g";
-		const regex = new RegExp(pattern, safeFlags);
-		let match: RegExpExecArray | null = null;
-		let count = 0;
-		const maxMatches = 5000;
-
-		while ((match = regex.exec(text)) !== null) {
-			if (match[0].length === 0) {
-				regex.lastIndex++;
-				continue;
-			}
-			results.push({
-				from: offset + match.index,
-				to: offset + match.index + match[0].length,
-			});
-			count++;
-			if (count >= maxMatches) break;
-		}
-	} catch {
-		// Invalid regex pattern
-		return [];
-	}
-	return results;
-}
-
-/**
  * Compiles a raw query string and options into an optimized CompiledQuery object.
  */
 export function compileQuery(
@@ -127,27 +153,6 @@ export function compileQuery(
 	const caseSensitive = options.caseSensitive ?? isCaseSensitive(query);
 	const wholeWord = Boolean(options.wholeWord);
 	const maxGapChars = options.maxGapChars;
-
-	// Check if query is formatted as /pattern/flags or explicit regexMode
-	const regexMatch = query.match(/^\/(.+)\/([a-z]*)$/);
-	if (options.regexMode || regexMatch) {
-		const pattern = regexMatch ? regexMatch[1] : query;
-		const rawFlags = regexMatch ? regexMatch[2] : caseSensitive ? "" : "i";
-		const safeFlags = rawFlags.includes("g") ? rawFlags : rawFlags + "g";
-		try {
-			const regex = new RegExp(pattern, safeFlags);
-			return {
-				rawQuery: query,
-				type: "regex",
-				caseSensitive,
-				wholeWord,
-				maxGapChars,
-				regex,
-			};
-		} catch {
-			return null;
-		}
-	}
 
 	const useWildcard = options.spaceAsWildcard ?? options.wildcard ?? options.fuzzy ?? true;
 	if (useWildcard) {
@@ -295,31 +300,8 @@ export function findMatchesInText(
 
 	let rawMatches: MatchRange[] = [];
 
-	if (compiled.type === "regex" && compiled.regex) {
-		const regex = new RegExp(compiled.regex.source, compiled.regex.flags);
-		let match: RegExpExecArray | null = null;
-		let count = 0;
-		const maxMatches = 5000;
-
-		while ((match = regex.exec(text)) !== null) {
-			if (match[0].length === 0) {
-				regex.lastIndex++;
-				continue;
-			}
-			rawMatches.push({
-				from: offset + match.index,
-				to: offset + match.index + match[0].length,
-			});
-			count++;
-			if (count >= maxMatches) break;
-		}
-	} else if (compiled.type === "wildcard" && compiled.tokens) {
-		rawMatches = findWildcardMatches(
-			text,
-			compiled.tokens,
-			offset,
-			compiled.caseSensitive
-		);
+	if (compiled.type === "wildcard" && compiled.tokens) {
+		rawMatches = findWildcardMatches(text, compiled.tokens, offset, compiled.caseSensitive);
 	} else if (compiled.type === "literal" && compiled.needle) {
 		const haystack = compiled.caseSensitive ? text : text.toLowerCase();
 		const needle = compiled.needle;

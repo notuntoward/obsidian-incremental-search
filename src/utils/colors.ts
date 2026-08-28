@@ -145,9 +145,7 @@ function detectPdfAppearance(containerEl: HTMLElement): { background: RGBA; text
 	};
 
 	for (const el of Array.from(
-		containerEl.querySelectorAll<HTMLElement>(
-			".pdfViewer .page, .pdf-viewer .page, .textLayer"
-		)
+		containerEl.querySelectorAll<HTMLElement>(".pdfViewer .page, .pdf-viewer .page, .textLayer")
 	)) {
 		const background = readBackground(el);
 		if (background) {

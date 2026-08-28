@@ -4,264 +4,110 @@
 [![CodeQL](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml)
 
-A fast, keyboard-first incremental search plugin for Obsidian.
+Incremental search for Obsidian notes and PDFs. Start typing and jump straight to the match — no need to open a separate panel or type a whole phrase.
 
-Designed for users who prefer home-row keyboard navigation—such as users of GNU Emacs (`isearch` / `swiper`) and modal editors. Search results highlight instantly in your active note or PDF as you type, and subsequent keypresses cycle seamlessly through matches without touching the mouse.
+Inspired by GNU Emacs `isearch` and `swiper`, for anyone who'd rather keep their hands on the keyboard.
 
----
+## Contents
 
-## Key Features
+- [Quick start](#quick-start)
+- [How search works](#how-search-works)
+- [Commands & keyboard shortcuts](#commands--keyboard-shortcuts)
+- [In-search controls](#in-search-controls)
+- [Settings](#settings)
+- [Customizing highlight colors](#customizing-highlight-colors)
+- [Development](#development)
+- [Developer notes: highlight color engine](#developer-notes-highlight-color-engine)
 
-- **⚡ Instant In-Document Highlighting:** Matches highlight directly in your viewport in real time. The active match features a high-contrast outline, while secondary matches use an adaptive theme-matched fill and inset edge.
-- **🎨 Adaptive Theme & Legibility Protection:** Automatically derives secondary match colors from your active theme's background and accent luminance. If background tinting reduces text readability, it automatically falls back to a non-intrusive dotted underline.
-- **↔️ Directional Navigation from Cursor:** Search begins from your current cursor position. Forward and backward commands navigate through matches relative to where you are working.
-- **🔍 Smart Space-as-Wildcard Matching:** Type search terms separated by single spaces to match ordered text fragments across flexible gaps. Extra spaces match literal spaces.
-- **🔤 Smart-Case Sensitivity:** Automatically searches case-insensitively when your query is all lowercase, and switches to case-sensitive matching the moment an uppercase character is typed.
-- **📊 Deep Context Support (Tables, Callouts & PDFs):**
-  - **Live Preview Tables:** Highlights matching table cells and displays a floating Table Toast with row/column context.
-  - **Callouts:** Searches and highlights content within both collapsed and expanded callouts.
-  - **PDF Documents:** Incremental search directly inside Obsidian's native PDF viewer using PDF.js-native highlight placement, match navigation, and page auto-scrolling. Match colors automatically adapt to the PDF's actual page background (white, dark, or inverted) for consistent readability.
-- **🔄 Search Memory & Double-Tap Recall:** Pressing a search hotkey twice consecutively on an empty search recalls your previous query and continues searching in that direction.
-- **👁️ On-Demand Secondary Highlighting:** Keep your screen minimal by showing only the active match, or press `Ctrl+Enter` (`Cmd+Enter` on macOS) during search to toggle highlighting for all other matches.
-- **🔗 Link Target Filtering:** Avoid false positives by searching only the visible text of Markdown links and aliased wikilinks, ignoring hidden URLs and destinations.
-- **⚙️ Configurable Exit Policies:** Choose between Emacs-style (`Enter` accepts, `Esc` cancels) and Obsidian-style (`Enter` finds next, `Esc` accepts) exit behavior.
-- **🪟 Optional Center-Screen Modal:** Prefer a dialog over an inline floating widget? Toggle on the popup modal interface in settings.
+## Quick start
 
----
+1. Run **Incremental Search: Forward** or **Incremental Search: Backward** from the Command Palette (assign a hotkey — see below).
+2. Start typing. Matches highlight as you go, starting from your cursor.
+3. Press the same hotkey again to jump to the next match, or press `Enter` to land the cursor there and close the search.
 
-## Commands & Keyboard Shortcuts
+Works in notes (source and Live Preview), tables, callouts, and PDFs.
 
-The plugin registers two commands in Obsidian's Command Palette. **Hotkeys are unassigned by default** so they never conflict with your existing keymap.
+## How search works
 
-| Command Name | Command ID | Suggested Hotkey | Description |
-| :--- | :--- | :--- | :--- |
-| **Incremental Search: Forward** | `obsidian-incremental-search:forward` | `Ctrl+S` / `Cmd+S` or `Alt+S` | Starts or advances forward search from the cursor |
-| **Incremental Search: Backward** | `obsidian-incremental-search:backward` | `Ctrl+R` / `Cmd+R` or `Alt+R` | Starts or advances backward search from the cursor |
+Type a few words and the plugin finds them nearby, in order — you don't need the exact phrase.
 
-### Assigning Hotkeys
-1. Open Obsidian **Settings → Hotkeys**.
-2. Search for `Incremental Search`.
-3. Assign your preferred shortcuts to **Incremental Search: Forward** and **Incremental Search: Backward**.
+For example, searching `the KAN` matches text like *"the original KAN"* — the words don't need to be adjacent.
 
----
+**Need an exact match?** Wrap any part of your search in double quotes. Searching `"the KAN"` matches only that exact phrase, with no words in between.
 
-## In-Search Controls
+You can mix quoted and unquoted parts in the same search. For example:
 
-While the search widget is active, the following controls are available:
+`foo "bar baz" qux`
 
-| Key Action | Emacs-Style Mode (Default) | Obsidian-Style Mode |
-| :--- | :--- | :--- |
-| **Type Characters** | Increments query and jumps to the nearest match in current direction | Increments query and jumps to the nearest match in current direction |
-| **Forward Hotkey / `F3`** | Advance to next match | Advance to next match |
-| **Backward Hotkey / `Shift+F3`** | Advance to previous match | Advance to previous match |
-| **`Enter`** | **Accept match** (place cursor at current match and close search) | **Find next match** in current direction |
-| **`Shift+Enter`** | Reverse direction / accept | **Find previous match** |
-| **`Esc`** | **Cancel search** (restore original cursor and viewport position) | **Accept match** and close search |
-| **`Ctrl+G`** | **Cancel search** (restore original position) | **Cancel search** (restore original position) |
-| **`Ctrl+Enter` / `Cmd+Enter`** | Toggle highlighting of all secondary matches on/off | Toggle highlighting of all secondary matches on/off |
-| **Double-Tap Search Hotkey** | Recalls last search query and advances | Recalls last search query and advances |
-| **Click Outside / Switch Tab** | Dismisses widget and retains current cursor position | Dismisses widget and retains current cursor position |
+Here, `foo` and `qux` are still flexible, but `bar baz` must appear together, exactly as written, in between.
 
----
+To search for a literal quote character inside a quoted phrase, escape it with a backslash, as in `"she said \"hi\""`.
 
-## Search Capabilities
+**Case sensitivity is automatic.** All-lowercase searches ignore case (`react` matches `React`); typing any capital letter makes the search case-sensitive (`React` matches only `React`).
 
-### 1. Space-as-Wildcard Matching Rules
-
-When **Space-as-wildcard matching** is enabled (default), spaces between words act as flexible wildcard gaps:
-
-| Spaces Typed | Behavior | Literal Spaces Required in Note | Example |
-| :--- | :--- | :--- | :--- |
-| **1 space** | Flexible wildcard gap between ordered fragments | 0 | `the KAN` matches `the original KAN` |
-| **2 spaces** | Exact match requiring 1 literal space | 1 literal space | `the  KAN` matches `the KAN` |
-| **3 spaces** | Exact match requiring 2 literal spaces | 2 literal spaces | `the   KAN` matches `the  KAN` |
-| **N spaces** | Exact match requiring N − 1 spaces | N − 1 literal spaces | Matches exactly N − 1 spaces |
+**Extra spaces are literal.** One space between words is a flexible gap; two or more spaces require that many literal spaces in the note.
 
 > [!TIP]
-> When searching with wildcard spaces, non-current matches highlight only the matched words, keeping gaps clean and readable.
+> In PDFs, matches must start at word boundaries and gaps between words are bounded. This still lets you type a prefix like `modalit` to match `modalities`, while avoiding false matches that start mid-word or span unrelated paragraphs.
 
-In PDFs, wildcard tokens must begin at word boundaries and each flexible gap is bounded. This preserves incremental prefix matching such as `modalit` matching `modalities` while preventing false matches that begin inside another word or span unrelated paragraphs after PDF text normalization.
+## Commands & keyboard shortcuts
 
-### 2. Smart-Case Sensitivity
+Hotkeys are unassigned by default so they never conflict with your existing keymap.
 
-Matching adapts automatically based on character case:
-- **All lowercase:** Search is **case-insensitive** (`react` matches `react`, `React`, and `REACT`).
-- **Contains any uppercase letter:** Search automatically becomes **case-sensitive** (`React` matches only `React`).
+| Command | Command ID | Suggested hotkey | Description |
+| :--- | :--- | :--- | :--- |
+| Incremental Search: Forward | `obsidian-incremental-search:forward` | `Ctrl+S` / `Cmd+S` or `Alt+S` | Start or advance forward search from the cursor |
+| Incremental Search: Backward | `obsidian-incremental-search:backward` | `Ctrl+R` / `Cmd+R` or `Alt+R` | Start or advance backward search from the cursor |
 
-### 3. Target Environments
+To assign hotkeys: **Settings → Hotkeys**, search for "Incremental Search," and bind both commands.
 
-- **Markdown Source & Live Preview:** Full text and headings.
-- **Markdown Tables:** Highlights cells with column and row awareness. When focusing a match inside a table, a toast popup previews the cell context.
-- **Callouts:** Highlights text inside callouts, including collapsed callout blocks.
-- **PDF Documents:** Native PDF.js highlight placement, current/secondary styling, forward/backward navigation, and page auto-scrolling in Obsidian's PDF viewer.
-- **Link Filtering:** When **Match only visible part of links** is enabled, raw URLs (`[label](https://example.com)`) and hidden wikilink destinations (`[[destination|alias]]`) are excluded from search results.
+## In-search controls
 
----
+Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on the **Search exit behavior** setting (**Settings → Incremental Search → Navigation & exit behavior**) — the two columns below show the two available modes.
 
-## Settings Reference
+| Key | Emacs-style mode (default) | Obsidian-style mode |
+| :--- | :--- | :--- |
+| Type characters | Updates query, jumps to nearest match | Updates query, jumps to nearest match |
+| Forward hotkey / `F3` | Next match | Next match |
+| Backward hotkey / `Shift+F3` | Previous match | Previous match |
+| `Enter` | Accept match, place cursor, close search | Find next match |
+| `Shift+Enter` | Accept match, place cursor, close search | Find previous match |
+| `Esc` | Cancel, restore original position | Accept match, close search |
+| `Ctrl+G` | Not bound by default | Not bound by default |
+| `Ctrl+Enter` / `Cmd+Enter` | Toggle highlighting of other matches — only when "Highlight all matches" is set to *On demand* | Same as Emacs-style |
+| Double-tap the search hotkey (once assigned) | Recall last query, continue searching | Recall last query, continue searching |
+| Click outside / switch tab | Dismiss, keep current cursor position | Dismiss, keep current cursor position |
 
-Access these options in Obsidian **Settings → Incremental Search**:
+## Settings
 
-### 🧭 Navigation & Exit Behavior
-- **Search exit behavior:** Choose how `Enter` and `Escape` conclude an active search session:
-  - **Emacs-style (default):** `Enter` accepts the current match and places the cursor there; `Escape` (or `Ctrl+G`) cancels and restores your original cursor and viewport.
-  - **Obsidian-style:** `Enter` advances to the next match (`Shift+Enter` to previous); `Escape` accepts the current match.
+All options live under **Settings → Incremental Search**.
 
-### 🎨 Match Highlighting & Appearance
-- **Highlight all matches:**
-  - **On demand (default):** Highlights only the active match; press `Ctrl+Enter` (`Cmd+Enter` on macOS) to toggle highlights for all other matches on or off.
-  - **Always:** Highlights all matches throughout notes, tables, callouts, and PDF views continuously.
-  - **Off:** Never highlights secondary matches (active match only).
-- **Secondary match highlight style:**
-  - **Adaptive (Theme-matched fill + edge) (default):** Inspects the active theme, computed background, and primary outline to automatically calculate a subordinate fill and inset edge line.
-  - **Dotted underline only:** Subtle dotted underline without any background fill.
-  - **Subtle background tint only:** Faint background tint without an inset edge line.
-  - **Obsidian highlight default:** Traditional Obsidian text highlight styling (`--text-highlight-bg`).
-  - **Custom colors:** Specify custom CSS color strings for light and dark themes.
-- **Secondary match prominence:** Slider from `20%` to `100%` (default `75%`) controlling the visual weight and contrast ratio of secondary highlights relative to the active match.
-- **Enforce text legibility (WCAG):** When enabled (default), ensures normal text contrast never drops below WCAG standards (4.5:1 floor). If a background fill would impair text legibility, it automatically switches to a dotted underline.
-- **Custom color (Light theme) / (Dark theme):** Visible when *Custom colors* style is selected. Accepts any valid CSS color (e.g. `#ffe066`, `rgba(112, 93, 207, 0.4)`).
-- **Live Preview Swatch:** An interactive preview in the settings tab demonstrating primary and secondary match styling in your active theme.
+**Navigation & exit behavior**
+- *Search exit behavior* — Emacs-style (`Enter` accepts, `Esc` cancels) or Obsidian-style (`Enter` finds next, `Esc` accepts). This also determines the default bindings shown in the table above.
 
-### ⚙️ Matching Rules
-- **Space-as-wildcard matching:** Toggle wildcard matching on spaces vs. literal substring search.
-- **Match only visible part of links:** When enabled (default), search ignores hidden destination URLs and paths in Markdown and wikilinks.
+**Match highlighting**
+- *Highlight all matches* — on demand (default; toggle with `Ctrl+Enter`/`Cmd+Enter`), always, or off. `Ctrl+Enter` only has an effect when this is set to *on demand*.
+- *Secondary match highlight style* — adaptive theme-matched (default), dotted underline, subtle tint, Obsidian's default highlight, or custom colors.
+- *Secondary match prominence* — slider, 20 to 100 percent (default 75).
+- *Enforce text legibility (WCAG)* — keeps secondary-match contrast above the WCAG AA floor (4.5:1), falling back to a dotted underline if a color combination would fail (default on).
+- *Custom colors* — light/dark theme color overrides, shown when "Custom colors" style is selected.
+- A live preview swatch in the settings tab shows how highlights will look in your current theme.
 
-### 🪟 Interface
-- **Use popup modal interface:** When enabled, replaces the inline floating widget with a center-screen modal suggest picker.
+**Matching rules**
+- *Space-as-wildcard matching* — toggle wildcard gaps on spaces vs. plain substring search.
+- *Match only visible part of links* — ignores hidden URLs and wikilink destinations when searching (default on).
 
----
+**Interface**
+- *Use popup modal interface* — swap the inline floating widget for a center-screen modal.
 
-## 🎨 Match Appearance Architecture & Visual Design
+## Customizing highlight colors
 
-The plugin avoids hardcoded or static highlight styles. Instead, it implements a comprehensive visual appearance engine that balances **focal command**, **spatial density awareness**, and **perceptual consistency** across diverse themes, backgrounds, and document types.
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ Visual Appearance Architecture                                        │
-│                                                                        │
-│  ┌───────────────────────────────┐   ┌───────────────────────────────┐ │
-│  │     ACTIVE (CURRENT) MATCH    │   │      SECONDARY MATCHES        │ │
-│  │ • 2px Outline + 1px Offset    │   │ • Hunt Effect CAM16 Tint (F_L)│ │
-│  │ • Dual-Ring Box-Shadow Halo   │   │ • Outset 1px Framing Halo     │ │
-│  │ • 100% Transparent Background │   │ • Inset 1.5–2px Baseline Bar  │ │
-│  │ • Non-Destructive Text Colors │   │ • Tokenized Wildcard Words    │ │
-│  │ • Table Toast Context Popup   │   │ • WCAG AA Legibility Fallback │ │
-│  └───────────────────────────────┘   └───────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### 1. Active (Current) Match Design Method
-
-The active match represents the user's **immediate navigational target**. Its visual treatment is designed to command instant focal attention without modifying or obscuring the underlying document formatting.
-
-#### A. Dual-Ring Boundary Enclosure
-- **Outer Outline:** A 2px solid boundary offset by 1px (`outline: 2px solid ...; outline-offset: 1px`).
-- **Outset Halo:** A complementary `box-shadow: 0 0 0 2px ...` halo wraps the match. This dual-ring structure ensures the active indicator remains crisp and visible even when positioned directly over table borders, code blocks, or horizontal rules.
-- **Corner Curvature:** Rounded with `--radius-s` (4px) to blend naturally with Obsidian's modern UI controls while maintaining structural alignment in fixed-pitch code.
-
-#### B. Non-Destructive Formatting & Color Preservation
-- **Transparent Fill (`background-color: transparent !important`):** Unlike standard search tools that draw opaque yellow or blue boxes over active text, the active match uses zero background fill.
-- **Text Color Inheritance (`color: inherit !important`):** Font colors, Markdown formatting (bold, italics), and syntax-highlighted code tokens remain completely unaltered.
-
-#### C. Adaptive Contrast Guarantee (`resolveOutlineColor`)
-The engine measures the computed background luminance of the active viewport against the theme's `--interactive-accent` or `--color-accent`. If the theme's accent color lacks sufficient contrast ($< 3.0:1$), the algorithm dynamically pivots to an inverted high-contrast safeguard (`#ffffff` on dark, `#000000` on light).
-
-#### D. Context-Aware Specialized Behaviors
-- **Markdown Tables:** Highlights the targeted cell and spawns a floating **Table Toast** displaying parent row and column headers (e.g. `[Row 3, Col "Price"]: $45.00`).
-- **Callouts:** Searches collapsed callouts and triggers auto-expansion with highlighted inline spans (`.incsearch-callout-match.is-current`).
-- **PDF Documents:** Supplies wildcard match ranges to Obsidian's PDF.js find controller, which owns text-layer placement, current-match selection, scrolling, and forward/backward navigation.
-
----
-
-### 2. Secondary (Non-Current) Match Design Method
-
-Secondary matches serve as **spatial waypoints**—they provide density and distribution awareness across the viewport without competing for focal priority with the active match.
-
-#### A. Visual Subordination & Dual-Layer Framing
-Secondary matches combine a calibrated background tint with an **outset perimeter halo** and **baseline accent bar**:
-- **Outset 1px Halo (`box-shadow: 0 0 0 1px ...`):** Standard `inset` borders render inside the glyph bounding box, causing letter descenders (`g`, `j`, `p`, `q`, `y`) to paint over and mask the highlight border. Outset framing wraps the word from the outside, eliminating glyph collision.
-- **Baseline Accent Bar (`inset 0 -1.5px 0 ...` / `inset 0 -2px 0 ...`):** Anchors the text horizontally without the visual weight of a heavy 4-sided border.
-
-#### B. The Hunt Effect & CAM16 Luminance-Level Adaptation ($F_L$)
-A fundamental challenge in UI color mixing is that linear opacity blending fails across varying background luminances. Under the **Hunt effect**, human perception of colorfulness (saturation) collapses in low-luminance environments:
-
-$$\text{Perceived Colorfulness } M = C \cdot F_L^{0.25}$$
-
-- **On Pure White / Warm Paper ($Y_{\text{bg}} \approx 0.90\text{--}1.00$):** High luminance ($F_L \approx 1.0$) means a subtle $10\%\text{--}24\%$ tint is perceived with high vividness.
-- **On AMOLED Black / Charcoal ($Y_{\text{bg}} \le 0.03$):** Low luminance ($F_L^{0.25} \approx 0.735$) causes the same physical mix to appear dull and dark grey. High-brightness text glyphs ($L \approx 0.7\text{--}1.0$) induce local brightness suppression over dark highlights.
-
-##### Fully Continuous Adaptation (No Discrete Modes or Tiered Thresholds)
-Rather than binning themes into discrete categories or fixed lookup presets, the engine measures the live computed background color down to its exact floating-point relative luminance $Y_{\text{bg}} \in [0.00, 1.00]$ and evaluates a **strictly continuous mathematical curve**:
-
-$$L_A = 5 + 195 \cdot Y_{\text{bg}} \quad (\text{adapting luminance in cd/m}^2)$$
-$$k = \frac{1}{5 L_A + 1}$$
-$$F_L = 0.2 k^4 (5 L_A) + 0.1 (1 - k^4)^2 (5 L_A)^{1/3}$$
-
-The continuous darkness deficit $D = \frac{1.0 - F_L^{0.25}}{0.265} \in [0.0, 1.0]$ scales the mixing alphas along smooth, uninterrupted transfer functions:
-
-$$\alpha_{\text{fill}}(P, D) = (0.08 + 0.12 \cdot D) + (0.16 + 0.10 \cdot D) \cdot P$$
-$$\alpha_{\text{edge}}(P, D) = (0.20 + 0.25 \cdot D) + (0.35 + 0.12 \cdot D) \cdot P$$
-
-> [!NOTE]
-> The values below are **illustrative sample benchmarks along the continuous function**, not hardcoded presets. Any arbitrary background color automatically computes its own tailored blend:
-
-| Sample Background ($Y_{\text{bg}}$) | Example Theme | Computed Deficit ($D$) | Continuous Fill Alpha ($20\%\text{--}100\%$ Prominence) | Continuous Edge Alpha ($20\%\text{--}100\%$ Prominence) |
-| :--- | :--- | :---: | :---: | :---: |
-| **Pure White** ($Y = 1.00$) | Obsidian Light | `0.00` | `0.11` → `0.24` | `0.27` → `0.55` |
-| **Warm Paper** ($Y = 0.93$) | Flexoki Warm Light | `0.05` | `0.12` → `0.26` | `0.28` → `0.58` |
-| **Mid-Grey / Slate** ($Y = 0.20$) | Solarized / Minimal | `0.52` | `0.18` → `0.36` | `0.40` → `0.74` |
-| **Nord Slate** ($Y = 0.035$) | Nord Dark | `0.89` | `0.23` → `0.44` | `0.49` → `0.88` |
-| **Charcoal** ($Y = 0.013$) | Obsidian Dark | `0.96` | `0.24` → `0.45` | `0.51` → `0.91` |
-| **AMOLED Black** ($Y = 0.00$) | Minimal OLED / True Black | `1.00` | `0.25` → `0.46` | `0.54` → `0.92` |
-
-#### C. Luminous Lifting & Saturation Deepening (`ensurePerceptibleAccent`)
-- **Dark Themes:** Channel values are scaled to maximum emission (`255`) and lower channels receive a luminous lift proportional to $D$, transforming dark saturated hues (e.g. deep purple `#705dcf`) into glowing, radiant pastels.
-- **Warm Light Themes:** Pale pastel highlights (e.g. soft yellow on warm cream `#FFFCF0` / `#F2F0E5`) are automatically saturated and deepened to guarantee $\ge 2.8:1$ contrast against paper backgrounds.
-
-#### D. Tokenized Space-as-Wildcard Highlighting
-In wildcard mode (`the KAN`), secondary matches highlight **only the matched keyword tokens** (`.incsearch-match-wildcard-word`). Wildcard gaps are left unhighlighted (`.incsearch-match-wildcard-gap`), eliminating large noisy blocks of background color.
-
-#### E. Text Legibility Protection (WCAG AA 4.5:1)
-When **Enforce text legibility** is enabled, every composite color is verified against WCAG relative luminance equations. If a candidate background tint would reduce text contrast below **4.5:1**, the background fill is automatically suppressed (`background: transparent`) and replaced with a non-intrusive dotted underline (`text-decoration: underline dotted`).
-
-#### F. Native PDF Highlight Styling
-PDF matches retain PDF.js-native text-layer geometry. The plugin styles native secondary matches with the same adaptive fill and edge variables used in Markdown, while the selected match uses the transparent current-match outline. Adjacent PDF.js fragments on the same visual line are joined to avoid internal outline seams.
-
-PDF page appearance is detected automatically: white canvas-rendered pages use light-theme color calculations even inside a dark Obsidian theme, while pages rendered with CSS `filter: invert(...)` (e.g. Minimal's PDF dark mode) use dark-theme calculations. This ensures match colors always contrast correctly against the actual PDF page.
-
----
-
-### 3. Defensive Accent Discovery & Variable Unrolling
-
-The engine inspects the live DOM through a prioritized fallback hierarchy:
-
-```mermaid
-flowchart TD
-    A["Live DOM Probe"] --> B{"Current Match Styled?"}
-    B -- Yes --> C["Extract Chromatic Fill / Border"]
-    B -- No --> D{"Theme Variable Present?"}
-    D -- Yes --> E["Unroll CSS Variables (up to 6 levels)\ne.g. var(--interactive-accent) → var(--color-cyan) → HSL"]
-    D -- No --> F{"--text-highlight-bg Present?"}
-    F -- Yes --> G["Use Highlight Background"]
-    F -- No --> H["Adaptive Neutral (White on Dark / Charcoal on Light)"]
-```
-
----
-
-## Customizing via CSS Snippets
-
-You can customize match highlighting using standard Obsidian CSS snippets. The plugin exposes the following CSS custom properties:
+Override highlight colors with a standard Obsidian CSS snippet:
 
 ```css
-/* Example: .obsidian/snippets/custom-incsearch.css */
+/* .obsidian/snippets/custom-incsearch.css */
 :root {
-  /* Active match outline */
   --incsearch-current-outline-resolved: var(--interactive-accent);
-
-  /* Secondary match fill & edge line */
   --incsearch-secondary-fill: rgba(112, 93, 207, 0.15);
   --incsearch-secondary-edge: rgba(112, 93, 207, 0.45);
 }
@@ -272,28 +118,86 @@ You can customize match highlighting using standard Obsidian CSS snippets. The p
 }
 ```
 
----
-
-## Development & Testing
+## Development
 
 ```bash
-# Install dependencies
 npm install
 
-# Automated Tests
-npm run test:run      # Run Vitest unit & integration test suite (210+ tests)
-npm run test:coverage # Run test suite with code coverage
-npm run test:browser  # Run Playwright browser integration tests
+npm run test:run      # Vitest unit & integration suite (210+ tests)
+npm run test:coverage
+npm run test:browser  # Playwright browser integration tests
 
-# Linting & Building
-npm run lint          # ESLint with obsidianmd rules (zero-warning policy)
-npm run format        # Prettier formatting
+npm run lint          # ESLint, obsidianmd rules, zero-warning policy
+npm run format        # Prettier
 npm run build         # Type-check and bundle main.js
 ```
 
+## License & acknowledgements
+
+MIT License. Inspired by [GNU Emacs](https://www.gnu.org/software/emacs/) `isearch` and [Ivy / Swiper](https://github.com/abo-abo/swiper).
+
 ---
 
-## License & Acknowledgements
+## Developer notes: highlight color engine
 
-- Licensed under the [MIT License](LICENSE).
-- Inspired by [GNU Emacs](https://www.gnu.org/software/emacs/) `isearch` and [Ivy / Swiper](https://github.com/abo-abo/swiper).
+<details>
+<summary>Expand for implementation details on adaptive match coloring (contributors / the curious)</summary>
+
+> [!NOTE]
+> This section uses LaTeX-style math notation. GitHub renders it via its math extension. In Obsidian, dollar signs are also used as MathJax delimiters — if anything here looks garbled in Obsidian's reader view, it's this delimiter conflict, not a content error. View this section on GitHub for the cleanest rendering.
+
+The plugin avoids hardcoded highlight colors. Instead, it computes active- and secondary-match styling live from the current theme, aiming for consistent focal hierarchy and legibility across arbitrary light, dark, and custom themes.
+
+### Active (current) match
+
+- **Dual-ring boundary:** a 2px outline (`outline: 2px solid ...; outline-offset: 1px`) plus a complementary `box-shadow` halo, so the indicator stays visible over table borders, code blocks, and horizontal rules.
+- **Non-destructive rendering:** `background-color: transparent !important` and `color: inherit !important` — the active match never paints over existing text color or Markdown formatting (bold, italic, syntax highlighting).
+- **Adaptive outline contrast (`resolveOutlineColor`):** measures the theme's `--interactive-accent` (or `--color-accent`) contrast against the computed background; if contrast falls below a 3.0 to 1 ratio, it falls back to an inverted high-contrast color (white on dark backgrounds, black on light).
+- **Context-aware behaviors:** table cells spawn a floating "Table Toast" with row/column context (for example, *Row 3, Col "Price": 45.00*); collapsed callouts auto-expand to show matches; PDF matches are handed to Obsidian's native PDF.js find controller for text-layer placement and scrolling.
+
+### Secondary (non-current) matches
+
+Secondary matches use a calibrated background tint plus an outset perimeter halo and baseline accent bar, rather than a plain highlight box:
+
+- **Outset (not inset) halo:** inset borders clip glyph descenders (`g`, `j`, `p`, `q`, `y`); an outset `box-shadow` wraps the word from outside instead.
+- **Baseline accent bar:** a thin `inset` bar under the text anchors it without a full 4-sided border.
+
+**Why luminance-adaptive blending:** linear alpha blending of a fixed highlight color looks inconsistent across very light and very dark backgrounds, because human perception of color saturation itself changes with background luminance. This is the Hunt effect from color appearance modeling: perceived colorfulness is proportional to physical chroma scaled by a luminance adaptation factor, so a fixed-alpha tint that looks vivid on white paper looks muddy on an AMOLED-black theme, and vice versa.
+
+Rather than binning themes into light and dark presets, the engine computes the background's exact relative luminance (a value from 0 to 1) and evaluates a continuous curve derived from the CAM16 color appearance model to get a luminance-adaptation factor. From that, it derives a continuous "darkness deficit" (also 0 to 1) that scales the fill and edge opacity as a function of both that deficit and the user's prominence setting (20 to 100 percent). Darker backgrounds get a larger deficit value, which increases both fill and edge opacity to compensate for reduced perceived colorfulness.
+
+Sample points along this curve:
+
+| Background | Example theme | Deficit | Fill opacity range | Edge opacity range |
+| :--- | :--- | :---: | :---: | :---: |
+| Pure white | Obsidian Light | 0.00 | 11% to 24% | 27% to 55% |
+| Warm paper | Flexoki Warm Light | 0.05 | 12% to 26% | 28% to 58% |
+| Mid-grey / slate | Solarized / Minimal | 0.52 | 18% to 36% | 40% to 74% |
+| Nord slate | Nord Dark | 0.89 | 23% to 44% | 49% to 88% |
+| Charcoal | Obsidian Dark | 0.96 | 24% to 45% | 51% to 91% |
+| AMOLED black | Minimal OLED / True Black | 1.00 | 25% to 46% | 54% to 92% |
+
+These are sample points on a continuous function, not discrete presets — any background luminance produces its own tailored blend. (The exact formulas are in `resolveOutlineColor` and the surrounding color-utility functions in the source, rather than reproduced here, to avoid the math-rendering conflicts noted above.)
+
+**Saturation lift (`ensurePerceptibleAccent`):** on dark themes, channel values are scaled toward maximum emission and lifted proportional to the darkness deficit, turning muted dark hues (for example, a dark purple) into more perceptible pastels. On warm light themes, pale accent colors are saturated and deepened to guarantee at least a 2.8 to 1 contrast ratio against paper-toned backgrounds.
+
+**Tokenized wildcard highlighting:** in wildcard mode (searching `the KAN`), only the matched keyword tokens are highlighted (`.incsearch-match-wildcard-word`); the flexible gaps between them are left unstyled (`.incsearch-match-wildcard-gap`) to avoid large, noisy blocks of background color.
+
+**WCAG legibility fallback:** when "Enforce text legibility" is on, every computed color is checked against WCAG relative-luminance contrast math. If a fill would drop text contrast below a 4.5 to 1 ratio, the plugin suppresses the background fill and substitutes a dotted underline instead.
+
+**PDF-specific handling:** PDF matches use PDF.js-native text-layer geometry, with the same adaptive fill and edge variables as Markdown. Adjacent PDF.js text fragments on the same visual line are joined to avoid seams in the outline. Page background is detected automatically — white canvas-rendered pages use light-theme calculations even under a dark Obsidian theme, while pages rendered with a CSS invert filter (for example, the Minimal theme's PDF dark mode) use dark-theme calculations — so highlight colors always contrast correctly against the actual rendered page.
+
+**Accent color discovery:** the engine probes the live DOM in priority order: first, it tries to extract color directly from an already-styled current-match element if present; otherwise it unrolls theme CSS variables up to six levels deep (for example, an interactive-accent variable resolving through a named color variable down to an HSL value); otherwise it falls back to the theme's highlight-background variable if defined; and if none of those are available, it uses an adaptive neutral (white on dark themes, charcoal on light).
+
+```mermaid
+flowchart TD
+    A["Live DOM probe"] --> B{"Current match already styled?"}
+    B -- Yes --> C["Extract fill / border color directly"]
+    B -- No --> D{"Theme accent variable present?"}
+    D -- Yes --> E["Unroll CSS variables up to 6 levels"]
+    D -- No --> F{"Highlight-background variable present?"}
+    F -- Yes --> G["Use highlight background"]
+    F -- No --> H["Adaptive neutral: white on dark, charcoal on light"]
+```
+
+</details>

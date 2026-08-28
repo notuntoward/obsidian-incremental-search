@@ -1,12 +1,7 @@
-import {
-	findMatchesInText,
-	findRegexMatches,
-	isWholeWord,
-	isWithinMaxGap,
-} from "../engine";
+import { findMatchesInText, isWholeWord, isWithinMaxGap } from "../engine";
 import { PageTextModel, NormalizedMatch, PdfSearchOptions } from "./types";
 
-export { findRegexMatches, isWholeWord, isWithinMaxGap };
+export { isWholeWord, isWithinMaxGap };
 
 /**
  * Searches a single PageTextModel for matches matching the given query and options.

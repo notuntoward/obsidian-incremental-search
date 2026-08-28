@@ -1,9 +1,4 @@
-import {
-	SearchDirection,
-	MatchRange,
-	AllMatchesDisplayMode,
-	SearchQueryOptions,
-} from "../types";
+import { SearchDirection, MatchRange, AllMatchesDisplayMode, SearchQueryOptions } from "../types";
 
 export interface PdfTextItem {
 	str: string;
@@ -87,4 +82,3 @@ export interface PdfScrollPosition {
 	scrollLeft: number;
 	pageNumber?: number;
 }
-

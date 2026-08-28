@@ -23,9 +23,7 @@ export const ACTIVE_CLASS = "incsearch-pdf-match is-current";
  * unwrapping their text content and normalizing adjacent text nodes back to the original DOM.
  */
 export function clearSecondaryHighlights(containerEl: HTMLElement): void {
-	const marks = containerEl.querySelectorAll(
-		`mark.${SECONDARY_CLASS}, mark.incsearch-pdf-match`
-	);
+	const marks = containerEl.querySelectorAll(`mark.${SECONDARY_CLASS}, mark.incsearch-pdf-match`);
 	const parentsToNormalize = new Set<Node>();
 
 	for (let i = 0; i < marks.length; i++) {
