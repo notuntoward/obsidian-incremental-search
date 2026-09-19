@@ -23,15 +23,9 @@
   background-color: var(--incsearch-secondary-fill);
   color: inherit !important;
   border-radius: var(--radius-s, 2px);
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent);
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-}
-
-.theme-dark .incsearch-match-exact {
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent);
 }
 
 .incsearch-match-exact.is-current {
@@ -57,15 +51,9 @@
 .incsearch-table-cell-match {
   background-color: var(--incsearch-secondary-fill) !important;
   color: inherit !important;
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent) !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent) !important;
   border-radius: var(--radius-s, 2px) !important;
   font-weight: 600 !important;
-}
-
-.theme-dark .incsearch-table-cell-match {
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent) !important;
 }
 
 .incsearch-table-cell-match.is-current {
@@ -81,17 +69,11 @@
 .incsearch-callout-match {
   background-color: var(--incsearch-secondary-fill) !important;
   color: inherit !important;
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent) !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent) !important;
   border-radius: var(--radius-s, 2px) !important;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   display: inline;
-}
-
-.theme-dark .incsearch-callout-match {
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent) !important;
 }
 
 .incsearch-callout-match.is-current {
@@ -183,18 +165,11 @@
 .incsearch-match-fuzzy-word {
   background-color: var(--incsearch-secondary-fill);
   color: inherit !important;
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent);
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent);
   border-radius: var(--radius-s, 2px);
   font-weight: 600;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-}
-
-.theme-dark .incsearch-match-wildcard-word,
-.theme-dark .incsearch-match-fuzzy-word {
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -2px 0 var(--incsearch-secondary-edge, transparent);
 }
 
 .incsearch-match-wildcard-gap,
@@ -353,8 +328,7 @@ mark.incsearch-pdf-secondary,
   background-color: var(--incsearch-secondary-fill) !important;
   color: transparent !important;
   border-radius: var(--radius-s, 2px) !important;
-  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent),
-              inset 0 -1.5px 0 var(--incsearch-secondary-edge, transparent) !important;
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent) !important;
   opacity: 1;
 }
 

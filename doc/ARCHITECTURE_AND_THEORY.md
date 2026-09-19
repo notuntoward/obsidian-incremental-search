@@ -56,12 +56,13 @@ The engine measures the computed background luminance of the active viewport aga
 
 Secondary matches serve as **spatial waypoints** — they provide density and distribution awareness across the viewport without competing for focal priority with the active match.
 
-### A. Visual Subordination & Dual-Layer Framing
+### A. Visual Subordination & Outset Framing
 
-Secondary matches combine a calibrated background tint with an **outset perimeter halo** and **baseline accent bar**:
+Secondary matches combine a calibrated background tint with an **outset perimeter halo**:
 
 - **Outset 1px Halo (`box-shadow: 0 0 0 1px ...`):** Standard `inset` borders render inside the glyph bounding box, causing letter descenders (`g`, `j`, `p`, `q`, `y`) to paint over and mask the highlight border. Outset framing wraps the word from the outside, eliminating glyph collision.
-- **Baseline Accent Bar (`inset 0 -1.5px 0 ...` / `inset 0 -2px 0 ...`):** Anchors the text horizontally without the visual weight of a heavy 4-sided border.
+
+A former "baseline accent bar" (an `inset 0 -1.5px 0` / `inset 0 -2px 0` bottom edge) was removed. Layered on top of the tint and halo it read as a redundant underline beneath every secondary match, adding visual weight without adding information.
 
 ### B. The Hunt Effect & CAM16 Luminance-Level Adaptation ($F_L$)
 

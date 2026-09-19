@@ -715,7 +715,7 @@ export function buildSecondaryStyle(
 		};
 	}
 
-	// 5. Default "adaptive" mode (fill + inset edge, with underline fallback if low readability)
+	// 5. Default "adaptive" mode (fill + outset halo, with underline fallback if low readability)
 	const rawAccent = chooseAccent(measured);
 	const accent = ensurePerceptibleAccent(rawAccent, measured.appBackground, isDark);
 	const { fillAlpha, edgeAlpha } = calculateSecondaryAlphas(prominence, bgLuminance);
