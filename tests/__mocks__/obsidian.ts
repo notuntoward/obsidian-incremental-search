@@ -27,11 +27,24 @@ export class PluginSettingTab {
 	app: any;
 	plugin: any;
 	containerEl: any;
+	settingItems: any[] = [];
 
 	constructor(app: any, plugin: any) {
 		this.app = app;
 		this.plugin = plugin;
 	}
+
+	// Declarative settings API (Obsidian 1.13+). The real base class reads/writes
+	// plugin.settings; tests only need the stubs to exist and be callable.
+	getSettingDefinitions(): any[] {
+		return [];
+	}
+	getControlValue(_key: string): unknown {
+		return undefined;
+	}
+	setControlValue(_key: string, _value: unknown): void | Promise<void> {}
+	update(): void {}
+	refreshDomState(): void {}
 
 	display(): void {}
 	hide(): void {}

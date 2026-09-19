@@ -252,7 +252,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     }).not.toThrow();
   });
 
-  it("renders and updates settings tab correctly", async () => {
+  it("provides declarative setting definitions via getSettingDefinitions()", async () => {
     let settingTabInstance: any = null;
     plugin.addSettingTab = (tab: any) => {
       settingTabInstance = tab;
@@ -260,8 +260,17 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     await plugin.onload();
 
     expect(settingTabInstance).not.toBeNull();
-    settingTabInstance.containerEl = document.createElement("div");
-    expect(() => settingTabInstance.display()).not.toThrow();
+    expect(typeof settingTabInstance.getSettingDefinitions).toBe("function");
+    const definitions = settingTabInstance.getSettingDefinitions();
+    expect(Array.isArray(definitions)).toBe(true);
+    expect(definitions.length).toBeGreaterThan(0);
+    // Every control-based row must carry a control with a settings key.
+    for (const def of definitions) {
+      if (def.control) {
+        expect(typeof def.control.key).toBe("string");
+        expect(typeof def.control.type).toBe("string");
+      }
+    }
   });
 
   it("handles PDF view commands via checkCallback", () => {
@@ -456,14 +465,39 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect((plugin.settings as any).fuzzyMode).toBeUndefined();
   });
 
-  it("renders the settings tab with secondary highlight controls", () => {
-    const settingTab = new (plugin.constructor as any).prototype.constructor(plugin.app, plugin);
-    // Get setting tab class from plugin instance
-    let registeredTab: any = null;
-    plugin.addSettingTab = (tab: any) => {
-      registeredTab = tab;
+  it("exposes secondary highlight controls as declarative definitions", async () => {
+    let tab: any = null;
+    plugin.addSettingTab = (t: any) => {
+      tab = t;
     };
-    plugin.onunload();
+    await plugin.onload();
+    expect(tab).not.toBeNull();
+
+    const definitions = tab.getSettingDefinitions();
+    const byName = (name: string) => definitions.find((d: any) => d.name === name);
+    const styleDef = byName("Secondary match highlight style");
+    const prominenceDef = byName("Secondary match prominence");
+    const lightDef = byName("Custom color (Light theme)");
+    const darkDef = byName("Custom color (Dark theme)");
+
+    expect(styleDef?.control.type).toBe("dropdown");
+    expect(prominenceDef?.control).toMatchObject({ type: "slider", min: 20, max: 100, step: 5 });
+    expect(lightDef?.control.type).toBe("text");
+    expect(darkDef?.control.type).toBe("text");
+
+    // The custom-color rows are visibility-gated on the "custom" style.
+    plugin.settings.secondaryHighlightStyle = "adaptive";
+    expect(lightDef.visible()).toBe(false);
+    expect(darkDef.visible()).toBe(false);
+    plugin.settings.secondaryHighlightStyle = "custom";
+    expect(lightDef.visible()).toBe(true);
+    expect(darkDef.visible()).toBe(true);
+
+    // Prominence is persisted as a 0..1 fraction but surfaced as a percentage.
+    plugin.settings.secondaryProminence = 0.75;
+    expect(tab.getControlValue(prominenceDef.control.key)).toBe(75);
+    await tab.setControlValue(prominenceDef.control.key, 40);
+    expect(plugin.settings.secondaryProminence).toBeCloseTo(0.4);
   });
 
   it("refreshes PDF colors on all open PDF leaves when settings change", () => {

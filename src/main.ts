@@ -1,10 +1,9 @@
-import { Plugin, PluginSettingTab, App, Setting, Editor, View } from "obsidian";
+import { Plugin, PluginSettingTab, App, Setting, Editor, View, type SettingDefinitionItem } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
 	IncrementalSearchSettings,
 	DEFAULT_SETTINGS,
 	SearchDirection,
-	AllMatchesDisplayMode,
 } from "./types";
 import {
 	searchSessionField,
@@ -564,6 +563,14 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 }
 
+/**
+ * Synthetic control key for the secondary-prominence slider. The persisted
+ * setting (`secondaryProminence`) is a 0..1 fraction, but the slider is a
+ * 0..100 control, so the value is scaled in getControlValue()/setControlValue().
+ * This key is never written to the settings object.
+ */
+const PROMINENCE_PERCENT_KEY = "secondaryProminencePercent";
+
 class IncrementalSearchSettingTab extends PluginSettingTab {
 	plugin: IncrementalSearchPlugin;
 
@@ -572,180 +579,165 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName("Search exit behavior")
-			.setDesc("Determines how Enter and Escape end an active incremental search session.")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("emacs", "Emacs-style (Enter accepts, Escape cancels)")
-					.addOption("obsidian", "Obsidian-style (Enter finds next, Escape accepts)")
-					.setValue(this.plugin.settings.searchExitBehavior)
-					.onChange(async (value) => {
-						this.plugin.settings.searchExitBehavior = value as any;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Highlight all matches")
-			.setDesc(
-				"Controls when matches other than the current match are highlighted during incremental search."
-			)
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("always", "Always")
-					.addOption("on-demand", "On demand (Ctrl+Enter to toggle)")
-					.addOption("off", "Off")
-					.setValue(this.plugin.settings.allMatchesDisplayMode)
-					.onChange(async (value) => {
-						this.plugin.settings.allMatchesDisplayMode = value as AllMatchesDisplayMode;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Secondary match highlight style")
-			.setDesc(
-				"Visual styling strategy for non-current matches. 'Adaptive' automatically derives fill and edge colors from the active theme and current match."
-			)
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("adaptive", "Adaptive (Theme-matched fill + edge)")
-					.addOption("underline", "Dotted underline only")
-					.addOption("tint", "Subtle background tint only")
-					.addOption("theme", "Obsidian highlight default")
-					.addOption("custom", "Custom colors")
-					.setValue(this.plugin.settings.secondaryHighlightStyle)
-					.onChange(async (value) => {
-						this.plugin.settings.secondaryHighlightStyle = value as any;
-						await this.plugin.saveSettings();
-						this.display();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Secondary match prominence")
-			.setDesc(
-				"Controls the visual strength and subordination level of secondary matches relative to the active match."
-			)
-			.addSlider((slider) =>
-				slider
-					.setLimits(20, 100, 5)
-					.setValue(Math.round(this.plugin.settings.secondaryProminence * 100))
-					.setDynamicTooltip()
-					.onChange(async (val) => {
-						this.plugin.settings.secondaryProminence = val / 100;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Enforce text legibility (WCAG)")
-			.setDesc(
-				"Automatically fall back to a dotted underline if background tinting would compromise normal text contrast."
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.secondaryEnforceLegibility)
-					.onChange(async (value) => {
-						this.plugin.settings.secondaryEnforceLegibility = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		if (this.plugin.settings.secondaryHighlightStyle === "custom") {
-			new Setting(containerEl)
-				.setName("Custom color (Light theme)")
-				.setDesc(
-					"Custom CSS color (hex, rgb, or rgba) for secondary highlights in light mode."
-				)
-				.addText((text) =>
-					text
-						.setPlaceholder("#ffe066 or rgba(255, 224, 102, 0.5)")
-						.setValue(this.plugin.settings.secondaryCustomLightColor)
-						.onChange(async (val) => {
-							this.plugin.settings.secondaryCustomLightColor = val;
-							await this.plugin.saveSettings();
-						})
-				);
-
-			new Setting(containerEl)
-				.setName("Custom color (Dark theme)")
-				.setDesc(
-					"Custom CSS color (hex, rgb, or rgba) for secondary highlights in dark mode."
-				)
-				.addText((text) =>
-					text
-						.setPlaceholder("#705dcf or rgba(112, 93, 207, 0.5)")
-						.setValue(this.plugin.settings.secondaryCustomDarkColor)
-						.onChange(async (val) => {
-							this.plugin.settings.secondaryCustomDarkColor = val;
-							await this.plugin.saveSettings();
-						})
-				);
+	/**
+	 * Reads a control's current value from plugin settings. `key` is normally a
+	 * settings property name; `PROMINENCE_PERCENT_KEY` is synthetic (see below).
+	 */
+	getControlValue(key: string): unknown {
+		if (key === PROMINENCE_PERCENT_KEY) {
+			return Math.round(this.plugin.settings.secondaryProminence * 100);
 		}
+		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+	}
 
-		// Preview swatch
-		const previewContainer = containerEl.createDiv({ cls: "incsearch-settings-preview" });
-		const previewHeader = previewContainer.createDiv({
-			cls: "incsearch-settings-preview-label",
-		});
-		previewHeader.setText("Highlighting Live Preview");
-		const previewBody = previewContainer.createDiv();
-		previewBody.createSpan({ text: "Example text demonstrating an " });
-		previewBody.createSpan({ cls: "incsearch-match-exact is-current", text: "active match" });
-		previewBody.createSpan({ text: " and a " });
-		previewBody.createSpan({ cls: "incsearch-match-exact", text: "secondary match" });
-		previewBody.createSpan({ text: " in the active theme." });
+	/**
+	 * Persists a control change and applies its side effects (recoloring, cache
+	 * invalidation) through saveSettings().
+	 */
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key === PROMINENCE_PERCENT_KEY) {
+			this.plugin.settings.secondaryProminence = Number(value) / 100;
+		} else {
+			(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+		}
+		await this.plugin.saveSettings();
+		// Custom-color rows only render when this style is selected; visibility is a
+		// predicate, so re-evaluate it in place rather than rebuilding the tab.
+		if (key === "secondaryHighlightStyle") {
+			this.refreshDomState();
+		}
+	}
 
-		new Setting(containerEl)
-			.setName("Space-as-wildcard matching")
-			.setDesc(
-				"Match words separated by wildcard spaces instead of literal substring matches."
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.spaceAsWildcard).onChange(async (value) => {
-					this.plugin.settings.spaceAsWildcard = value;
-					await this.plugin.saveSettings();
-				})
-			);
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				name: "Search exit behavior",
+				desc: "Determines how Enter and Escape end an active incremental search session.",
+				control: {
+					type: "dropdown",
+					key: "searchExitBehavior",
+					options: {
+						emacs: "Emacs-style (Enter accepts, Escape cancels)",
+						obsidian: "Obsidian-style (Enter finds next, Escape accepts)",
+					},
+				},
+			},
+			{
+				name: "Highlight all matches",
+				desc: "Controls when matches other than the current match are highlighted during incremental search.",
+				control: {
+					type: "dropdown",
+					key: "allMatchesDisplayMode",
+					options: {
+						always: "Always",
+						"on-demand": "On demand (Ctrl+Enter to toggle)",
+						off: "Off",
+					},
+				},
+			},
+			{
+				name: "Secondary match highlight style",
+				desc: "Visual styling strategy for non-current matches. 'Adaptive' automatically derives fill and edge colors from the active theme and current match.",
+				control: {
+					type: "dropdown",
+					key: "secondaryHighlightStyle",
+					options: {
+						adaptive: "Adaptive (Theme-matched fill + edge)",
+						underline: "Dotted underline only",
+						tint: "Subtle background tint only",
+						theme: "Obsidian highlight default",
+						custom: "Custom colors",
+					},
+				},
+			},
+			{
+				name: "Secondary match prominence",
+				desc: "Controls the visual strength and subordination level of secondary matches relative to the active match.",
+				control: {
+					type: "slider",
+					key: PROMINENCE_PERCENT_KEY,
+					min: 20,
+					max: 100,
+					step: 5,
+					displayFormat: (value: number) => `${value}%`,
+				},
+			},
+			{
+				name: "Enforce text legibility (WCAG)",
+				desc: "Automatically fall back to a dotted underline if background tinting would compromise normal text contrast.",
+				control: {
+					type: "toggle",
+					key: "secondaryEnforceLegibility",
+				},
+			},
 
-		new Setting(containerEl)
-			.setName("Match only visible part of links")
-			.setDesc("Ignore hidden URLs in markdown links and hidden destinations in wikilinks.")
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.matchOnlyVisibleLinks)
-					.onChange(async (value) => {
-						this.plugin.settings.matchOnlyVisibleLinks = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Use popup modal interface")
-			.setDesc("If enabled, use a center-screen popup instead of the inline floating widget.")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.usePopupModal).onChange(async (value) => {
-					this.plugin.settings.usePopupModal = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Debug logging")
-			.setDesc(
-				"Write detailed diagnostic messages to the developer console. Leave this off unless you are troubleshooting."
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.debugLogging).onChange(async (value) => {
-					this.plugin.settings.debugLogging = value;
-					await this.plugin.saveSettings();
-				})
-			);
+			{
+				name: "Custom color (Light theme)",
+				desc: "Custom CSS color (hex, rgb, or rgba) for secondary highlights in light mode.",
+				visible: () => this.plugin.settings.secondaryHighlightStyle === "custom",
+				control: {
+					type: "text",
+					key: "secondaryCustomLightColor",
+					placeholder: "#ffe066 or rgba(255, 224, 102, 0.5)",
+				},
+			},
+			{
+				name: "Custom color (Dark theme)",
+				desc: "Custom CSS color (hex, rgb, or rgba) for secondary highlights in dark mode.",
+				visible: () => this.plugin.settings.secondaryHighlightStyle === "custom",
+				control: {
+					type: "text",
+					key: "secondaryCustomDarkColor",
+					placeholder: "#705dcf or rgba(112, 93, 207, 0.5)",
+				},
+			},
+			{
+				name: "Highlighting live preview",
+				desc: "Preview of the current and secondary match styles in the active theme.",
+				render: (setting: Setting) => {
+					// Full-width preview: stack the row and append the sample beneath it,
+					// reusing the .incsearch-settings-preview box styling.
+					setting.settingEl.addClass("incsearch-settings-preview-row");
+					const box = setting.settingEl.createDiv({ cls: "incsearch-settings-preview" });
+					box.createSpan({ text: "Example text demonstrating an " });
+					box.createSpan({ cls: "incsearch-match-exact is-current", text: "active match" });
+					box.createSpan({ text: " and a " });
+					box.createSpan({ cls: "incsearch-match-exact", text: "secondary match" });
+					box.createSpan({ text: " in the active theme." });
+				},
+			},
+			{
+				name: "Space-as-wildcard matching",
+				desc: "Match words separated by wildcard spaces instead of literal substring matches.",
+				control: {
+					type: "toggle",
+					key: "spaceAsWildcard",
+				},
+			},
+			{
+				name: "Match only visible part of links",
+				desc: "Ignore hidden URLs in markdown links and hidden destinations in wikilinks.",
+				control: {
+					type: "toggle",
+					key: "matchOnlyVisibleLinks",
+				},
+			},
+			{
+				name: "Use popup modal interface",
+				desc: "If enabled, use a center-screen popup instead of the inline floating widget.",
+				control: {
+					type: "toggle",
+					key: "usePopupModal",
+				},
+			},
+			{
+				name: "Debug logging",
+				desc: "Write detailed diagnostic messages to the developer console. Leave this off unless you are troubleshooting.",
+				control: {
+					type: "toggle",
+					key: "debugLogging",
+				},
+			},
+		];
 	}
 }

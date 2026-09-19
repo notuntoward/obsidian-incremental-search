@@ -408,10 +408,11 @@ mark.incsearch-pdf-match::selection {
   font-size: var(--font-text-size, 14px);
 }
 
-.incsearch-settings-preview-label {
-  font-size: var(--font-ui-smaller, 11px);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  margin-bottom: 6px;
+/* The live-preview setting row stacks so the sample spans the full width. */
+.incsearch-settings-preview-row {
+  display: block;
+}
+
+.incsearch-settings-preview-row .incsearch-settings-preview {
+  margin-top: 8px;
 }
