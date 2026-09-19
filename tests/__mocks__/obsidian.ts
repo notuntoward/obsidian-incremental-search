@@ -135,15 +135,65 @@ export class Component {
 	onunload(): void {}
 }
 
-// Polyfill Obsidian HTMLElement extensions in test environment
+// Polyfill Obsidian HTMLElement/DocumentFragment extensions in test environment.
+// Mirrors the subset of Obsidian's `DomElementInfo`-based helpers (createEl/createDiv/
+// createSpan/createFragment/appendText) that plugin source code relies on, so tests can
+// exercise real widget-construction code without a live Obsidian runtime.
+function applyDomElementInfo(el: any, options?: any) {
+  if (!options) return;
+  if (typeof options === "string") {
+    el.className = options;
+    return;
+  }
+  if (options.cls) {
+    el.className = Array.isArray(options.cls) ? options.cls.join(" ") : options.cls;
+  }
+  if (options.text !== undefined) el.textContent = options.text;
+  if (options.attr) {
+    for (const [key, value] of Object.entries(options.attr)) {
+      if (value === null || value === false) continue;
+      el.setAttribute(key, String(value));
+    }
+  }
+  if (options.title !== undefined) el.title = options.title;
+  if (options.type !== undefined) el.type = options.type;
+  if (options.value !== undefined) el.value = options.value;
+  if (options.placeholder !== undefined) el.placeholder = options.placeholder;
+  if (options.href !== undefined) el.href = options.href;
+}
+
+function mockCreateEl(this: any, tag: string, options?: any, callback?: (el: any) => void) {
+  const el = document.createElement(tag);
+  applyDomElementInfo(el, options);
+  if (typeof options === "object" && options?.parent) {
+    options.parent.appendChild(el);
+  } else if (typeof options === "object" && options?.prepend) {
+    this.insertBefore(el, this.firstChild);
+  } else {
+    this.appendChild(el);
+  }
+  callback?.(el);
+  return el;
+}
+
 if (typeof window !== "undefined" && typeof HTMLElement !== "undefined") {
+  if (!(HTMLElement.prototype as any).createEl) {
+    (HTMLElement.prototype as any).createEl = function (
+      tag: string,
+      options?: any,
+      callback?: (el: any) => void
+    ) {
+      return mockCreateEl.call(this, tag, options, callback);
+    };
+  }
   if (!(HTMLElement.prototype as any).createSpan) {
-    (HTMLElement.prototype as any).createSpan = function (options?: any) {
-      const span = document.createElement("span");
-      if (options?.cls) span.className = options.cls;
-      if (options?.text) span.textContent = options.text;
-      this.appendChild(span);
-      return span;
+    (HTMLElement.prototype as any).createSpan = function (options?: any, callback?: (el: any) => void) {
+      return mockCreateEl.call(this, "span", options, callback);
+    };
+  }
+  if (!(HTMLElement.prototype as any).createDiv) {
+    (HTMLElement.prototype as any).createDiv = function (options?: any, callback?: (el: any) => void) {
+      return mockCreateEl.call(this, "div", options, callback);
     };
   }
   if (!(HTMLElement.prototype as any).empty) {
@@ -157,15 +207,39 @@ if (typeof window !== "undefined" && typeof HTMLElement !== "undefined") {
       return this;
     };
   }
-  if (!(HTMLElement.prototype as any).createDiv) {
-    (HTMLElement.prototype as any).createDiv = function (options?: any) {
-      const div = document.createElement("div");
-      if (options?.cls) div.className = options.cls;
-      if (options?.text) div.textContent = options.text;
-      this.appendChild(div);
-      return div;
+  if (!(HTMLElement.prototype as any).appendText) {
+    (HTMLElement.prototype as any).appendText = function (val: string) {
+      this.appendChild(document.createTextNode(val));
     };
   }
+}
+if (typeof window !== "undefined" && typeof DocumentFragment !== "undefined") {
+  if (!(DocumentFragment.prototype as any).createEl) {
+    (DocumentFragment.prototype as any).createEl = function (
+      tag: string,
+      options?: any,
+      callback?: (el: any) => void
+    ) {
+      return mockCreateEl.call(this, tag, options, callback);
+    };
+  }
+  if (!(DocumentFragment.prototype as any).createSpan) {
+    (DocumentFragment.prototype as any).createSpan = function (options?: any, callback?: (el: any) => void) {
+      return mockCreateEl.call(this, "span", options, callback);
+    };
+  }
+  if (!(DocumentFragment.prototype as any).createDiv) {
+    (DocumentFragment.prototype as any).createDiv = function (options?: any, callback?: (el: any) => void) {
+      return mockCreateEl.call(this, "div", options, callback);
+    };
+  }
+}
+if (typeof window !== "undefined") {
+  (globalThis as any).createFragment = function (callback?: (el: DocumentFragment) => void) {
+    const fragment = document.createDocumentFragment();
+    callback?.(fragment as any);
+    return fragment;
+  };
 }
 
 export interface Loc {

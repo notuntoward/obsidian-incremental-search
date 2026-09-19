@@ -41,14 +41,6 @@ export function toggleDemandHighlights(view: EditorView) {
 	}
 }
 
-export function getAutoUnfoldedCallouts(): readonly HTMLElement[] {
-	return autoUnfoldedCallouts;
-}
-
-export function getAutoUnfoldedFoldRanges(): readonly AutoFoldedRange[] {
-	return autoUnfoldedFoldRanges;
-}
-
 export const setSession = StateEffect.define<SearchSessionState | null>();
 
 export const searchSessionField = StateField.define<SearchSessionState | null>({
@@ -373,7 +365,8 @@ function expandCallout(callout: HTMLElement) {
 	});
 	const content = callout.querySelector<HTMLElement>(".callout-content");
 	if (content) {
-		content.style.display = "block";
+		content.classList.remove("incsearch-callout-content-hidden");
+		content.classList.add("incsearch-callout-content-visible");
 	}
 }
 
@@ -385,7 +378,8 @@ function collapseCallout(callout: HTMLElement) {
 	});
 	const content = callout.querySelector<HTMLElement>(".callout-content");
 	if (content) {
-		content.style.display = "none";
+		content.classList.remove("incsearch-callout-content-visible");
+		content.classList.add("incsearch-callout-content-hidden");
 	}
 }
 

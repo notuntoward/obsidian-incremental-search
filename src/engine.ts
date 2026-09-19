@@ -110,8 +110,6 @@ export function parseWildcardQuery(query: string, caseSensitive: boolean): strin
 	return tokens;
 }
 
-export const parseFuzzyQuery = parseWildcardQuery;
-
 /**
  * Checks if a match range aligns with whole-word boundaries in a text string.
  */
@@ -154,7 +152,7 @@ export function compileQuery(
 	const wholeWord = Boolean(options.wholeWord);
 	const maxGapChars = options.maxGapChars;
 
-	const useWildcard = options.spaceAsWildcard ?? options.wildcard ?? options.fuzzy ?? true;
+	const useWildcard = options.spaceAsWildcard ?? true;
 	if (useWildcard) {
 		const tokens = parseWildcardQuery(query, caseSensitive);
 		if (tokens.length === 0) return null;
@@ -253,30 +251,6 @@ export function findWildcardMatches(
 		searchStart = lastTokenEnd;
 	}
 
-	return results;
-}
-
-export const findFuzzyMatches = findWildcardMatches;
-
-/**
- * Finds all literal substring matches in a string.
- */
-export function findLiteralMatches(
-	text: string,
-	query: string,
-	offset = 0,
-	caseSensitive = false
-): MatchRange[] {
-	const results: MatchRange[] = [];
-	const haystack = caseSensitive ? text : text.toLowerCase();
-	const needle = caseSensitive ? query : query.toLowerCase();
-	if (needle.length === 0) return results;
-
-	let idx = haystack.indexOf(needle);
-	while (idx !== -1) {
-		results.push({ from: offset + idx, to: offset + idx + needle.length });
-		idx = haystack.indexOf(needle, idx + needle.length);
-	}
 	return results;
 }
 

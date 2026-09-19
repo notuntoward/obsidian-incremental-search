@@ -1,6 +1,6 @@
 # Obsidian Incremental Search
 
-[![Build](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/build.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/build.yml)
+[![CI](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/ci.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml)
 
@@ -25,6 +25,9 @@ Inspired by GNU Emacs `isearch` and `swiper`, for anyone who'd rather keep their
 3. Press the same hotkey again to jump to the next match, or press `Enter` to land the cursor there and close the search.
 
 Works in notes (source and Live Preview), tables, callouts, and PDFs.
+
+> [!NOTE]
+> PDF search hooks into Obsidian's built-in PDF viewer through undocumented internals, so it may stop working after an Obsidian update. Note search is unaffected.
 
 ## How search works
 
@@ -57,8 +60,8 @@ Hotkeys are unassigned by default so they never conflict with your existing keym
 
 | Command | Command ID | Suggested hotkey | Description |
 | :--- | :--- | :--- | :--- |
-| Incremental Search: Forward | `obsidian-incremental-search:forward` | `Ctrl+S` / `Cmd+S` or `Alt+S` | Start or advance forward search from the cursor |
-| Incremental Search: Backward | `obsidian-incremental-search:backward` | `Ctrl+R` / `Cmd+R` or `Alt+R` | Start or advance backward search from the cursor |
+| Incremental Search: Forward | `incremental-search:forward` | `Ctrl+S` / `Cmd+S` or `Alt+S` | Start or advance forward search from the cursor |
+| Incremental Search: Backward | `incremental-search:backward` | `Ctrl+R` / `Cmd+R` or `Alt+R` | Start or advance backward search from the cursor |
 
 To assign hotkeys: **Settings → Hotkeys**, search for "Incremental Search," and bind both commands.
 

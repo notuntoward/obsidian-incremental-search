@@ -105,6 +105,8 @@
   display: inline;
 }
 
+/* Static show/hide state is expressed with the is-hidden class so that themes
+   and CSS snippets can override it; the plugin never writes inline styles. */
 .incsearch-table-toast {
   position: absolute;
   top: calc(100% + 4px);
@@ -125,8 +127,12 @@
   word-break: break-word;
   z-index: 100;
   box-shadow: var(--shadow-s);
-  display: none;
+  display: block;
   box-sizing: border-box;
+}
+
+.incsearch-table-toast.is-hidden {
+  display: none;
 }
 
 .incsearch-table-toast-mark {
@@ -136,12 +142,25 @@
 }
 
 .incsearch-table-icon {
-  display: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text-accent, var(--interactive-accent));
   flex-shrink: 0;
   line-height: 1;
+}
+
+.incsearch-table-icon.is-hidden {
+  display: none;
+}
+
+/* Callout expand/collapse state driven by the search session. */
+.callout-content.incsearch-callout-content-visible {
+  display: block;
+}
+
+.callout-content.incsearch-callout-content-hidden {
+  display: none;
 }
 
 .incsearch-table-icon svg {

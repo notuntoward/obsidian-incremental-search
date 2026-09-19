@@ -1,5 +1,5 @@
 {
-	"id": "obsidian-incremental-search",
+	"id": "incremental-search",
 	"name": "Incremental Search",
 	"version": "0.1.0",
 	"minAppVersion": "1.13.1",

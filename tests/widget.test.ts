@@ -115,13 +115,13 @@ describe("widget: counter & lifecycle", () => {
     const tableIcon = widget?.querySelector(".incsearch-table-icon") as HTMLElement;
 
     expect(counter?.textContent).toBe("1/2");
-    expect(tableIcon?.style.display).toBe("inline-flex");
+    expect(tableIcon?.classList.contains("is-hidden")).toBe(false);
 
     // Move to match not in table
     sessionState.activeIndex = 1;
     updateWidgetCounter(mockView);
     expect(counter?.textContent).toBe("2/2");
-    expect(tableIcon?.style.display).toBe("none");
+    expect(tableIcon?.classList.contains("is-hidden")).toBe(true);
   });
 
   it("updates counter to 0/0 when there are no matches", () => {
@@ -143,7 +143,7 @@ describe("widget: counter & lifecycle", () => {
 
     expect(counter?.textContent).toBe("0/0");
     expect(dir?.textContent).toBe("▲");
-    expect(tableIcon?.style.display).toBe("none");
+    expect(tableIcon?.classList.contains("is-hidden")).toBe(true);
   });
 
   it("handles input event by recomputing query and updating counter", () => {
@@ -628,7 +628,6 @@ describe("widget: unified SearchSessionController & adapters", () => {
     const mockController: any = {
       adapter: { containerEl: document.createElement("div") },
       state: {
-        matches: [{ id: "m1" }],
         activeIndex: 0,
         direction: "forward",
         isScanning: false,
@@ -650,10 +649,11 @@ describe("widget: unified SearchSessionController & adapters", () => {
     const ctrl = createPdfSessionController(mockController, mockPlugin, () => { closed = true; });
     expect(ctrl.containerEl).toBe(mockController.adapter.containerEl);
 
-    // Initial state: 1 match
+    // Before the native find controller reports a result, totalMatchesCount is undefined;
+    // the counter shows 0/0 (with isScanning reflecting whether a query is in flight).
     expect(ctrl.getCounterState()).toEqual({
-      current: 1,
-      total: 1,
+      current: 0,
+      total: 0,
       direction: "forward",
       isScanning: false,
       inTable: false,
@@ -784,12 +784,12 @@ describe("widget: unified SearchSessionController & adapters", () => {
     updateWidgetCounter(mockCtrl);
     expect(counter?.textContent).toBe("3/10");
     expect(dir?.textContent).toBe("▲");
-    expect(tableIcon.style.display).toBe("inline-flex");
+    expect(tableIcon.classList.contains("is-hidden")).toBe(false);
 
-    // updatePdfWidgetCounter convenience alias
+    // updatePdfWidgetCounter convenience alias: before totalMatchesCount arrives from the
+    // native find controller, the counter shows 0/0.
     const mockPdfCtrl: any = {
       state: {
-        matches: [{ id: "1" }],
         activeIndex: 0,
         direction: "forward",
         isScanning: false,
@@ -798,7 +798,7 @@ describe("widget: unified SearchSessionController & adapters", () => {
       },
     };
     updatePdfWidgetCounter(mockPdfCtrl);
-    expect(counter?.textContent).toBe("1/1");
+    expect(counter?.textContent).toBe("0/0");
     expect(dir?.textContent).toBe("▼");
 
     removeWidget();

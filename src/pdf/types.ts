@@ -1,70 +1,12 @@
-import { SearchDirection, MatchRange, AllMatchesDisplayMode, SearchQueryOptions } from "../types";
-
-export interface PdfTextItem {
-	str: string;
-	dir?: string;
-	width?: number;
-	height?: number;
-	transform?: number[];
-	fontName?: string;
-	hasEOL?: boolean;
-	domIndex?: number;
-}
-
-export interface CharSourceMapping {
-	itemIndex: number;
-	charOffset: number;
-	origLength?: number;
-}
-
-export interface PageTextModel {
-	pageNumber: number;
-	normalizedText: string;
-	charMapping: (CharSourceMapping | null)[];
-	items: PdfTextItem[];
-}
-
-export interface ItemMatchSpan {
-	itemIndex: number;
-	startOffset: number;
-	endOffset: number;
-}
-
-export interface MatchRect {
-	left: number;
-	top: number;
-	width: number;
-	height: number;
-}
-
-export interface NormalizedMatch extends MatchRange {
-	pageNumber: number;
-	start: number;
-	end: number;
-}
-
-export interface PdfMatch {
-	id: string;
-	pageNumber: number;
-	from: number;
-	to: number;
-	chars?: { from: number; to: number }[];
-	itemSpans: ItemMatchSpan[];
-	rects?: MatchRect[];
-}
-
-export type PdfSearchOptions = SearchQueryOptions;
+import { SearchDirection, AllMatchesDisplayMode } from "../types";
 
 export interface PdfSessionState {
 	query: string;
 	direction: SearchDirection;
-	matches: PdfMatch[];
 	activeIndex: number;
 	allMatchesDisplayMode: AllMatchesDisplayMode;
 	isDemandPeekActive: boolean;
 	isScanning: boolean;
-	totalPages: number;
-	scannedPages: number;
 	totalMatchesCount?: number;
 }
 

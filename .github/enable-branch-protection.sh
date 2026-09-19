@@ -43,7 +43,7 @@ read -r -d '' PAYLOAD <<EOF
   },
   "required_status_checks": {
     "strict": true,
-    "contexts": ["ESLint and build"]
+    "contexts": ["Lint, build and test"]
   }
 }
 EOF

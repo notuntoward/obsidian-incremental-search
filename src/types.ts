@@ -32,8 +32,6 @@ export interface MatchRange {
 
 export interface SearchQueryOptions {
 	spaceAsWildcard?: boolean;
-	wildcard?: boolean;
-	fuzzy?: boolean;
 	caseSensitive?: boolean;
 	wholeWord?: boolean;
 	maxGapChars?: number;
@@ -64,7 +62,6 @@ export type SecondaryHighlightStyle = "adaptive" | "underline" | "tint" | "theme
 
 export interface IncrementalSearchSettings {
 	lastQuery: string;
-	doubleTapWindowMs: number;
 	spaceAsWildcard: boolean;
 	usePopupModal: boolean;
 	matchOnlyVisibleLinks: boolean;
@@ -75,11 +72,11 @@ export interface IncrementalSearchSettings {
 	secondaryEnforceLegibility: boolean;
 	secondaryCustomLightColor: string;
 	secondaryCustomDarkColor: string;
+	debugLogging: boolean;
 }
 
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	lastQuery: "",
-	doubleTapWindowMs: 600,
 	spaceAsWildcard: true,
 	usePopupModal: false,
 	matchOnlyVisibleLinks: true,
@@ -90,4 +87,5 @@ export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	secondaryEnforceLegibility: true,
 	secondaryCustomLightColor: "",
 	secondaryCustomDarkColor: "",
+	debugLogging: false,
 };

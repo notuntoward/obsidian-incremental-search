@@ -48,17 +48,18 @@ export function isPageCompletelyOffScreen(
 }
 
 /**
- * Calculates the vertical scroll offset needed to center the target element/rect
- * within the container viewport.
+ * Calculates the scroll offset needed to center a target span within a container span
+ * along a single axis. This is the ONE canonical centering formula in the plugin; both
+ * axes of computeScrollDeltas delegate to it.
  */
-export function computeVerticalCenterDelta(
-	targetTop: number,
-	targetHeight: number,
-	containerTop: number,
-	containerHeight: number
+export function computeAxisCenterDelta(
+	targetStart: number,
+	targetSize: number,
+	containerStart: number,
+	containerSize: number
 ): number {
-	const targetCenter = targetTop + targetHeight / 2;
-	const containerCenter = containerTop + containerHeight / 2;
+	const targetCenter = targetStart + targetSize / 2;
+	const containerCenter = containerStart + containerSize / 2;
 	return targetCenter - containerCenter;
 }
 
@@ -112,11 +113,11 @@ export function computeScrollDeltas(
 	const containerWidth = containerRect.width ?? (containerRect.right - containerRect.left);
 	const containerHeight = containerRect.height ?? (containerRect.bottom - containerRect.top);
 
-	const deltaY = target.top + targetHeight / 2 - (containerRect.top + containerHeight / 2);
+	const deltaY = computeAxisCenterDelta(target.top, targetHeight, containerRect.top, containerHeight);
 
 	const shouldCenterH = isOffH || isZoomedH === true;
 	const deltaX = shouldCenterH
-		? target.left + targetWidth / 2 - (containerRect.left + containerWidth / 2)
+		? computeAxisCenterDelta(target.left, targetWidth, containerRect.left, containerWidth)
 		: 0;
 
 	return { isOffV, isOffH, deltaX, deltaY };
@@ -236,51 +237,78 @@ export function scrollEditorMatchIntoView(
 	}
 }
 
-/**
- * For CodeMirror 6 EditorView: checks if a range [from, to] is off-screen vertically or horizontally.
- * If off-screen, returns a scrollIntoView effect with y/x: "center".
- * If already visible on-screen, returns a scrollIntoView effect with y/x: "nearest".
+/*
+ * Canonical "current match" selectors.
+ *
+ * These constants are the SINGLE SOURCE OF TRUTH for "which DOM element is the
+ * current/active match". They previously existed as five divergent, hand-written
+ * class lists that could disagree with each other about which element was current.
+ * Every consumer (here and in src/pdf/**) must derive from these; do not re-spell a
+ * class list inline.
+ *
+ * Note on layering: these live in src/utils/scroll.ts because getCompoundMatchBoundingRect
+ * is PDF-aware and needs them. src/pdf/** imports from src/utils/**, never the reverse.
  */
-export function getSmartScrollEffect(view: EditorView, from: number, to: number) {
-	try {
-		const scrollDOM = (view as any).scrollDOM || view.dom;
-		if (!scrollDOM || typeof scrollDOM.getBoundingClientRect !== "function") {
-			return EditorView.scrollIntoView(EditorSelection.range(from, to), {
-				y: "center",
-				x: "nearest",
-			});
-		}
 
-		const viewportRect = scrollDOM.getBoundingClientRect();
-		const startCoords = view.coordsAtPos(from);
-		const endCoords = view.coordsAtPos(to) || startCoords;
+/** PDF.js's native find controller marks the active result fragment .highlight.selected. */
+export const NATIVE_CURRENT_MATCH_SELECTOR = ".highlight.selected";
 
-		if (!startCoords) {
-			return EditorView.scrollIntoView(EditorSelection.range(from, to), {
-				y: "center",
-				x: "nearest",
-			});
-		}
+/**
+ * Obsidian-flavoured spelling of the same native state seen in some viewer builds.
+ * Harmless when absent, so it is part of the canonical union.
+ */
+export const NATIVE_CURRENT_MATCH_ALT_SELECTOR = ".highlight.is-selected";
 
-		const targetBox: BoundingRectLike = {
-			top: Math.min(startCoords.top, endCoords?.top ?? startCoords.top),
-			bottom: Math.max(startCoords.bottom, endCoords?.bottom ?? startCoords.bottom),
-			left: Math.min(startCoords.left, endCoords?.left ?? startCoords.left),
-			right: Math.max(startCoords.right, endCoords?.right ?? startCoords.right),
-		};
+/** The inline <mark> this plugin injects for the current match (see text-layer-highlighter). */
+export const PLUGIN_CURRENT_MATCH_SELECTOR = ".incsearch-pdf-match.is-current";
 
-		const isOff = isOffScreenVertically(targetBox, viewportRect) || isOffScreenHorizontally(targetBox, viewportRect);
+/** Scope selectors for the PDF.js text layer, whose class name differs across builds. */
+export const TEXT_LAYER_SCOPE_SELECTORS = [".textLayer", ".text-layer"] as const;
 
-		return EditorView.scrollIntoView(EditorSelection.range(from, to), {
-			y: isOff ? "center" : "nearest",
-			x: isOff ? "center" : "nearest",
-		});
-	} catch {
-		return EditorView.scrollIntoView(EditorSelection.range(from, to), {
-			y: "center",
-			x: "nearest",
-		});
-	}
+/** The individual parts of CURRENT_MATCH_SELECTOR, exposed for tests and for composition. */
+export const CURRENT_MATCH_SELECTOR_PARTS = [
+	NATIVE_CURRENT_MATCH_SELECTOR,
+	NATIVE_CURRENT_MATCH_ALT_SELECTOR,
+	PLUGIN_CURRENT_MATCH_SELECTOR,
+] as const;
+
+/**
+ * Matches every element shape that represents the current match, regardless of whether
+ * it was produced by PDF.js natively or injected by this plugin.
+ */
+export const CURRENT_MATCH_SELECTOR = CURRENT_MATCH_SELECTOR_PARTS.join(", ");
+
+/**
+ * Deliberately narrower than CURRENT_MATCH_SELECTOR: only PDF.js's own selected fragments
+ * inside a text layer, because the geometry decorations that use it (join classes, CSS
+ * Custom Highlight token painting) are meaningful only for native fragments. Plugin-injected
+ * <mark> elements must NOT be decorated as native fragments.
+ */
+export const NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR = TEXT_LAYER_SCOPE_SELECTORS
+	.map((scope) => `${scope} ${NATIVE_CURRENT_MATCH_SELECTOR}`)
+	.join(", ");
+
+/**
+ * Class tokens used by the deliberately BROAD catch-all guard in the patched
+ * HTMLElement.prototype.scrollIntoView (see isMatchElementCandidate). Kept as the bare
+ * tokens of CURRENT_MATCH_SELECTOR_PARTS without their state modifiers (`selected`,
+ * `is-selected`, `is-current`) so the guard still fires for an element PDF.js is about to
+ * mark current but has not marked yet. tests/scroll.test.ts asserts this list stays a
+ * subset of the tokens spelled in CURRENT_MATCH_SELECTOR_PARTS.
+ */
+export const MATCH_ELEMENT_CLASS_TOKENS = ["highlight", "selected", "incsearch-pdf-match"] as const;
+
+/**
+ * Broad, forgiving test for "this element is probably a search-match fragment".
+ * Intentionally an OR over MATCH_ELEMENT_CLASS_TOKENS rather than CURRENT_MATCH_SELECTOR:
+ * it guards a scroll interception path where being too narrow means a real match scroll
+ * escapes our centering logic, while being too broad only costs a compound-rect lookup
+ * that falls back to the element's own rect.
+ */
+export function isMatchElementCandidate(el: { classList?: DOMTokenList } | null | undefined): boolean {
+	const classList = el?.classList;
+	if (!classList || typeof classList.contains !== "function") return false;
+	return MATCH_ELEMENT_CLASS_TOKENS.some((token) => classList.contains(token));
 }
 
 export interface CompoundBoundingRect {
@@ -304,9 +332,7 @@ export function getCompoundMatchBoundingRect(
 	if (!scope || typeof scope.querySelectorAll !== "function") return null;
 
 	const fragments = Array.from(
-		scope.querySelectorAll<HTMLElement>(
-			".highlight.selected, .highlight.is-selected, .incsearch-pdf-match.is-current"
-		)
+		scope.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
 	).filter((el) => {
 		if (typeof el.getBoundingClientRect !== "function") return false;
 		const r = el.getBoundingClientRect();

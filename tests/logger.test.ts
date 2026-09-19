@@ -1,9 +1,21 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { logDebug, describeElement, getRecentLogs, clearLogs } from "../src/utils/logger";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+	logDebug,
+	describeElement,
+	getRecentLogs,
+	clearLogs,
+	setDebugLogging,
+	isDebugLoggingEnabled,
+} from "../src/utils/logger";
 
 describe("utils: logger", () => {
 	beforeEach(() => {
 		clearLogs();
+	});
+
+	afterEach(() => {
+		setDebugLogging(false);
+		vi.restoreAllMocks();
 	});
 
 	it("describes DOM elements safely", () => {
@@ -34,5 +46,34 @@ describe("utils: logger", () => {
 		expect(getRecentLogs()).toHaveLength(1);
 		clearLogs();
 		expect(getRecentLogs()).toHaveLength(0);
+	});
+
+	it("does not write to the console by default but still buffers entries", () => {
+		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		expect(isDebugLoggingEnabled()).toBe(false);
+		logDebug("test", "silent message");
+		logDebug("test", "silent message with details", { foo: "bar" });
+
+		expect(spy).not.toHaveBeenCalled();
+		expect(getRecentLogs()).toHaveLength(2);
+	});
+
+	it("writes to the console once debug logging is enabled", () => {
+		const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		setDebugLogging(true);
+		expect(isDebugLoggingEnabled()).toBe(true);
+		logDebug("test", "loud message");
+		logDebug("test", "loud message with details", { foo: "bar" });
+
+		expect(spy).toHaveBeenCalledTimes(2);
+		expect(spy.mock.calls[0][0]).toContain("[IncSearch:test]");
+		expect(spy.mock.calls[0][0]).toContain("loud message");
+		expect(spy.mock.calls[1][1]).toEqual({ foo: "bar" });
+
+		setDebugLogging(false);
+		logDebug("test", "silent again");
+		expect(spy).toHaveBeenCalledTimes(2);
 	});
 });

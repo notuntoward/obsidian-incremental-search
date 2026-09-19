@@ -1,31 +1,16 @@
-import { MatchRect, PdfTextItem, PdfViewportAnchor, PdfScrollPosition } from "./types";
-import {
-	isPageCompletelyOffScreen,
-	computeVerticalCenterDelta,
-	scrollTargetIntoViewIfNeeded,
-	getCompoundMatchBoundingRect,
-} from "../utils/scroll";
+import { PdfViewportAnchor, PdfScrollPosition } from "./types";
+import { isPageCompletelyOffScreen, scrollTargetIntoViewIfNeeded } from "../utils/scroll";
 import { logDebug, describeElement } from "../utils/logger";
-
-export interface PdfPageProxyAdapter {
-	pageNumber: number;
-	getTextContent(): Promise<{ items: PdfTextItem[] }>;
-	getViewport(params: { scale: number; rotation?: number }): any;
-}
 
 export interface PdfViewAdapter {
 	numPages: number;
 	containerEl: HTMLElement;
-	getPage(pageNumber: number): Promise<PdfPageProxyAdapter | null>;
 	getPageElement(pageNumber: number): HTMLElement | null;
-	getTextLayerElement(pageNumber: number): HTMLElement | null;
-	getPageViewport(pageNumber: number): any;
 	getVisiblePageNumbers(): number[];
 	getViewportAnchor?(): PdfViewportAnchor;
 	getScrollPosition?(): PdfScrollPosition;
 	restoreScrollPosition?(pos: PdfScrollPosition): void;
 	on(event: string, handler: (...args: any[]) => void): () => void;
-	scrollToRect(pageNumber: number, rect?: MatchRect): void;
 	scrollPageIntoView(pageNumber: number): void;
 	findController?: any;
 	pdfViewer?: any;
@@ -224,23 +209,6 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		findController,
 		pdfViewer,
 
-		async getPage(pageNumber: number): Promise<PdfPageProxyAdapter | null> {
-			if (pageNumber < 1 || pageNumber > numPages) return null;
-			try {
-				if (typeof pdfDocument.getPage === "function") {
-					const page = await pdfDocument.getPage(pageNumber);
-					return {
-						pageNumber,
-						getTextContent: () => page.getTextContent(),
-						getViewport: (params) => page.getViewport(params),
-					};
-				}
-			} catch (e) {
-				console.error(`Incremental Search: failed to get PDF page ${pageNumber}`, e);
-			}
-			return null;
-		},
-
 		getPageElement(pageNumber: number): HTMLElement | null {
 			// Query by data-page-number attribute
 			const el = containerEl.querySelector(
@@ -257,42 +225,6 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				if (pageView?.div) return pageView.div;
 			} catch {
 				// Ignore
-			}
-			return null;
-		},
-
-		getTextLayerElement(pageNumber: number): HTMLElement | null {
-			const pageEl = this.getPageElement(pageNumber);
-			if (pageEl) {
-				const textLayer = pageEl.querySelector(
-					".textLayer, .text-layer"
-				) as HTMLElement | null;
-				if (textLayer) return textLayer;
-			}
-			try {
-				const pageView =
-					pdfViewer.getPageView?.(pageNumber - 1) || pdfViewer._pages?.[pageNumber - 1];
-				if (pageView?.textLayer?.div) return pageView.textLayer.div;
-				if (pageView?.textLayer?.textLayerDiv) return pageView.textLayer.textLayerDiv;
-			} catch {
-				// Ignore
-			}
-			return null;
-		},
-
-		getPageViewport(pageNumber: number): any {
-			try {
-				const pageView =
-					pdfViewer.getPageView?.(pageNumber - 1) ||
-					pdfViewer._pages?.[pageNumber - 1] ||
-					pdfViewer.pages?.[pageNumber - 1];
-				if (pageView?.viewport) return pageView.viewport;
-				const scale = pdfViewer.currentScale || pdfViewer._currentScale || 1.0;
-				if (pageView?.pdfPage?.getViewport) {
-					return pageView.pdfPage.getViewport({ scale });
-				}
-			} catch {
-				return null;
 			}
 			return null;
 		},
@@ -512,95 +444,6 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			} catch (e) {
 				logDebug("pdf", "adapter.scrollPageIntoView: error in child scroll", e);
 			}
-		},
-
-		scrollToRect(pageNumber: number, rect?: MatchRect) {
-			const pageEl = this.getPageElement(pageNumber);
-			const scrollContainer = getScrollContainer(containerEl, pageEl);
-			const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
-
-			logDebug(
-				"pdf",
-				`adapter.scrollToRect: page=${pageNumber}, hasPageEl=${Boolean(pageEl)}, hasRect=${Boolean(rect)}, scrollContainer=${describeElement(scrollContainer)}`
-			);
-
-			if (!pageEl) {
-				this.scrollPageIntoView(pageNumber);
-				return;
-			}
-
-			// 1. If rect is provided, calculate target rect directly from page bounds and match rect
-			if (rect && scrollContainer && containerRect) {
-				const pageBounds = pageEl.getBoundingClientRect();
-				const isPageOff = isPageCompletelyOffScreen(pageBounds, containerRect);
-				const scaleX = pageEl.offsetWidth > 0 ? pageBounds.width / pageEl.offsetWidth : 1;
-				const scaleY = pageEl.offsetHeight > 0 ? pageBounds.height / pageEl.offsetHeight : 1;
-
-				const targetTop = pageBounds.top + rect.top * scaleY;
-				const targetBottom = targetTop + rect.height * scaleY;
-				const targetLeft = pageBounds.left + rect.left * scaleX;
-				const targetRight = targetLeft + rect.width * scaleX;
-				const targetWidth = rect.width * scaleX;
-				const targetHeight = rect.height * scaleY;
-
-				const targetRect = {
-					top: targetTop,
-					bottom: targetBottom,
-					left: targetLeft,
-					right: targetRight,
-					width: targetWidth,
-					height: targetHeight,
-				};
-
-				logDebug(
-					"pdf",
-					`adapter.scrollToRect: rectTarget=[${targetTop.toFixed(1)}, ${targetBottom.toFixed(1)}, ${targetLeft.toFixed(1)}, ${targetRight.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}, ${containerRect.left.toFixed(1)}, ${containerRect.right.toFixed(1)}]`
-				);
-
-				const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
-					behavior: "smooth",
-					forceCenter: isPageOff,
-				});
-				if (!scrolled) {
-					logDebug("pdf", "adapter.scrollToRect: rect is already on-screen, skipping scroll");
-				} else {
-					logDebug("pdf", "adapter.scrollToRect: scrolled container for rect");
-				}
-				return;
-			}
-
-			// 2. Otherwise try to measure current active match element in DOM
-			const compoundRect = getCompoundMatchBoundingRect(containerEl, pageEl);
-			const currentHighlight = compoundRect
-				? null
-				: (pageEl.querySelector(
-						".incsearch-pdf-match.is-current, .highlight.selected"
-				  ) as HTMLElement | null);
-
-			const targetRect = compoundRect ?? (currentHighlight?.getBoundingClientRect() ?? null);
-			const targetHeight = targetRect?.height ?? (targetRect ? targetRect.bottom - targetRect.top : 0);
-			const targetWidth = targetRect?.width ?? (targetRect ? targetRect.right - targetRect.left : 0);
-
-			if (targetRect && (targetHeight > 0 || targetWidth > 0) && scrollContainer) {
-				const pageBounds = pageEl.getBoundingClientRect();
-				const isPageOff = isPageCompletelyOffScreen(pageBounds, containerRect ?? scrollContainer.getBoundingClientRect());
-				logDebug(
-					"pdf",
-					`adapter.scrollToRect: targetRect=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}, ${targetRect.left.toFixed(1)}, ${targetRect.right.toFixed(1)}], containerRect=[${containerRect?.top.toFixed(1) ?? 0}, ${containerRect?.bottom.toFixed(1) ?? 0}, ${containerRect?.left.toFixed(1) ?? 0}, ${containerRect?.right.toFixed(1) ?? 0}]`
-				);
-				const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
-					behavior: "smooth",
-					forceCenter: isPageOff,
-				});
-				if (!scrolled) {
-					logDebug("pdf", "adapter.scrollToRect: highlight is already on-screen, skipping scroll");
-				} else {
-					logDebug("pdf", "adapter.scrollToRect: scrolled container for highlight");
-				}
-				return;
-			}
-
-			this.scrollPageIntoView(pageNumber);
 		},
 
 		executeNativeFind(command: {

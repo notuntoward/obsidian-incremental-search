@@ -27,7 +27,7 @@ import {
 import { IncrementalSearchSuggestModal } from "./modal";
 import { updateResolvedOutlineColor, applyPdfColors } from "./utils/colors";
 import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/adaptive-highlight";
-import { logDebug, describeElement } from "./utils/logger";
+import { logDebug, describeElement, setDebugLogging } from "./utils/logger";
 import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
 import { clearAllPdfHighlights } from "./pdf/highlight-layer";
@@ -39,9 +39,6 @@ export * from "./session";
 export * from "./widget";
 export * from "./modal";
 export * from "./pdf/types";
-export * from "./pdf/text-model";
-export * from "./pdf/pattern-matcher";
-export * from "./pdf/match-geometry";
 export * from "./pdf/highlight-layer";
 export * from "./pdf/pdf-view-adapter";
 export * from "./pdf/pdf-match-controller";
@@ -95,6 +92,12 @@ export default class IncrementalSearchPlugin extends Plugin {
 			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
 				if (leaf.containerEl === leafEl) {
 					this.lastInteractedLeaf = leaf;
+					// `workspace.activeLeaf` is discouraged for reading "the current view" (use
+					// `getActiveViewOfType` for that), but there is no supported way to compare
+					// leaf identity to avoid a redundant `setActiveLeaf` call here. Reading the
+					// DOM `mod-active` class instead would race against Obsidian's own
+					// pointerdown/mousedown leaf-activation handling, since we cannot guarantee
+					// listener ordering, so this narrower identity check is kept intentionally.
 					if (this.app.workspace.activeLeaf !== leaf) {
 						logDebug(
 							"main",
@@ -248,18 +251,18 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}
 		}
 
-		// 4. Check workspace.activeLeaf
+		// 4. Prefer the documented `getMostRecentLeaf()` API over reading `workspace.activeLeaf`
+		// directly; fall back to the discouraged property only if that returns nothing.
 		const activeLeaf =
-			(this.app.workspace as any).activeLeaf ||
-			(this.app.workspace as any).getMostRecentLeaf?.();
+			this.app.workspace.getMostRecentLeaf?.() || (this.app.workspace as any).activeLeaf;
 		const activeView = activeLeaf?.view;
 
 		if (activeView && isPdfView(activeView)) {
-			logDebug("main", "getActiveTarget [4]: workspace.activeLeaf -> PDF view");
+			logDebug("main", "getActiveTarget [4]: getMostRecentLeaf -> PDF view");
 			return { type: "pdf", view: activeView };
 		}
 		if (activeView?.editor) {
-			logDebug("main", "getActiveTarget [4]: workspace.activeLeaf -> Editor view");
+			logDebug("main", "getActiveTarget [4]: getMostRecentLeaf -> Editor view");
 			return { type: "editor", editor: activeView.editor };
 		}
 
@@ -532,10 +535,12 @@ export default class IncrementalSearchPlugin extends Plugin {
 		delete loaded.fuzzyMode;
 
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		setDebugLogging(this.settings.debugLogging);
 		await this.saveSettings();
 	}
 
 	async saveSettings() {
+		setDebugLogging(this.settings.debugLogging);
 		invalidateAppearanceCache();
 		updateResolvedOutlineColor();
 		getOrComputeSecondaryStyle(this.settings);
@@ -727,6 +732,18 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.usePopupModal).onChange(async (value) => {
 					this.plugin.settings.usePopupModal = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Debug logging")
+			.setDesc(
+				"Write detailed diagnostic messages to the developer console. Leave this off unless you are troubleshooting."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.debugLogging).onChange(async (value) => {
+					this.plugin.settings.debugLogging = value;
 					await this.plugin.saveSettings();
 				})
 			);

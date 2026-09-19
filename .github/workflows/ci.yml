@@ -1,21 +1,15 @@
-name: Build
+name: CI
 
 on:
   push:
-    branches: [master]
-    tags: ['v*']
   pull_request:
-    branches: [master]
-  release:
-    types: [published]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: ESLint and build
+  ci:
+    name: Lint, build and test
     runs-on: ubuntu-latest
 
     steps:
@@ -31,5 +25,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run ESLint and build
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
         run: npm run build
+
+      - name: Unit tests
+        run: npm run test:run

@@ -130,7 +130,12 @@ export function createPdfSessionController(
 	return {
 		containerEl: controller.adapter.containerEl,
 		getCounterState() {
-			const { matches, activeIndex, direction, isScanning, query, totalMatchesCount } =
+			// The native PDF.js find path (always used in production; see the
+			// "PDF search always uses the native path" note in AGENTS.md) never
+			// populates `controller.state.matches` — counts come solely from
+			// `totalMatchesCount`, which is `undefined` only in the brief window
+			// while a search is in flight (hence the `isScanning` fallback below).
+			const { activeIndex, direction, isScanning, query, totalMatchesCount } =
 				controller.state;
 			if (totalMatchesCount !== undefined) {
 				if (totalMatchesCount === 0) {
@@ -150,20 +155,11 @@ export function createPdfSessionController(
 					inTable: false,
 				};
 			}
-			if (matches.length === 0) {
-				return {
-					current: 0,
-					total: 0,
-					direction,
-					isScanning: isScanning && query.length > 0,
-					inTable: false,
-				};
-			}
 			return {
-				current: activeIndex + 1,
-				total: matches.length,
+				current: 0,
+				total: 0,
 				direction,
-				isScanning: false,
+				isScanning: isScanning && query.length > 0,
 				inTable: false,
 			};
 		},
@@ -241,7 +237,7 @@ export function updateWidgetCounter(target: SearchSessionController | EditorView
 		if (!session || !session.matches || session.matches.length === 0) {
 			counter.textContent = "0/0";
 			dirIndicator.textContent = session?.direction === "backward" ? "▲" : "▼";
-			if (tableIcon) tableIcon.style.display = "none";
+			if (tableIcon) tableIcon.classList.add("is-hidden");
 			return;
 		}
 		const activeMatch = session.matches[session.activeIndex];
@@ -249,14 +245,14 @@ export function updateWidgetCounter(target: SearchSessionController | EditorView
 		counter.textContent = `${session.activeIndex + 1}/${session.matches.length}`;
 		dirIndicator.textContent = session.direction === "backward" ? "▲" : "▼";
 		if (tableIcon) {
-			tableIcon.style.display = inTable ? "inline-flex" : "none";
+			tableIcon.classList.toggle("is-hidden", !inTable);
 		}
 		return;
 	}
 
 	const { current, total, direction, inTable, isScanning } = state;
 	if (tableIcon) {
-		tableIcon.style.display = inTable ? "inline-flex" : "none";
+		tableIcon.classList.toggle("is-hidden", !inTable);
 	}
 
 	if (total === 0) {
@@ -279,10 +275,12 @@ export function updatePdfWidgetCounter(controller: PdfMatchController) {
 	) as HTMLSpanElement | null;
 	if (!counter || !dirIndicator) return;
 
-	if (tableIcon) tableIcon.style.display = "none";
+	if (tableIcon) tableIcon.classList.add("is-hidden");
 
-	const { matches, activeIndex, direction, isScanning, query, totalMatchesCount } =
-		controller.state;
+	// See the matching comment in createPdfSessionController.getCounterState: the native
+	// find path never populates `controller.state.matches`, so counts come solely from
+	// `totalMatchesCount` (undefined only while a search is in flight).
+	const { activeIndex, direction, isScanning, query, totalMatchesCount } = controller.state;
 
 	if (totalMatchesCount !== undefined) {
 		if (totalMatchesCount === 0) {
@@ -290,10 +288,8 @@ export function updatePdfWidgetCounter(controller: PdfMatchController) {
 		} else {
 			counter.textContent = `${activeIndex + 1}/${totalMatchesCount}`;
 		}
-	} else if (matches.length === 0) {
-		counter.textContent = isScanning && query.length > 0 ? "..." : "0/0";
 	} else {
-		counter.textContent = `${activeIndex + 1}/${matches.length}`;
+		counter.textContent = isScanning && query.length > 0 ? "..." : "0/0";
 	}
 	dirIndicator.textContent = direction === "backward" ? "▲" : "▼";
 }
@@ -310,26 +306,19 @@ export function showWidgetTableToast(
 	const matched = cellText.slice(matchStartInCell, matchEndInCell);
 	const after = cellText.slice(matchEndInCell);
 
-	const fragment = document.createDocumentFragment();
-	const container = document.createElement("span");
-	container.appendChild(document.createTextNode(before));
-	const mark = document.createElement("span");
-	mark.className = "incsearch-table-toast-mark";
-	mark.textContent = matched;
-	container.appendChild(mark);
-	container.appendChild(document.createTextNode(after));
-	fragment.appendChild(container);
-
 	toast.textContent = "";
-	toast.appendChild(fragment);
-	toast.style.display = "block";
+	const line = toast.createSpan();
+	line.appendText(before);
+	line.createSpan({ cls: "incsearch-table-toast-mark", text: matched });
+	line.appendText(after);
+	toast.classList.remove("is-hidden");
 }
 
 export function hideWidgetTableToast() {
 	if (!activeWidgetEl) return;
 	const toast = activeWidgetEl.querySelector(".incsearch-table-toast") as HTMLDivElement;
 	if (toast) {
-		toast.style.display = "none";
+		toast.classList.add("is-hidden");
 	}
 }
 
@@ -399,36 +388,29 @@ export function renderSearchWidget(
 	};
 
 	const container = controller.containerEl;
-	const el = document.createElement("div");
-	el.className = "incsearch-widget";
+	const el = container.createDiv({ cls: "incsearch-widget" });
 
-	const dirIndicator = document.createElement("span");
-	dirIndicator.className = "incsearch-dir";
-	dirIndicator.textContent = initialDirection === "forward" ? "▼" : "▲";
+	el.createSpan({
+		cls: "incsearch-dir",
+		text: initialDirection === "forward" ? "▼" : "▲",
+	});
 
-	const tableIcon = document.createElement("span");
-	tableIcon.className = "incsearch-table-icon";
-	tableIcon.setAttribute("aria-label", "In table");
-	tableIcon.style.display = "none";
+	const tableIcon = el.createSpan({
+		cls: "incsearch-table-icon is-hidden",
+		attr: { "aria-label": "In table" },
+	});
 	setIcon(tableIcon, "table");
 
-	const input = document.createElement("input");
-	input.className = "incsearch-input";
-	input.type = "text";
-	input.value = initialQuery;
+	const input = el.createEl("input", {
+		cls: "incsearch-input",
+		type: "text",
+		value: initialQuery,
+	});
 
-	const counter = document.createElement("span");
-	counter.className = "incsearch-counter";
+	el.createSpan({ cls: "incsearch-counter" });
 
-	const toast = document.createElement("div");
-	toast.className = "incsearch-table-toast";
+	el.createDiv({ cls: "incsearch-table-toast is-hidden" });
 
-	el.appendChild(dirIndicator);
-	el.appendChild(tableIcon);
-	el.appendChild(input);
-	el.appendChild(counter);
-	el.appendChild(toast);
-	container.appendChild(el);
 	activeWidgetEl = el;
 
 	const adjustInputSize = () => {

@@ -14,6 +14,23 @@ export interface LogEntry {
 
 const MAX_LOG_ENTRIES = 200;
 const logBuffer: LogEntry[] = [];
+let debugLoggingEnabled = false;
+
+/**
+ * Enables or disables console output of debug events.
+ * The in-memory log buffer is always recorded; only console output is gated,
+ * so the developer console stays clean in the default configuration.
+ */
+export function setDebugLogging(enabled: boolean): void {
+	debugLoggingEnabled = enabled;
+}
+
+/**
+ * Returns whether debug events are currently echoed to the console.
+ */
+export function isDebugLoggingEnabled(): boolean {
+	return debugLoggingEnabled;
+}
 
 function formatTime(d = new Date()): string {
 	const hh = String(d.getHours()).padStart(2, "0");
@@ -53,6 +70,8 @@ export function logDebug(category: string, message: string, details?: any) {
 	if (logBuffer.length > MAX_LOG_ENTRIES) {
 		logBuffer.shift();
 	}
+
+	if (!debugLoggingEnabled) return;
 
 	if (details !== undefined) {
 		console.log(`[IncSearch:${category}] ${entry.timestamp} ${message}`, details);

@@ -2,16 +2,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
 	PdfMatchController,
 	processPdfQuery,
-	isMatchAtOrAfterTop,
-	isMatchAtOrBeforeBottom,
-	findInitialPdfActiveIndex,
 	findPdfWildcardMatches,
 	deduplicateRepeatedPdfMatches,
 	decorateNativeSelectedHighlightFragments,
 } from "../src/pdf/pdf-match-controller";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
-import { PdfMatch, PdfViewportAnchor } from "../src/pdf/types";
 import * as colors from "../src/utils/colors";
 
 describe("processPdfQuery (Space-as-wildcard for PDF)", () => {
@@ -274,13 +270,9 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 		nativeAdapter = {
 			numPages: 5,
 			containerEl,
-			getPage: async () => null,
 			getPageElement: () => null,
-			getTextLayerElement: () => null,
-			getPageViewport: () => ({ width: 600, height: 800 }),
 			getVisiblePageNumbers: () => [1],
 			on: (_event: string, _handler: any) => () => { },
-			scrollToRect: vi.fn(),
 			scrollPageIntoView: vi.fn(),
 			executeNativeFind: (cmd: any) => {
 				nativeFindCommands.push(cmd);
@@ -438,7 +430,6 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 			...nativeAdapter,
 			numPages: 1,
 			getPageElement: () => pageEl,
-			getTextLayerElement: () => textLayer,
 		};
 
 		const controller = new PdfMatchController(adapterWithPage, {
@@ -452,6 +443,139 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 		expect(nativeFindCommands[0].highlightAll).toBe(true);
 
 		controller.destroy();
+	});
+
+	// Regression guard for the global-prototype patch documented at the "4. Intercept
+	// PDFViewer page changes..." comment in setupFindControllerHook: destroy() MUST put
+	// back the exact original HTMLElement.prototype.scrollIntoView. This patch touches a
+	// browser-wide prototype (not a per-instance object), so if a future edit to destroy()
+	// forgets to restore it, EVERY element in the vault silently loses native scrollIntoView
+	// behavior for the rest of the Obsidian session, not just this plugin's own elements.
+	it("restores the exact original HTMLElement.prototype.scrollIntoView on destroy", async () => {
+		const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
+		const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+		await controller.search("test");
+
+		// The patch must actually be installed (otherwise this test would trivially pass).
+		expect(HTMLElement.prototype.scrollIntoView).not.toBe(originalScrollIntoView);
+
+		controller.destroy();
+
+		expect(HTMLElement.prototype.scrollIntoView).toBe(originalScrollIntoView);
+	});
+
+	// Regression guard for the explicit invariant documented in setupFindControllerHook:
+	// "Only patch resolved instances, never a shared prototype... would break or crash
+	// scrolling in unrelated PDF views." This test proves two controllers, each bound to
+	// its own distinct pdfViewer-like object, never cross-contaminate: patching/destroying
+	// one must not affect the other's patched methods.
+	it("isolates per-viewer method patches across two simultaneous controllers", async () => {
+		const makeViewer = () => ({
+			_setCurrentPageNumber: vi.fn(),
+			_scrollIntoView: vi.fn(),
+			scrollPageIntoView: vi.fn(),
+		});
+		const viewerA = makeViewer();
+		const viewerB = makeViewer();
+		const origSetCurrentPageNumberA = viewerA._setCurrentPageNumber;
+		const origSetCurrentPageNumberB = viewerB._setCurrentPageNumber;
+
+		const containerA = document.createElement("div");
+		const containerB = document.createElement("div");
+		const adapterA: PdfViewAdapter = {
+			...nativeAdapter,
+			containerEl: containerA,
+			pdfViewer: viewerA as any,
+		};
+		const adapterB: PdfViewAdapter = {
+			...nativeAdapter,
+			containerEl: containerB,
+			pdfViewer: viewerB as any,
+		};
+
+		const controllerA = new PdfMatchController(adapterA, DEFAULT_SETTINGS);
+		const controllerB = new PdfMatchController(adapterB, DEFAULT_SETTINGS);
+		await controllerA.search("test");
+		await controllerB.search("test");
+
+		// Each controller must have patched only its own viewer.
+		expect(viewerA._setCurrentPageNumber).not.toBe(origSetCurrentPageNumberA);
+		expect(viewerB._setCurrentPageNumber).not.toBe(origSetCurrentPageNumberB);
+
+		// Destroying A must not touch B's still-active patch.
+		controllerA.destroy();
+		expect(viewerA._setCurrentPageNumber).toBe(origSetCurrentPageNumberA);
+		expect(viewerB._setCurrentPageNumber).not.toBe(origSetCurrentPageNumberB);
+
+		controllerB.destroy();
+		expect(viewerB._setCurrentPageNumber).toBe(origSetCurrentPageNumberB);
+	});
+
+	// Regression guard for the two magic timeout constants in requestMatchScroll (2000ms)
+	// and markProgrammaticScroll (400ms). Nothing else in the suite exercises real time, so
+	// a future edit could change or delete either window (or its clearTimeout) without any
+	// test noticing, silently breaking the scroll-suppression state machine.
+	describe("scroll-suppression timing windows", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("matchScrollPending expires after exactly the 2000ms window", () => {
+			const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+
+			controller.requestMatchScroll();
+			expect(controller.matchScrollPending).toBe(true);
+
+			vi.advanceTimersByTime(1999);
+			expect(controller.matchScrollPending).toBe(true);
+
+			vi.advanceTimersByTime(1);
+			expect(controller.matchScrollPending).toBe(false);
+			expect(controller.pendingTargetPage).toBeUndefined();
+		});
+
+		it("a new requestMatchScroll call resets the 2000ms window instead of stacking", () => {
+			const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+
+			controller.requestMatchScroll();
+			vi.advanceTimersByTime(1500);
+			controller.requestMatchScroll(); // should restart the window, not let the first timer fire
+			vi.advanceTimersByTime(1500);
+			expect(controller.matchScrollPending).toBe(true);
+
+			vi.advanceTimersByTime(500);
+			expect(controller.matchScrollPending).toBe(false);
+		});
+
+		it("isProgrammaticScrolling clears after exactly the 400ms window", () => {
+			const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+
+			controller.markProgrammaticScroll();
+			expect(controller.isProgrammaticScrolling).toBe(true);
+
+			vi.advanceTimersByTime(399);
+			expect(controller.isProgrammaticScrolling).toBe(true);
+
+			vi.advanceTimersByTime(1);
+			expect(controller.isProgrammaticScrolling).toBe(false);
+		});
+
+		it("destroy() clears a pending programmatic-scroll timer instead of leaking it", () => {
+			const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+
+			controller.markProgrammaticScroll();
+			controller.destroy();
+
+			// If destroy() failed to clear the timer, this would still flip the flag on an
+			// already-destroyed controller; asserting no throw and the flag's final state
+			// together prove the timeout was actually cancelled, not merely superseded.
+			expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+			expect(controller.isProgrammaticScrolling).toBe(false);
+		});
 	});
 });
 
@@ -478,81 +602,11 @@ describe("PDF Match Controller", () => {
 		mockAdapter = {
 			numPages: 3,
 			containerEl,
-			getPage: async (pageNumber: number) => {
-				const sampleTexts: Record<number, string> = {
-					1: "Introduction to algorithm design and analysis",
-					2: "Chapter 1: Sorting algorithm fundamentals",
-					3: "Chapter 2: Graph algorithm applications",
-				};
-				return {
-					pageNumber,
-					getTextContent: async () => ({
-						items: [{ str: sampleTexts[pageNumber] || "" }],
-					}),
-					getViewport: () => ({ width: 600, height: 800 }),
-				};
-			},
 			getPageElement: (pageNumber: number) => pageElements.get(pageNumber) || null,
-			getTextLayerElement: (pageNumber: number) => {
-				const page = pageElements.get(pageNumber);
-				return page?.querySelector(".textLayer") as HTMLElement | null;
-			},
-			getPageViewport: () => ({ width: 600, height: 800 }),
 			getVisiblePageNumbers: () => [1], // Page 1 visible initially
 			on: (_event: string, _handler: any) => () => { },
-			scrollToRect: vi.fn(),
 			scrollPageIntoView: vi.fn(),
 		};
-	});
-
-	it("performs progressive scanning: scans visible page 1 first, then background pages", async () => {
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-
-		await controller.search("algorithm");
-
-		// "algorithm" appears on all 3 pages
-		expect(controller.state.matches).toHaveLength(3);
-		expect(controller.state.matches[0].pageNumber).toBe(1);
-		expect(controller.state.matches[1].pageNumber).toBe(2);
-		expect(controller.state.matches[2].pageNumber).toBe(3);
-		expect(controller.state.activeIndex).toBe(0);
-	});
-
-	it("advances forward and backward with wrap-around", async () => {
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-		await controller.search("algorithm");
-
-		expect(controller.state.activeIndex).toBe(0);
-
-		// Advance forward
-		controller.advance("forward");
-		expect(controller.state.activeIndex).toBe(1);
-
-		controller.advance("forward");
-		expect(controller.state.activeIndex).toBe(2);
-
-		// Wrap around to 0
-		controller.advance("forward");
-		expect(controller.state.activeIndex).toBe(0);
-
-		// Advance backward from 0 -> wraps to last (2)
-		controller.advance("backward");
-		expect(controller.state.activeIndex).toBe(2);
-		expect(mockAdapter.scrollToRect).toHaveBeenCalledWith(3, expect.anything());
-	});
-
-	it("cancels previous in-flight scans when query updates rapidly", async () => {
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-
-		const search1 = controller.search("algorithm");
-		const search2 = controller.search("graph");
-
-		await Promise.all([search1, search2]);
-
-		// Only the last search results ("graph", on page 3) should be active
-		expect(controller.state.query).toBe("graph");
-		expect(controller.state.matches).toHaveLength(1);
-		expect(controller.state.matches[0].pageNumber).toBe(3);
 	});
 
 	it("removes generated and native current boxes immediately on accept", () => {
@@ -578,131 +632,6 @@ describe("PDF Match Controller", () => {
 			type: "find",
 			highlightAll: false,
 		});
-	});
-
-	it("orders matches on a page in top-to-bottom visual order when items are scrambled in stream order", async () => {
-		// Scrambled items in raw stream: Body text first (y=300), Watermark second (y=600), Title third (y=750)
-		mockAdapter.getPage = async (pageNumber: number) => {
-			if (pageNumber === 1) {
-				return {
-					pageNumber: 1,
-					getTextContent: async () => ({
-						items: [
-							{ str: "Body paragraph mentioning keyword", transform: [1, 0, 0, 1, 50, 300], width: 200, height: 12 },
-							{ str: "Watermark keyword logo", transform: [1, 0, 0, 1, 50, 600], width: 150, height: 24 },
-							{ str: "Header keyword title", transform: [1, 0, 0, 1, 50, 750], width: 100, height: 14 },
-						],
-					}),
-					getViewport: () => ({ width: 600, height: 800 }),
-				};
-			}
-			return null;
-		};
-
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-		await controller.search("keyword");
-
-		expect(controller.state.matches).toHaveLength(3);
-		// Visual order: Header (y=750) -> Watermark (y=600) -> Body (y=300)
-		expect(controller.state.matches[0].itemSpans[0].itemIndex).toBe(0); // Top Header
-		expect(controller.state.matches[1].itemSpans[0].itemIndex).toBe(1); // Watermark
-		expect(controller.state.matches[2].itemSpans[0].itemIndex).toBe(2); // Body
-
-		// Forward advances in top-to-bottom visual order
-		expect(controller.state.activeIndex).toBe(0);
-		controller.advance("forward");
-		expect(controller.state.activeIndex).toBe(1);
-		controller.advance("forward");
-		expect(controller.state.activeIndex).toBe(2);
-	});
-
-	it("handles off-screen pages with unrendered text layers and refreshes when textlayerrendered fires", async () => {
-		const listeners = new Map<string, ((...args: any[]) => void)[]>();
-		mockAdapter.on = (event: string, handler: any) => {
-			if (!listeners.has(event)) listeners.set(event, []);
-			listeners.get(event)!.push(handler);
-			return () => { };
-		};
-
-		// Page 2 has unrendered textLayer initially (0 children in textLayer)
-		const page2TextLayer = pageElements.get(2)!.querySelector(".textLayer") as HTMLElement;
-		page2TextLayer.innerHTML = "";
-
-		mockAdapter.getPageViewport = (pageNum: number) => ({
-			convertToViewportPoint: (x: number, y: number) => [x * 1.2, 800 - y * 1.2],
-			transform: [1.2, 0, 0, -1.2, 0, 800],
-			width: 600,
-			height: 800,
-		});
-
-		const controller = new PdfMatchController(mockAdapter, {
-			...DEFAULT_SETTINGS,
-			allMatchesDisplayMode: "always",
-		});
-		await controller.search("algorithm");
-
-		// Page 2 match initially computed via fallback transform matrix
-		const page2Match = controller.state.matches.find((m) => m.pageNumber === 2);
-		expect(page2Match).toBeDefined();
-		expect(page2Match?.rects).toBeDefined();
-		expect(page2Match?.rects![0].width).toBeGreaterThan(0);
-
-		// Now simulate PDF.js rendering the text layer for Page 2
-		const span = document.createElement("span");
-		span.textContent = "Chapter 1: Sorting algorithm fundamentals";
-		page2TextLayer.appendChild(span);
-
-		// Fire textlayerrendered event
-		const textLayerRenderedHandlers = listeners.get("textlayerrendered") || [];
-		for (const h of textLayerRenderedHandlers) {
-			h({ pageNumber: 2 });
-		}
-
-		// Highlights should now be refreshed for Page 2
-		const page2Highlight = pageElements.get(2)!.querySelector(".incsearch-pdf-match");
-		expect(page2Highlight).not.toBeNull();
-	});
-
-	it("deduplicates identical text items at the same coordinates so forward search never requires double-stepping", async () => {
-		mockAdapter.getPage = async (pageNumber: number) => {
-			if (pageNumber === 1) {
-				return {
-					pageNumber: 1,
-					getTextContent: async () => ({
-						items: [
-							{ str: "First section item", transform: [1, 0, 0, 1, 50, 700], width: 100, height: 14 },
-							// Exact duplicate of Myndex Research at (50, 500)
-							{ str: "Myndex Research", transform: [1, 0, 0, 1, 50, 500], width: 120, height: 14 },
-							{ str: "Myndex Research", transform: [1, 0, 0, 1, 50, 500], width: 120, height: 14 },
-							{ str: "Last footer item", transform: [1, 0, 0, 1, 50, 200], width: 100, height: 14 },
-						],
-					}),
-					getViewport: () => ({ width: 600, height: 800 }),
-				};
-			}
-			return null;
-		};
-
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-		await controller.search("Myndex");
-
-		// Must deduplicate to exactly 1 match (not 2)
-		expect(controller.state.matches).toHaveLength(1);
-		expect(controller.state.activeIndex).toBe(0);
-
-		// Advancing forward wraps to 0 directly without getting stuck on duplicate
-		controller.advance("forward");
-		expect(controller.state.activeIndex).toBe(0);
-	});
-
-	it("cleans up overlays and listeners on destroy", async () => {
-		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-		await controller.search("algorithm");
-
-		expect(containerEl.querySelectorAll(".incsearch-pdf-overlay").length).toBeGreaterThan(0);
-
-		controller.destroy();
-		expect(containerEl.querySelectorAll(".incsearch-pdf-overlay").length).toBe(0);
 	});
 
 	it("restores origin page on cancel() and preserves current page on accept()", async () => {
@@ -739,255 +668,23 @@ describe("PDF Match Controller", () => {
 		expect(controller.shouldShowAllMatches()).toBe(false);
 	});
 
-	it("renders only current match in on-demand mode and toggles DOM highlights on demand", async () => {
-		mockAdapter.getVisiblePageNumbers = () => [1, 2, 3];
-		mockAdapter.getPageViewport = () => ({
-			convertToViewportPoint: (x: number, y: number) => [x, 800 - y],
-			transform: [1, 0, 0, -1, 0, 800],
-			width: 600,
-			height: 800,
+	it("restores original scroll position on cancel", async () => {
+		const restoreFn = vi.fn();
+		mockAdapter.restoreScrollPosition = restoreFn;
+		mockAdapter.getScrollPosition = () => ({
+			scrollTop: 450,
+			scrollLeft: 20,
+			pageNumber: 2,
 		});
 
-		const controller = new PdfMatchController(mockAdapter, {
-			...DEFAULT_SETTINGS,
-			allMatchesDisplayMode: "on-demand",
-		});
-
+		const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
 		await controller.search("algorithm");
-		expect(controller.state.matches).toHaveLength(3);
 
-		// Page 1 has the active match (activeIndex = 0)
-		const page1 = pageElements.get(1)!;
-		const page2 = pageElements.get(2)!;
-
-		// On-demand mode before toggle: only page 1 (active) has 1 highlight with is-current; page 2 has 0
-		const p1HighlightsInitial = page1.querySelectorAll(".incsearch-pdf-match");
-		const p2HighlightsInitial = page2.querySelectorAll(".incsearch-pdf-match");
-		expect(p1HighlightsInitial.length).toBe(1);
-		expect(p1HighlightsInitial[0].classList.contains("is-current")).toBe(true);
-		expect(p2HighlightsInitial.length).toBe(0);
-
-		// Toggle on demand (Ctrl+Enter)
-		controller.toggleDemandHighlights();
-
-		const p1HighlightsPeek = page1.querySelectorAll(".incsearch-pdf-match");
-		const p2HighlightsPeek = page2.querySelectorAll(".incsearch-pdf-match");
-		expect(p1HighlightsPeek.length).toBe(1);
-		expect(p2HighlightsPeek.length).toBe(1);
-
-		// Toggle off again
-		controller.toggleDemandHighlights();
-		const p2HighlightsOff = page2.querySelectorAll(".incsearch-pdf-match");
-		expect(p2HighlightsOff.length).toBe(0);
-	});
-
-	describe("Viewport-Relative Starting Position & Geometry", () => {
-		const dummyMatch = (id: string, pageNumber: number, top: number, height = 16): PdfMatch => ({
-			id,
-			pageNumber,
-			from: 0,
-			to: 5,
-			itemSpans: [{ itemIndex: 0, startOffset: 0, endOffset: 5 }],
-			rects: [{ left: 50, top, width: 100, height }],
-		});
-
-		it("evaluates isMatchAtOrAfterTop correctly across pages and pixel offsets", () => {
-			const anchor: PdfViewportAnchor = {
-				topPageNumber: 2,
-				topPageY: 300,
-				topPageX: 0,
-				bottomPageNumber: 2,
-				bottomPageY: 800,
-				bottomPageX: 600,
-			};
-
-			// Page 1 is before top visible page
-			expect(isMatchAtOrAfterTop(dummyMatch("m1", 1, 500), anchor)).toBe(false);
-
-			// Page 2, match at y=200 (scrolled above topPageY=300)
-			expect(isMatchAtOrAfterTop(dummyMatch("m2", 2, 200, 16), anchor)).toBe(false);
-
-			// Page 2, match at y=350 (at/below topPageY=300)
-			expect(isMatchAtOrAfterTop(dummyMatch("m3", 2, 350, 16), anchor)).toBe(true);
-
-			// Page 3 is after top visible page
-			expect(isMatchAtOrAfterTop(dummyMatch("m4", 3, 50), anchor)).toBe(true);
-		});
-
-		it("evaluates isMatchAtOrBeforeBottom correctly across pages and pixel offsets", () => {
-			const anchor: PdfViewportAnchor = {
-				topPageNumber: 2,
-				topPageY: 300,
-				topPageX: 0,
-				bottomPageNumber: 2,
-				bottomPageY: 700,
-				bottomPageX: 600,
-			};
-
-			// Page 1 is before bottom visible page
-			expect(isMatchAtOrBeforeBottom(dummyMatch("m1", 1, 500), anchor)).toBe(true);
-
-			// Page 2, match at y=650 (at/above bottomPageY=700)
-			expect(isMatchAtOrBeforeBottom(dummyMatch("m2", 2, 650, 16), anchor)).toBe(true);
-
-			// Page 2, match at y=750 (scrolled below bottomPageY=700)
-			expect(isMatchAtOrBeforeBottom(dummyMatch("m3", 2, 750, 16), anchor)).toBe(false);
-
-			// Page 3 is after bottom visible page
-			expect(isMatchAtOrBeforeBottom(dummyMatch("m4", 3, 50), anchor)).toBe(false);
-		});
-
-		it("findInitialPdfActiveIndex selects first visible match for forward search and wraps if needed", () => {
-			const anchor: PdfViewportAnchor = {
-				topPageNumber: 2,
-				topPageY: 400,
-				topPageX: 0,
-				bottomPageNumber: 2,
-				bottomPageY: 800,
-				bottomPageX: 600,
-			};
-
-			const matches: PdfMatch[] = [
-				dummyMatch("m1", 1, 100), // Page 1
-				dummyMatch("m2", 2, 200), // Page 2 above viewport
-				dummyMatch("m3", 2, 450), // Page 2 inside viewport (first visible match!)
-				dummyMatch("m4", 2, 600), // Page 2 inside viewport
-				dummyMatch("m5", 3, 100), // Page 3
-			];
-
-			// Forward search starts at top of visible content (index 2: m3)
-			const forwardIdx = findInitialPdfActiveIndex(matches, "forward", anchor);
-			expect(forwardIdx).toBe(2);
-			expect(matches[forwardIdx].id).toBe("m3");
-
-			// Backward search starts at bottom of visible content (index 3: m4)
-			const backwardIdx = findInitialPdfActiveIndex(matches, "backward", anchor);
-			expect(backwardIdx).toBe(3);
-			expect(matches[backwardIdx].id).toBe("m4");
-
-			// Wrap-around forward: when all matches are above top of viewport
-			const aboveOnly: PdfMatch[] = [dummyMatch("m1", 1, 100), dummyMatch("m2", 2, 200)];
-			expect(findInitialPdfActiveIndex(aboveOnly, "forward", anchor)).toBe(0);
-
-			// Wrap-around backward: when all matches are below bottom of viewport
-			const belowOnly: PdfMatch[] = [dummyMatch("m5", 3, 100), dummyMatch("m6", 3, 500)];
-			expect(findInitialPdfActiveIndex(belowOnly, "backward", anchor)).toBe(1); // last match
-		});
-
-		it("starts forward search at top of visible PDF content when scrolled down", async () => {
-			// Page 2 is visible, scrolled such that topPageY is 400
-			mockAdapter.getVisiblePageNumbers = () => [2];
-			mockAdapter.getViewportAnchor = () => ({
-				topPageNumber: 2,
-				topPageY: 400,
-				topPageX: 0,
-				bottomPageNumber: 2,
-				bottomPageY: 800,
-				bottomPageX: 600,
-			});
-
-			mockAdapter.getPage = async (pageNumber: number) => {
-				if (pageNumber === 1) {
-					return {
-						pageNumber: 1,
-						getTextContent: async () => ({
-							items: [{ str: "keyword on page 1", transform: [1, 0, 0, 1, 50, 700], width: 100, height: 14 }],
-						}),
-						getViewport: () => ({ width: 600, height: 800 }),
-					};
-				}
-				if (pageNumber === 2) {
-					return {
-						pageNumber: 2,
-						getTextContent: async () => ({
-							items: [
-								// Inverted transform coordinates: y=700 in PDF is near top (rect.top ~ 100)
-								{ str: "keyword scrolled off top", transform: [1, 0, 0, 1, 50, 700], width: 100, height: 14 },
-								// y=350 in PDF is near middle (rect.top ~ 450)
-								{ str: "keyword visible at top of viewport", transform: [1, 0, 0, 1, 50, 350], width: 100, height: 14 },
-								// y=200 in PDF is lower (rect.top ~ 600)
-								{ str: "keyword visible lower down", transform: [1, 0, 0, 1, 50, 200], width: 100, height: 14 },
-							],
-						}),
-						getViewport: () => ({ width: 600, height: 800 }),
-					};
-				}
-				return null;
-			};
-
-			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS, "forward");
-			await controller.search("keyword");
-
-			// Should have matches on Page 2 and Page 1
-			expect(controller.state.matches.length).toBeGreaterThanOrEqual(3);
-
-			// Active match should be the first one visible on Page 2 at or below topPageY=400 (not page 1, not scrolled off top)
-			const activeMatch = controller.getActiveMatch();
-			expect(activeMatch).not.toBeNull();
-			expect(activeMatch?.pageNumber).toBe(2);
-			expect(activeMatch?.rects![0].top).toBeGreaterThanOrEqual(390); // ~436px
-		});
-
-		it("starts reverse search at bottom of visible PDF content when scrolled down", async () => {
-			mockAdapter.getVisiblePageNumbers = () => [2];
-			mockAdapter.getViewportAnchor = () => ({
-				topPageNumber: 2,
-				topPageY: 200,
-				topPageX: 0,
-				bottomPageNumber: 2,
-				bottomPageY: 500, // viewport bottom cuts off at y=500
-				bottomPageX: 600,
-			});
-
-			mockAdapter.getPage = async (pageNumber: number) => {
-				if (pageNumber === 2) {
-					return {
-						pageNumber: 2,
-						getTextContent: async () => ({
-							items: [
-								// rect.top ~ 100 (y=700 in PDF)
-								{ str: "item at top", transform: [1, 0, 0, 1, 50, 700], width: 100, height: 14 },
-								// rect.top ~ 450 (y=350 in PDF) - inside viewport (<= 500)
-								{ str: "item at bottom of view", transform: [1, 0, 0, 1, 50, 350], width: 100, height: 14 },
-								// rect.top ~ 700 (y=100 in PDF) - below viewport (> 500)
-								{ str: "item cut off below", transform: [1, 0, 0, 1, 50, 100], width: 100, height: 14 },
-							],
-						}),
-						getViewport: () => ({ width: 600, height: 800 }),
-					};
-				}
-				return null;
-			};
-
-			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS, "backward");
-			await controller.search("item", "backward");
-
-			const activeMatch = controller.getActiveMatch();
-			expect(activeMatch).not.toBeNull();
-			expect(activeMatch?.pageNumber).toBe(2);
-			// Should select the last match at or above bottomPageY=500 ("item at bottom of view", rect.top ~ 436)
-			expect(activeMatch?.rects![0].top).toBeLessThanOrEqual(500);
-			expect(activeMatch?.rects![0].top).toBeGreaterThan(200);
-		});
-
-		it("restores original scroll position on cancel", async () => {
-			const restoreFn = vi.fn();
-			mockAdapter.restoreScrollPosition = restoreFn;
-			mockAdapter.getScrollPosition = () => ({
-				scrollTop: 450,
-				scrollLeft: 20,
-				pageNumber: 2,
-			});
-
-			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
-			await controller.search("algorithm");
-
-			controller.cancel();
-			expect(restoreFn).toHaveBeenCalledWith({
-				scrollTop: 450,
-				scrollLeft: 20,
-				pageNumber: 2,
-			});
+		controller.cancel();
+		expect(restoreFn).toHaveBeenCalledWith({
+			scrollTop: 450,
+			scrollLeft: 20,
+			pageNumber: 2,
 		});
 	});
 

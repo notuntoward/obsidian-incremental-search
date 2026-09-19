@@ -1,12 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import {
 	isOffScreenVertically,
 	isOffScreenHorizontally,
 	isPageCompletelyOffScreen,
-	computeVerticalCenterDelta,
+	computeAxisCenterDelta,
 	computeScrollDeltas,
 	scrollTargetIntoViewIfNeeded,
 	scrollEditorMatchIntoView,
+	CURRENT_MATCH_SELECTOR_PARTS,
+	MATCH_ELEMENT_CLASS_TOKENS,
+	NATIVE_CURRENT_MATCH_SELECTOR,
+	NATIVE_CURRENT_MATCH_ALT_SELECTOR,
+	PLUGIN_CURRENT_MATCH_SELECTOR,
+	NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR,
+	isMatchElementCandidate,
+	getCompoundMatchBoundingRect,
 } from "../src/utils/scroll";
 
 describe("utils: scroll geometry", () => {
@@ -67,11 +77,11 @@ describe("utils: scroll geometry", () => {
 		expect(isPageCompletelyOffScreen({ top: 650, bottom: 1650, left: 0, right: 800 }, viewport)).toBe(true);
 	});
 
-	it("correctly computes vertical center delta", () => {
-		// target: top 400, height 20 -> center 410
-		// container: top 100, height 500 -> center 350
+	it("correctly computes the axis center delta (canonical centering formula)", () => {
+		// target: start 400, size 20 -> center 410
+		// container: start 100, size 500 -> center 350
 		// delta = 410 - 350 = 60
-		const delta = computeVerticalCenterDelta(400, 20, 100, 500);
+		const delta = computeAxisCenterDelta(400, 20, 100, 500);
 		expect(delta).toBe(60);
 	});
 
@@ -333,5 +343,101 @@ describe("utils: scroll geometry", () => {
 			top: 250,
 			behavior: "smooth",
 		});
+	});
+});
+
+describe("utils: scroll canonical current-match selectors", () => {
+	// These tests exist so that editing one copy of the "current match" class list
+	// without updating the others (see the comment block above CURRENT_MATCH_SELECTOR
+	// in src/utils/scroll.ts) fails the suite instead of silently reintroducing drift
+	// between the several PDF consumers that must agree on "which element is current".
+
+	it("builds CURRENT_MATCH_SELECTOR from exactly its three documented parts", () => {
+		expect(CURRENT_MATCH_SELECTOR_PARTS).toEqual([
+			NATIVE_CURRENT_MATCH_SELECTOR,
+			NATIVE_CURRENT_MATCH_ALT_SELECTOR,
+			PLUGIN_CURRENT_MATCH_SELECTOR,
+		]);
+		expect(NATIVE_CURRENT_MATCH_SELECTOR).toBe(".highlight.selected");
+		expect(NATIVE_CURRENT_MATCH_ALT_SELECTOR).toBe(".highlight.is-selected");
+		expect(PLUGIN_CURRENT_MATCH_SELECTOR).toBe(".incsearch-pdf-match.is-current");
+	});
+
+	it("scopes NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR to both textLayer class spellings", () => {
+		expect(NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR).toBe(
+			".textLayer .highlight.selected, .text-layer .highlight.selected"
+		);
+	});
+
+	it("keeps MATCH_ELEMENT_CLASS_TOKENS as bare tokens drawn from CURRENT_MATCH_SELECTOR_PARTS", () => {
+		// isMatchElementCandidate's broad OR-guard must never test for a class that isn't
+		// part of the canonical selector union, or it could treat an unrelated element as
+		// a match candidate; and every token it tests must actually appear somewhere in the
+		// canonical parts, or a real current-match element could stop being recognized.
+		const canonicalTokens = new Set(
+			CURRENT_MATCH_SELECTOR_PARTS.flatMap((part) => part.replace(/^\./, "").split("."))
+		);
+		for (const token of MATCH_ELEMENT_CLASS_TOKENS) {
+			expect(canonicalTokens.has(token)).toBe(true);
+		}
+	});
+
+	it("isMatchElementCandidate recognizes every canonical current-match class shape", () => {
+		const makeEl = (...classes: string[]) =>
+			({
+				classList: { contains: (c: string) => classes.includes(c) } as unknown as DOMTokenList,
+			}) as { classList: DOMTokenList };
+		expect(isMatchElementCandidate(makeEl("highlight", "selected"))).toBe(true);
+		expect(isMatchElementCandidate(makeEl("incsearch-pdf-match", "is-current"))).toBe(true);
+		expect(isMatchElementCandidate(makeEl("unrelated-class"))).toBe(false);
+		expect(isMatchElementCandidate(null)).toBe(false);
+		expect(isMatchElementCandidate(undefined)).toBe(false);
+	});
+
+	it("getCompoundMatchBoundingRect queries elements using the canonical selector union", () => {
+		const querySelectorAll = vi.fn().mockReturnValue([]);
+		const containerEl: any = { querySelectorAll };
+		getCompoundMatchBoundingRect(containerEl);
+		expect(querySelectorAll).toHaveBeenCalledWith(
+			CURRENT_MATCH_SELECTOR_PARTS.join(", ")
+		);
+	});
+
+	// The three tests above only guard scroll.ts's own constants against internal drift.
+	// They do NOT prove any consumer actually imports and uses those constants instead of
+	// re-spelling ".highlight.selected" (etc.) inline. This static source scan closes that
+	// gap: it fails if a future edit reintroduces a hardcoded copy of the selector in any
+	// file under src/pdf/, which is exactly the bug this consolidation fixed.
+	//
+	// The scanned directory and the checked class fragments are both derived at runtime
+	// (readdirSync + the exported selector parts) rather than hand-maintained, so this
+	// guard cannot silently go stale by missing a new src/pdf/ file or a new selector part
+	// the way a hardcoded file list or hardcoded regex could.
+	it("never re-inlines a hardcoded current-match class string in src/pdf/**", () => {
+		const pdfDir = join(__dirname, "..", "src", "pdf");
+		const filesToScan = readdirSync(pdfDir).filter((f) => f.endsWith(".ts"));
+		expect(filesToScan.length).toBeGreaterThan(0);
+
+		// Build one pattern per selector part's state-bearing class fragment (e.g.
+		// "highlight.selected", "highlight.is-selected", "incsearch-pdf-match.is-current"),
+		// matched as a dotted class chain so it still catches the fragment inside a longer
+		// selector string (e.g. ".textLayer .highlight.selected").
+		const fragments = CURRENT_MATCH_SELECTOR_PARTS.map((part) =>
+			part.replace(/^\./, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+		);
+		const inlineSelectorPattern = new RegExp(
+			`["'\`][^"'\`]*(?:${fragments.join("|")})[^"'\`]*["'\`]`
+		);
+
+		for (const file of filesToScan) {
+			const contents = readFileSync(join(pdfDir, file), "utf8");
+			expect(
+				inlineSelectorPattern.test(contents),
+				`${file} appears to hardcode a current-match selector string instead of importing ` +
+					`it from src/utils/scroll.ts (NATIVE_CURRENT_MATCH_SELECTOR / ` +
+					`NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR / PLUGIN_CURRENT_MATCH_SELECTOR / ` +
+					`CURRENT_MATCH_SELECTOR).`
+			).toBe(false);
+		}
 	});
 });

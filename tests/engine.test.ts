@@ -5,7 +5,6 @@ import {
   isCaseSensitive,
   parseWildcardQuery,
   findWildcardMatches,
-  findLiteralMatches,
   compileQuery,
   findMatchesInText,
   isWholeWord,
@@ -306,26 +305,6 @@ describe("engine: findWildcardMatches", () => {
     expect(matches).toHaveLength(1);
     expect(matches[0].from).toBe(15);
     expect(matches[0].to).toBe(30);
-  });
-});
-
-describe("engine: findLiteralMatches", () => {
-  it("returns empty array for empty query", () => {
-    expect(findLiteralMatches("some text", "", 0, false)).toEqual([]);
-  });
-
-  it("finds all literal occurrences with case matching", () => {
-    const text = "abc ABC abc";
-    expect(findLiteralMatches(text, "abc", 0, false)).toHaveLength(3);
-    expect(findLiteralMatches(text, "ABC", 0, true)).toHaveLength(1);
-    expect(findLiteralMatches(text, "ABC", 0, true)[0]).toEqual({ from: 4, to: 7 });
-  });
-
-  it("handles offset and special characters safely", () => {
-    const text = "cost is $10.00 each";
-    const matches = findLiteralMatches(text, "$10.00", 50, false);
-    expect(matches).toHaveLength(1);
-    expect(matches[0]).toEqual({ from: 58, to: 64 });
   });
 });
 
