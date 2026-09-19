@@ -21,7 +21,7 @@
 $ErrorActionPreference = "Stop"
 
 $OWNER  = "notuntoward"
-$REPO   = "obsidian-plugin-template"
+$REPO   = "obsidian-incremental-search"
 $BRANCH = "master"
 
 # GitHub REST API endpoint for branch protection (legacy)
@@ -48,8 +48,10 @@ $payload = @"
 "@
 
 # Write payload to a temp file; avoids encoding issues with pipes in PowerShell.
+# Use WriteAllText (UTF-8 without BOM): PowerShell's `Set-Content -Encoding utf8`
+# prepends a BOM, which the GitHub API rejects with "Problems parsing JSON".
 $tempFile = [System.IO.Path]::GetTempFileName()
-Set-Content -Path $tempFile -Value $payload -Encoding utf8 -NoNewline
+[System.IO.File]::WriteAllText($tempFile, $payload)
 
 Write-Host "Applying branch protection to $BRANCH on $OWNER/$REPO ..."
 Write-Host "(Admins are NOT restricted: you can still direct-push or force-push.)"

@@ -3,6 +3,7 @@
 [![CI](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/ci.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml/badge.svg)](https://github.com/notuntoward/obsidian-incremental-search/actions/workflows/scorecard.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/notuntoward/obsidian-incremental-search/badge)](https://securityscorecards.dev/viewer/?uri=github.com/notuntoward/obsidian-incremental-search)
 
 Incremental search for Obsidian notes and PDFs. Start typing and jump straight to the match — no need to open a separate panel or type a whole phrase.
 
