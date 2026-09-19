@@ -963,6 +963,66 @@ describe("PDF Match Controller", () => {
 			controller.destroy();
 		});
 
+		it("centers an already-rendered off-screen page match instead of only scrolling the page", () => {
+			// Regression guard: when the active match is on a completely off-screen page but
+			// that page is ALREADY rendered (so no `textlayerrendered` event will fire again),
+			// the controller must center the match itself. Previously this branch only asked
+			// for a page-level scroll and relied on a later event to center the match, which
+			// for a tall/zoomed page left the match barely visible at the viewport edge.
+			const scrollBySpy = vi.fn();
+			mockAdapter.containerEl.scrollBy = scrollBySpy;
+			mockAdapter.containerEl.getBoundingClientRect = () => ({
+				top: 100,
+				bottom: 600,
+				left: 0,
+				right: 800,
+				height: 500,
+				width: 800,
+			} as DOMRect);
+			const scrollPageIntoViewSpy = vi.fn();
+			mockAdapter.scrollPageIntoView = scrollPageIntoViewSpy;
+
+			const page3 = pageElements.get(3)!;
+			page3.getBoundingClientRect = () => ({
+				top: 1000,
+				bottom: 1800,
+				left: 0,
+				right: 800,
+				height: 800,
+				width: 800,
+			} as DOMRect);
+
+			// The match is already rendered, near the bottom of the off-screen page.
+			const matchEl = document.createElement("span");
+			matchEl.className = "highlight selected";
+			matchEl.getBoundingClientRect = () => ({
+				top: 1750,
+				bottom: 1770,
+				left: 200,
+				right: 280,
+				height: 20,
+				width: 80,
+			} as DOMRect);
+			page3.querySelector(".textLayer")?.appendChild(matchEl);
+
+			const findController = {
+				scrollMatchIntoView: vi.fn(),
+			};
+			mockAdapter.findController = findController;
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+
+			findController.scrollMatchIntoView({ selected: { pageIdx: 2, matchIdx: 0 } });
+
+			// Match center 1760 vs container center 350 => deltaY 1410; horizontally inside => deltaX 0.
+			expect(scrollBySpy).toHaveBeenCalledWith({
+				left: 0,
+				top: 1410,
+				behavior: "smooth",
+			});
+			controller.destroy();
+		});
+
 		it("skips page scroll jump when selected match page is already visible on screen", () => {
 			const scrollPageIntoViewSpy = vi.fn();
 			mockAdapter.scrollPageIntoView = scrollPageIntoViewSpy;

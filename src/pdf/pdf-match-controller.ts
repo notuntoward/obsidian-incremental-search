@@ -425,14 +425,17 @@ export class PdfMatchController {
 				behavior: "smooth",
 				forceCenter,
 			});
-			if (!scrolled) {
-				logDebug("pdf", "scrollActiveMatchIntoView: match is already on-screen, skipping scroll");
-			} else {
-				logDebug("pdf", "scrollActiveMatchIntoView: match is off-screen, scrolled container");
-			}
+			logDebug(
+				"pdf",
+				`scrollActiveMatchIntoView: pageArg=${String(pageNumber)} forceCenter=${forceCenter} match=[top ${compoundRect.top.toFixed(1)}, bottom ${compoundRect.bottom.toFixed(1)}, left ${compoundRect.left.toFixed(1)}, right ${compoundRect.right.toFixed(1)}] container=[top ${containerRect.top.toFixed(1)}, bottom ${containerRect.bottom.toFixed(1)}, left ${containerRect.left.toFixed(1)}, right ${containerRect.right.toFixed(1)}] scrollContainer=${describeElement(scrollContainer)} ${scrolled ? "SCROLLED" : "ALREADY-ON-SCREEN/SKIPPED"}`
+			);
 			this.cancelPendingMatchScroll();
 			return true;
 		}
+		logDebug(
+			"pdf",
+			`scrollActiveMatchIntoView: no match rect found for pageArg=${String(pageNumber)} (returning false so caller can retry)`
+		);
 		return false;
 	}
 
@@ -629,8 +632,17 @@ export class PdfMatchController {
 						}
 					}
 					this.requestMatchScroll(pageNumber);
+					// If the selected page's match is already rendered, center the match itself
+					// with a single scroll. Only fall back to a page-level jump — which for a
+					// tall/zoomed page can leave the match barely visible at the viewport edge —
+					// plus a deferred re-center when the match rect is not yet available (e.g.
+					// the page is still virtualized/rendering, so `textlayerrendered` will fire).
+					if (this.scrollActiveMatchIntoView(pageNumber)) {
+						return;
+					}
 					this.markProgrammaticScroll();
 					this.adapter.scrollPageIntoView(pageNumber);
+					this.scheduleActiveMatchScroll(pageNumber);
 					return;
 				}
 
@@ -770,8 +782,15 @@ export class PdfMatchController {
 
 		const onUserManualScroll = () => {
 			if (!this.isProgrammaticScrolling) {
+				logDebug(
+					"pdf",
+					"onUserManualScroll: latching userHasManuallyScrolled=true (no programmatic scroll in flight); matchScrollPending was " +
+						String(this.matchScrollPending)
+				);
 				this.userHasManuallyScrolled = true;
 				this.cancelPendingMatchScroll();
+			} else {
+				logDebug("pdf", "onUserManualScroll: ignoring scroll event (programmatic scroll in flight)");
 			}
 		};
 
@@ -793,6 +812,7 @@ export class PdfMatchController {
 		const onWheelCapture = (evt: Event) => {
 			const target = evt.target as Node | null;
 			if (target && (container.contains(target) || target === container)) {
+				logDebug("pdf", "onWheelCapture: user wheel over PDF container, latching userHasManuallyScrolled=true");
 				this.userHasManuallyScrolled = true;
 				this.cancelPendingMatchScroll();
 			}
