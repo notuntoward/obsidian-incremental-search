@@ -47,6 +47,7 @@ export * from "./pdf/pdf-view-adapter";
 export * from "./pdf/pdf-match-controller";
 export * from "./utils/adaptive-highlight";
 export * from "./utils/logger";
+export * from "./utils/scroll";
 
 export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { unfoldEffect, foldEffect } from "@codemirror/language";
 import {
@@ -832,5 +832,215 @@ describe("session: callout and fold auto-expansion and restoration", () => {
       iter.next();
     }
     expect(count15to20).toBe(1);
+  });
+});
+
+describe("session: markdown smart search scrolling", () => {
+  it("does not scroll when the next match is already fully in view", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "first match text and second match text" });
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      coordsAtPos: () => ({
+        top: 250,
+        bottom: 270,
+        left: 50,
+        right: 150,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 5, to: 15 });
+    expect(scrollBySpy).not.toHaveBeenCalled();
+  });
+
+  it("scrolls and centers vertically when next match is off-screen vertically", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "first line\nsecond line" });
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      // Target [590, 610], center 600. Container [100, 600], center 350. deltaY = 250
+      coordsAtPos: () => ({
+        top: 590,
+        bottom: 610,
+        left: 50,
+        right: 150,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 20, to: 30 });
+    expect(scrollBySpy).toHaveBeenCalledWith({
+      left: 0,
+      top: 250,
+      behavior: "smooth",
+    });
+  });
+
+  it("scrolls and centers horizontally when note is zoomed and next match is off-screen horizontally", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "very long line with zoomed text" });
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      // Target [780, 850], center 815. Container [0, 800], center 400. deltaX = 415. Vertical is on-screen (top 200, bottom 220).
+      coordsAtPos: () => ({
+        top: 200,
+        bottom: 220,
+        left: 780,
+        right: 850,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 50, to: 60 });
+    expect(scrollBySpy).toHaveBeenCalledWith({
+      left: 415,
+      top: -140,
+      behavior: "smooth",
+    });
+  });
+
+  it("does not scroll when advancing to ANY match on different lines in markdown that is already on-screen", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 150,
+      scrollTop: 100,
+    };
+
+    const state = EditorState.create({ doc: "line 1\nline 2\nline 3\nline 4\nline 5" });
+
+    // Target match is on line 4, top: 380, bottom: 400 (fully within viewport [100, 600] and [0, 800])
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      coordsAtPos: () => ({
+        top: 380,
+        bottom: 400,
+        left: 200,
+        right: 280,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 25, to: 30 });
+
+    // Must not call scrollBy or change scroll positions
+    expect(scrollBySpy).not.toHaveBeenCalled();
+    expect(scrollDOM.scrollLeft).toBe(150);
+    expect(scrollDOM.scrollTop).toBe(100);
+  });
+
+  it("does not mistake previous active match element in DOM for current match when advancing to off-screen match", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "first match line\n" + "long text\n".repeat(50) + "offscreen match line" });
+
+    // Simulated stale element in DOM from previous match (at top: 200, inside viewport)
+    const staleEl = {
+      getBoundingClientRect: () => ({ top: 200, bottom: 220, left: 50, right: 150, width: 100, height: 20 } as DOMRect),
+    };
+
+    // Target match is off-screen at top: 750, bottom: 770 (below viewport [100, 600])
+    // Container center: 100 + 250 = 350. Target center: 750 + 10 = 760. DeltaY: 760 - 350 = 410.
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: (selector: string) => (selector.includes("is-current") ? staleEl : null),
+      },
+      coordsAtPos: () => ({
+        top: 750,
+        bottom: 770,
+        left: 200,
+        right: 280,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 400, to: 415 });
+
+    // Must scroll to center the new match, NOT skip because of the stale on-screen element!
+    expect(scrollBySpy).toHaveBeenCalledWith({
+      left: 0,
+      top: 410,
+      behavior: "smooth",
+    });
+  });
+
+  it("scrolls and centers when next match is in distant unrendered line via EditorView.scrollIntoView dispatch", () => {
+    const dispatchSpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: vi.fn(),
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "short doc" });
+
+    // Target match is unrendered (coordsAtPos returns null)
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      coordsAtPos: () => null,
+      dispatch: dispatchSpy,
+    };
+
+    scrollToMatch(view, { from: 500, to: 510 });
+
+    expect(dispatchSpy).toHaveBeenCalled();
   });
 });

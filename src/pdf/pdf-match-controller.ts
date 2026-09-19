@@ -17,7 +17,11 @@ import { clearSecondaryHighlights } from "./text-layer-highlighter";
 import { applyPdfColors, clearPdfColors } from "../utils/colors";
 import { logDebug, describeElement } from "../utils/logger";
 import { getScrollContainer } from "./pdf-view-adapter";
-import { isOffScreenVertically, isPageCompletelyOffScreen } from "../utils/scroll";
+import {
+	isPageCompletelyOffScreen,
+	scrollTargetIntoViewIfNeeded,
+	getCompoundMatchBoundingRect,
+} from "../utils/scroll";
 
 /**
  * Determines whether a PDF match is positioned at or after the top edge of the visible viewport.
@@ -177,6 +181,114 @@ export function findPdfWildcardMatches(pageContent: string, query: string, caseS
 	return nonOverlappingMatches;
 }
 
+const MAX_PDF_MATCH_REPEAT_DISTANCE = 512;
+// Below this length, a fully glued (no-separator) repeat is more likely to be an
+// incidental coincidence (e.g. adjacent table cells like "100100") than an actual
+// re-printed text run, so glued repeats shorter than this are not deduplicated.
+const MIN_GLUED_PDF_MATCH_REPEAT_LENGTH = 12;
+
+const WHITESPACE_EXCEPT_NEWLINE_RE = /[^\S\n]/;
+
+/**
+ * Decides whether the boundary between two equal, adjacent blocks of text looks
+ * like a re-printed text run (safe to collapse) rather than two independent
+ * occurrences that merely happen to be preceded by identical text. Only looks at
+ * the single characters straddling the boundary, so it never needs to allocate
+ * the (potentially large) block substrings.
+ */
+function isPlausiblePdfRepeatBoundary(pageContent: string, firstStart: number, distance: number): boolean {
+	const secondStart = firstStart + distance;
+	const firstBlockLastChar = pageContent.charAt(firstStart + distance - 1);
+	const secondBlockFirstChar = pageContent.charAt(secondStart);
+
+	// A repeat that begins with whitespace isn't a glued re-print of the block itself.
+	if (/\s/.test(secondBlockFirstChar)) return false;
+
+	if (firstBlockLastChar === "\n") {
+		// A hard line break between two identical runs strongly indicates a
+		// duplicated text item (which carries its own EOL marker), not prose.
+		return true;
+	}
+	if (WHITESPACE_EXCEPT_NEWLINE_RE.test(firstBlockLastChar)) {
+		// Ordinary whitespace-separated word/phrase repetition in prose
+		// ("that that", "very very"): never treat this as a duplicate.
+		return false;
+	}
+	// No separator at all: only trust longer runs, since short glued tokens
+	// (e.g. adjacent table cell values) can coincidentally repeat.
+	return distance >= MIN_GLUED_PDF_MATCH_REPEAT_LENGTH;
+}
+
+/**
+ * Compares two equal-length blocks of `text` character by character, exiting on
+ * the first mismatch instead of allocating substrings for a full `===` compare.
+ */
+function pdfBlocksEqual(text: string, start1: number, start2: number, length: number): boolean {
+	for (let i = 0; i < length; i++) {
+		if (text.charCodeAt(start1 + i) !== text.charCodeAt(start2 + i)) return false;
+	}
+	return true;
+}
+
+/**
+ * Determines whether `current` is a visually identical repeat of `previous`,
+ * caused by a PDF content stream printing the same text run more than once
+ * (faux-bold text, drop shadows, overprinted headers/footers). PDF.js matches
+ * are offset-based, so such runs produce two matches at the same location.
+ */
+function isRepeatedPdfMatch(
+	pageContent: string,
+	previous: { index: number; length: number },
+	current: { index: number; length: number }
+): boolean {
+	const distance = current.index - previous.index;
+	if (distance <= 0 || distance > MAX_PDF_MATCH_REPEAT_DISTANCE) return false;
+	if (Math.max(previous.length, current.length) < 3) return false;
+
+	const matchEnd = current.index + current.length;
+	const maxShift = Math.min(previous.index, distance);
+	for (let shift = 0; shift <= maxShift; shift++) {
+		const firstStart = previous.index - shift;
+		const secondStart = firstStart + distance;
+		if (secondStart + distance > pageContent.length) continue;
+		// The repeat must fully contain the current match.
+		if (current.index < secondStart || matchEnd > secondStart + distance) continue;
+
+		if (!isPlausiblePdfRepeatBoundary(pageContent, firstStart, distance)) continue;
+		if (!pdfBlocksEqual(pageContent, firstStart, secondStart, distance)) continue;
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Collapses duplicate matches that sit at the same visual position because the
+ * PDF prints a text run twice. Without this, advancing skips to the duplicate
+ * instead of the next real match, and the current match is painted with both
+ * the current and secondary highlight styles.
+ *
+ * Each match is compared against the immediately preceding match in the
+ * original (unfiltered) list, not the last surviving one, so a run printed
+ * three or more times collapses completely instead of leaving a spurious
+ * extra copy once the comparison distance no longer lines up.
+ */
+export function deduplicateRepeatedPdfMatches(
+	pageContent: string,
+	matches: { index: number; length: number }[] | undefined | null
+): { index: number; length: number }[] | undefined {
+	if (!matches || matches.length <= 1) return matches ?? undefined;
+	const result: { index: number; length: number }[] = [];
+	for (let i = 0; i < matches.length; i++) {
+		const current = matches[i];
+		const previousOriginal = i > 0 ? matches[i - 1] : undefined;
+		if (previousOriginal && isRepeatedPdfMatch(pageContent, previousOriginal, current)) {
+			continue;
+		}
+		result.push(current);
+	}
+	return result;
+}
+
 const PDF_TOKEN_HIGHLIGHT_NAME = "incsearch-pdf-current-token";
 
 interface CssHighlightRegistry {
@@ -310,12 +422,102 @@ export class PdfMatchController {
 	originPageNumber: number;
 	unsubscribers: (() => void)[] = [];
 	onStateChange?: (state: PdfSessionState) => void;
-	originalMatch?: (query: any, pageContent: string, pageIndex: number) => any;
-	originalPdfViewerScrollPageIntoView?: (...args: any[]) => any;
-	originalScrollMatchIntoView?: (params: any) => any;
-	originalViewerScrollIntoViews: Map<any, (...args: any[]) => any> = new Map();
 	originalElementScrollIntoView?: typeof HTMLElement.prototype.scrollIntoView;
-	cleanupScrollProperty?: () => void;
+	originalMatch?: (query: any, pageContent: string, pageIndex: number) => any;
+	originalScrollMatchIntoView?: (params: any) => any;
+	originalViewerSetCurrentPageNumbers: Map<any, any> = new Map();
+	originalViewerScrollIntoViews: Map<any, any> = new Map();
+	originalViewerScrollPageIntoViews: Map<any, any> = new Map();
+	userHasManuallyScrolled = false;
+	matchScrollPending = false;
+	isProgrammaticScrolling = false;
+	pendingTargetPage?: number;
+	private matchScrollTimeout?: number;
+	private programmaticScrollTimeout?: number;
+
+	requestMatchScroll(targetPage?: number) {
+		this.userHasManuallyScrolled = false;
+		this.matchScrollPending = true;
+		this.pendingTargetPage = targetPage;
+		if (this.matchScrollTimeout) {
+			window.clearTimeout(this.matchScrollTimeout);
+		}
+		this.matchScrollTimeout = window.setTimeout(() => {
+			this.matchScrollPending = false;
+			this.pendingTargetPage = undefined;
+			this.matchScrollTimeout = undefined;
+		}, 2000);
+	}
+
+	cancelPendingMatchScroll() {
+		this.matchScrollPending = false;
+		this.pendingTargetPage = undefined;
+		if (this.matchScrollTimeout) {
+			window.clearTimeout(this.matchScrollTimeout);
+			this.matchScrollTimeout = undefined;
+		}
+	}
+
+	markProgrammaticScroll() {
+		this.isProgrammaticScrolling = true;
+		if (this.programmaticScrollTimeout) {
+			window.clearTimeout(this.programmaticScrollTimeout);
+		}
+		this.programmaticScrollTimeout = window.setTimeout(() => {
+			this.isProgrammaticScrolling = false;
+			this.programmaticScrollTimeout = undefined;
+		}, 400);
+	}
+
+	scheduleActiveMatchScroll(pageNumber?: number) {
+		if (this.userHasManuallyScrolled || !this.matchScrollPending) {
+			return;
+		}
+		if (this.scrollActiveMatchIntoView(pageNumber)) {
+			return;
+		}
+		window.requestAnimationFrame(() => {
+			if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+				if (this.scrollActiveMatchIntoView(pageNumber)) {
+					return;
+				}
+				window.setTimeout(() => {
+					if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+						this.scrollActiveMatchIntoView(pageNumber);
+					}
+				}, 40);
+			}
+		});
+	}
+
+	scrollActiveMatchIntoView(pageNumber?: number): boolean {
+		if (this.userHasManuallyScrolled || !this.matchScrollPending) {
+			return false;
+		}
+		const scrollContainer = getScrollContainer(this.adapter.containerEl);
+		const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+		if (!scrollContainer || !containerRect) return false;
+
+		const pageEl = typeof pageNumber === "number" ? this.adapter.getPageElement(pageNumber) : null;
+		const compoundRect = getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl);
+
+		if (compoundRect && (compoundRect.width > 0 || compoundRect.height > 0)) {
+			this.markProgrammaticScroll();
+			const forceCenter = Boolean(this.pendingTargetPage && this.pendingTargetPage === pageNumber);
+			const scrolled = scrollTargetIntoViewIfNeeded(compoundRect, scrollContainer, {
+				behavior: "smooth",
+				forceCenter,
+			});
+			if (!scrolled) {
+				logDebug("pdf", "scrollActiveMatchIntoView: match is already on-screen, skipping scroll");
+			} else {
+				logDebug("pdf", "scrollActiveMatchIntoView: match is off-screen, scrolled container");
+			}
+			this.cancelPendingMatchScroll();
+			return true;
+		}
+		return false;
+	}
 
 	constructor(
 		adapter: PdfViewAdapter,
@@ -345,89 +547,6 @@ export class PdfMatchController {
 
 		this.setupEventListeners();
 		this.setupFindControllerHook();
-		this.setupScrollInterception();
-	}
-
-	private setupScrollInterception() {
-		const scrollContainer = getScrollContainer(this.adapter.containerEl);
-		if (scrollContainer) {
-			const origScrollTo = scrollContainer.scrollTo;
-			const origScrollBy = scrollContainer.scrollBy;
-			const origScroll = scrollContainer.scroll;
-
-			if (origScrollTo) {
-				scrollContainer.scrollTo = function (...args: any[]) {
-					logDebug("pdf", `scrollContainer.scrollTo called with args=${JSON.stringify(args)}`, new Error().stack);
-					return origScrollTo.apply(this, args as any);
-				};
-			}
-
-			if (origScrollBy) {
-				scrollContainer.scrollBy = function (...args: any[]) {
-					logDebug("pdf", `scrollContainer.scrollBy called with args=${JSON.stringify(args)}`, new Error().stack);
-					return origScrollBy.apply(this, args as any);
-				};
-			}
-
-			if (origScroll) {
-				scrollContainer.scroll = function (...args: any[]) {
-					logDebug("pdf", `scrollContainer.scroll called with args=${JSON.stringify(args)}`, new Error().stack);
-					return origScroll.apply(this, args as any);
-				};
-			}
-
-			const protoDesc =
-				Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop") ||
-				Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
-			if (protoDesc && protoDesc.set && protoDesc.get) {
-				const origSet = protoDesc.set;
-				const origGet = protoDesc.get;
-				try {
-					Object.defineProperty(scrollContainer, "scrollTop", {
-						configurable: true,
-						get() {
-							return origGet.call(this);
-						},
-						set(val: number) {
-							const currentVal = origGet.call(this);
-							const stack = new Error().stack || "";
-
-							// Suppress internal PDF.js page-switch / pageDiv scroll routines during active search
-							if (
-								stack.includes("_resetCurrentPageView") ||
-								stack.includes("_setCurrentPageNumber") ||
-								stack.includes("currentPageNumber") ||
-								stack.includes("_updatePage") ||
-								stack.includes("_scrollIntoView")
-							) {
-								logDebug(
-									"pdf",
-									`scrollContainer.scrollTop SETTER suppressed (page-switch routine): requested=${val}, current=${currentVal}`
-								);
-								return;
-							}
-
-							logDebug(
-								"pdf",
-								`scrollContainer.scrollTop SETTER applied: val=${val}, current=${currentVal}`
-							);
-							origSet.call(this, val);
-						},
-					});
-				} catch {
-					// Ignore if property is non-configurable
-				}
-			}
-
-			this.cleanupScrollProperty = () => {
-				try {
-					delete (scrollContainer as any).scrollTop;
-				} catch {}
-				if (origScrollTo) scrollContainer.scrollTo = origScrollTo;
-				if (origScrollBy) scrollContainer.scrollBy = origScrollBy;
-				if (origScroll) scrollContainer.scroll = origScroll;
-			};
-		}
 	}
 
 	private setupFindControllerHook() {
@@ -436,38 +555,53 @@ export class PdfMatchController {
 		// 1. Intercept DOM scrollIntoView calls inside this PDF container
 		const originalElementScrollIntoView = HTMLElement.prototype.scrollIntoView;
 		this.originalElementScrollIntoView = originalElementScrollIntoView;
+		const self = this;
 		HTMLElement.prototype.scrollIntoView = function (
 			this: HTMLElement,
 			arg?: boolean | ScrollIntoViewOptions
 		) {
 			if (container && container.contains(this) && this !== container) {
+				if (self.userHasManuallyScrolled || !self.matchScrollPending) {
+					logDebug(
+						"pdf",
+						`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: user manually scrolled or no pending scroll, suppressing`
+					);
+					return;
+				}
 				const scrollContainer = getScrollContainer(container, this);
 				if (scrollContainer) {
-					const containerRect = scrollContainer.getBoundingClientRect();
-					const targetRect = this.getBoundingClientRect();
+					const isMatchEl =
+						this.classList.contains("highlight") ||
+						this.classList.contains("selected") ||
+						this.classList.contains("incsearch-pdf-match");
+					const pageEl = this.closest?.(".page") as HTMLElement | null;
+					const targetRect = isMatchEl
+						? (getCompoundMatchBoundingRect(container, pageEl) ?? this.getBoundingClientRect())
+						: this.getBoundingClientRect();
 
-					if (targetRect.height > 0 || targetRect.width > 0) {
-						const isOffScreen = isOffScreenVertically(targetRect, containerRect);
-						logDebug(
-							"pdf",
-							`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: target=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
-						);
-						if (!isOffScreen) {
+					const targetHeight = targetRect.height ?? (targetRect.bottom - targetRect.top);
+					const targetWidth = targetRect.width ?? (targetRect.right - targetRect.left);
+
+					if (targetHeight > 0 || targetWidth > 0) {
+						self.markProgrammaticScroll();
+						const forceCenter = Boolean(self.pendingTargetPage);
+						const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
+							behavior: "smooth",
+							forceCenter,
+						});
+						if (!scrolled) {
 							logDebug(
 								"pdf",
 								`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: already on-screen, suppressing scroll`
 							);
-							return;
+						} else {
+							logDebug(
+								"pdf",
+								`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: off-screen, scrolled to center`
+							);
 						}
-						logDebug(
-							"pdf",
-							`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: off-screen, centering vertically`
-						);
-						return originalElementScrollIntoView.call(this, {
-							block: "center",
-							inline: "nearest",
-							behavior: "smooth",
-						});
+						self.cancelPendingMatchScroll();
+						return;
 					}
 				}
 			}
@@ -476,20 +610,26 @@ export class PdfMatchController {
 
 		// 2. Intercept PDF.js findController matching
 		const findController = this.adapter.findController;
+		const pdfViewer =
+			this.adapter.pdfViewer ||
+			(findController as any)?._pdfViewer ||
+			(findController as any)?.pdfViewer;
+
 		logDebug("pdf", "PDF objects inspection:", {
 			hasFindController: Boolean(findController),
 			findControllerKeys: findController ? Object.keys(findController).slice(0, 30) : [],
-			hasPdfViewer: Boolean(this.adapter.pdfViewer),
-			pdfViewerKeys: this.adapter.pdfViewer ? Object.keys(this.adapter.pdfViewer).slice(0, 30) : [],
+			hasPdfViewer: Boolean(pdfViewer),
+			pdfViewerKeys: pdfViewer ? Object.keys(pdfViewer).slice(0, 30) : [],
 			hasFindEventBus: Boolean(findController?._eventBus || findController?.eventBus),
 			hasLinkService: Boolean(findController?._linkService || findController?.linkService),
 			hasPdfViewerOnFindController: Boolean(findController?._pdfViewer || findController?.pdfViewer),
 		});
+
 		if (findController && typeof findController.match === "function") {
 			this.originalMatch = findController.match;
 			findController.match = (query: any, pageContent: string, pageIndex: number) => {
 				if (this.usesPluginWildcardSearch()) {
-					return findPdfWildcardMatches(
+					const wildcardMatches = findPdfWildcardMatches(
 						pageContent,
 						this.state.query,
 						isCaseSensitive(this.state.query)
@@ -497,8 +637,12 @@ export class PdfMatchController {
 						index: match.from,
 						length: match.to - match.from,
 					}));
+					return deduplicateRepeatedPdfMatches(pageContent, wildcardMatches);
 				}
-				return this.originalMatch?.call(findController, query, pageContent, pageIndex);
+				return deduplicateRepeatedPdfMatches(
+					pageContent,
+					this.originalMatch?.call(findController, query, pageContent, pageIndex)
+				);
 			};
 		}
 
@@ -507,62 +651,87 @@ export class PdfMatchController {
 			this.originalScrollMatchIntoView = findController.scrollMatchIntoView;
 			findController.scrollMatchIntoView = (params: any) => {
 				logDebug("pdf", "findController.scrollMatchIntoView called:", params);
+				if (this.userHasManuallyScrolled) {
+					logDebug("pdf", "findController.scrollMatchIntoView: user has manually scrolled, skipping scroll!");
+					return;
+				}
+				// Capture before requestMatchScroll() clears it below, so the compound-match
+				// branch can still honor a cross-page scroll request from advance().
+				const hadPendingTargetPage = Boolean(this.pendingTargetPage);
+				this.requestMatchScroll();
+
 				const scrollContainer = getScrollContainer(this.adapter.containerEl);
 				const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
 				if (!scrollContainer || !containerRect) return;
 
-				const pageIndex = typeof params?.pageIndex === "number" ? params.pageIndex : -1;
-				const pageEl = pageIndex >= 0 ? this.adapter.getPageElement(pageIndex + 1) : null;
-				const matchesOnPage = pageEl?.querySelectorAll(".highlight");
-				const matchIndex = typeof params?.matchIndex === "number" ? params.matchIndex : -1;
-
-				const targetEl =
-					params?.element ||
-					pageEl?.querySelector(".highlight.selected, .highlight.is-selected, .incsearch-pdf-match.is-current") ||
-					(matchesOnPage && matchIndex >= 0 && matchesOnPage[matchIndex]) ||
-					this.adapter.containerEl.querySelector(
-						".highlight.selected, .highlight.is-selected, .incsearch-pdf-match.is-current"
-					) as HTMLElement | null;
-
+				const targetEl = (params?.element ?? (typeof params === "object" ? params : null)) as HTMLElement | undefined;
 				if (targetEl && typeof targetEl.getBoundingClientRect === "function") {
-					const hlRect = targetEl.getBoundingClientRect();
-					if (hlRect.height > 0 || hlRect.width > 0) {
-						const isOffScreen = isOffScreenVertically(hlRect, containerRect);
+					const pageEl = targetEl.closest?.(".page") as HTMLElement | null;
+					const targetRect =
+						getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ??
+						targetEl.getBoundingClientRect();
+					const targetHeight = targetRect.height ?? (targetRect.bottom - targetRect.top);
+					const targetWidth = targetRect.width ?? (targetRect.right - targetRect.left);
+					if (targetHeight > 0 || targetWidth > 0) {
 						logDebug(
 							"pdf",
-							`findController.scrollMatchIntoView: match=[${hlRect.top.toFixed(1)}, ${hlRect.bottom.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+							`findController.scrollMatchIntoView: match=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}, ${targetRect.left.toFixed(1)}, ${targetRect.right.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}, ${containerRect.left.toFixed(1)}, ${containerRect.right.toFixed(1)}]`
 						);
-						if (!isOffScreen) {
+						this.markProgrammaticScroll();
+						const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
+							behavior: "smooth",
+							forceCenter: hadPendingTargetPage,
+						});
+						if (!scrolled) {
 							logDebug("pdf", "findController.scrollMatchIntoView: match is already on-screen, skipping scroll!");
-							return;
+						} else {
+							logDebug("pdf", "findController.scrollMatchIntoView: match is off-screen, scrolled container");
 						}
-						logDebug("pdf", "findController.scrollMatchIntoView: match is off-screen, centering match!");
-						targetEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+						this.cancelPendingMatchScroll();
 						return;
 					}
 				}
 
-				if (pageEl && typeof pageEl.getBoundingClientRect === "function") {
-					const pageBounds = pageEl.getBoundingClientRect();
-					const isPageOffScreen = isPageCompletelyOffScreen(pageBounds, containerRect);
-					logDebug(
-						"pdf",
-						`findController.scrollMatchIntoView (page fallback): pageBounds=[${pageBounds.top.toFixed(1)}, ${pageBounds.bottom.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isPageOffScreen=${isPageOffScreen}`
-					);
-					if (!isPageOffScreen) {
-						logDebug("pdf", "findController.scrollMatchIntoView: page is already partially on-screen, skipping scroll!");
-						return;
+				const pageIndex =
+					typeof params === "number"
+						? params
+						: typeof params?.pageIndex === "number"
+							? params.pageIndex
+							: typeof params?.selected?.pageIdx === "number"
+								? params.selected.pageIdx
+								: (this.adapter.getActiveFindMatchInfo?.()?.pageIndex ?? -1);
+
+				const pageNumber = pageIndex >= 0 ? pageIndex + 1 : -1;
+				if (pageNumber > 0) {
+					const pageEl = this.adapter.getPageElement(pageNumber);
+					if (pageEl && typeof pageEl.getBoundingClientRect === "function") {
+						const pageBounds = pageEl.getBoundingClientRect();
+						const isOffScreen = isPageCompletelyOffScreen(pageBounds, containerRect);
+						if (!isOffScreen) {
+							this.requestMatchScroll();
+							this.scheduleActiveMatchScroll(pageNumber);
+							logDebug(
+								"pdf",
+								`findController.scrollMatchIntoView: page ${pageNumber} is already visible on-screen, scheduling active match scroll`
+							);
+							return;
+						}
 					}
-					logDebug("pdf", "findController.scrollMatchIntoView: page is completely off-screen, centering page!");
-					pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+					this.requestMatchScroll(pageNumber);
+					this.markProgrammaticScroll();
+					this.adapter.scrollPageIntoView(pageNumber);
 					return;
 				}
 
-				return this.originalScrollMatchIntoView?.call(findController, params);
+				this.scheduleActiveMatchScroll();
 			};
 		}
 
-		// 4. Intercept PDFViewer._scrollIntoView
+		// 4. Intercept PDFViewer page changes and scrollPageIntoView across all candidate instances.
+		// Only patch resolved instances, never a shared prototype: an arrow function that closes
+		// over a shared prototype object would invoke the original method with `this` bound to
+		// that prototype (not the real calling instance) for any other viewer sharing it, breaking
+		// or crashing scrolling in unrelated PDF views.
 		const candidateViewers = [
 			findController?._pdfViewer,
 			this.adapter.pdfViewer,
@@ -571,36 +740,78 @@ export class PdfMatchController {
 			(this.adapter as any).view?.viewer?.child?.pdfViewer,
 		].filter(Boolean);
 
-		const allViewersAndPrototypes: any[] = [];
 		for (const pv of candidateViewers) {
-			allViewersAndPrototypes.push(pv);
-			const proto = Object.getPrototypeOf(pv);
-			if (proto && proto !== Object.prototype) {
-				allViewersAndPrototypes.push(proto);
+			if (pv && typeof pv._setCurrentPageNumber === "function" && !this.originalViewerSetCurrentPageNumbers.has(pv)) {
+				const origSetCurrentPageNumber = pv._setCurrentPageNumber;
+				this.originalViewerSetCurrentPageNumbers.set(pv, origSetCurrentPageNumber);
+				pv._setCurrentPageNumber = (val: number, resetCurrentPageView = false) => {
+					if (resetCurrentPageView) {
+						const pageEl = this.adapter.getPageElement(val);
+						const scrollContainer = getScrollContainer(this.adapter.containerEl);
+						const containerRect = scrollContainer?.getBoundingClientRect();
+						if (pageEl && containerRect) {
+							const pageBounds = pageEl.getBoundingClientRect();
+							if (!isPageCompletelyOffScreen(pageBounds, containerRect)) {
+								logDebug(
+									"pdf",
+									`pdfViewer._setCurrentPageNumber: page ${val} is already visible, calling with resetCurrentPageView=false to avoid left=0 jump`
+								);
+								return origSetCurrentPageNumber.call(pv, val, false);
+							}
+						}
+					}
+					return origSetCurrentPageNumber.call(pv, val, resetCurrentPageView);
+				};
 			}
-		}
 
-		for (const pv of allViewersAndPrototypes) {
 			if (pv && typeof pv._scrollIntoView === "function" && !this.originalViewerScrollIntoViews.has(pv)) {
 				const origScrollIntoView = pv._scrollIntoView;
 				this.originalViewerScrollIntoViews.set(pv, origScrollIntoView);
 				pv._scrollIntoView = (params: any) => {
-					logDebug("pdf", "pdfViewer._scrollIntoView called (suppressed during search):", params);
-					// Suppress pageDiv scrolling during search; match positioning is handled by scrollMatchIntoView
-					return;
+					if (this.userHasManuallyScrolled) {
+						logDebug("pdf", "pdfViewer._scrollIntoView: user has manually scrolled, skipping page jump");
+						return;
+					}
+					const pageDiv = params?.pageDiv || params?.div || (params?.id ? this.adapter.getPageElement(params.id) : null);
+					const scrollContainer = getScrollContainer(this.adapter.containerEl);
+					const containerRect = scrollContainer?.getBoundingClientRect();
+					if (pageDiv && scrollContainer && containerRect) {
+						const pageBounds = pageDiv.getBoundingClientRect();
+						if (!isPageCompletelyOffScreen(pageBounds, containerRect)) {
+							logDebug("pdf", "pdfViewer._scrollIntoView: page is already visible, skipping page jump");
+							return;
+						}
+					}
+					logDebug("pdf", "pdfViewer._scrollIntoView: delegating to origScrollIntoView");
+					return origScrollIntoView.call(pv, params);
 				};
 			}
-		}
 
-		// 5. Intercept PDF.js viewer scrollPageIntoView
-		const pdfViewer = findController?._pdfViewer || this.adapter.pdfViewer;
-		if (pdfViewer && typeof pdfViewer.scrollPageIntoView === "function") {
-			this.originalPdfViewerScrollPageIntoView = pdfViewer.scrollPageIntoView;
-			pdfViewer.scrollPageIntoView = (params: any) => {
-				logDebug("pdf", "pdfViewer.scrollPageIntoView called (suppressed during search):", params);
-				// Suppress pageDiv scrolling during search; match positioning is handled by scrollMatchIntoView
-				return;
-			};
+			if (pv && typeof pv.scrollPageIntoView === "function" && !this.originalViewerScrollPageIntoViews.has(pv)) {
+				const origScrollPageIntoView = pv.scrollPageIntoView;
+				this.originalViewerScrollPageIntoViews.set(pv, origScrollPageIntoView);
+				pv.scrollPageIntoView = (params: any) => {
+					if (this.userHasManuallyScrolled) {
+						logDebug("pdf", "pdfViewer.scrollPageIntoView: user has manually scrolled, skipping page jump");
+						return;
+					}
+					const pageNum = typeof params === "number" ? params : params?.pageNumber;
+					const scrollContainer = getScrollContainer(this.adapter.containerEl);
+					const containerRect = scrollContainer?.getBoundingClientRect();
+					if (typeof pageNum === "number" && scrollContainer && containerRect) {
+						const pageEl = this.adapter.getPageElement(pageNum);
+						if (pageEl && typeof pageEl.getBoundingClientRect === "function") {
+							const pageBounds = pageEl.getBoundingClientRect();
+							if (!isPageCompletelyOffScreen(pageBounds, containerRect)) {
+								logDebug("pdf", `pdfViewer.scrollPageIntoView: page ${pageNum} is already visible, skipping page jump`);
+								return;
+							}
+						}
+					}
+					logDebug("pdf", `pdfViewer.scrollPageIntoView: delegating to origScrollPageIntoView for page ${pageNum}`);
+					return origScrollPageIntoView.call(pv, params);
+				};
+			}
 		}
 	}
 
@@ -648,6 +859,70 @@ export class PdfMatchController {
 			window.removeEventListener("scroll", globalScrollListener, { capture: true } as any);
 		});
 
+		const onUserManualScroll = () => {
+			if (!this.isProgrammaticScrolling) {
+				this.userHasManuallyScrolled = true;
+				this.cancelPendingMatchScroll();
+			}
+		};
+
+		const container = this.adapter.containerEl;
+
+		const onScrollCapture = (evt: Event) => {
+			const target = evt.target as Node | null;
+			if (target && (container.contains(target) || target === container)) {
+				onUserManualScroll();
+			}
+		};
+		window.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
+		container.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
+		this.unsubscribers.push(() => {
+			window.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
+			container.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
+		});
+
+		const onWheelCapture = (evt: Event) => {
+			const target = evt.target as Node | null;
+			if (target && (container.contains(target) || target === container)) {
+				this.userHasManuallyScrolled = true;
+				this.cancelPendingMatchScroll();
+			}
+		};
+		window.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
+		container.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
+		this.unsubscribers.push(() => {
+			window.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
+			container.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
+		});
+
+		const onPointerDownCapture = (evt: Event) => {
+			const target = evt.target as Node | null;
+			if (target && (container.contains(target) || target === container)) {
+				this.userHasManuallyScrolled = true;
+				this.cancelPendingMatchScroll();
+			}
+		};
+		window.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
+		container.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
+		this.unsubscribers.push(() => {
+			window.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
+			container.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
+		});
+
+		const onTouchMoveCapture = (evt: Event) => {
+			const target = evt.target as Node | null;
+			if (target && (container.contains(target) || target === container)) {
+				this.userHasManuallyScrolled = true;
+				this.cancelPendingMatchScroll();
+			}
+		};
+		window.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
+		container.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
+		this.unsubscribers.push(() => {
+			window.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
+			container.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
+		});
+
 		const refreshNativeFragmentJoins = () => {
 			window.requestAnimationFrame(() => {
 				decorateNativeSelectedHighlightFragments(
@@ -662,6 +937,9 @@ export class PdfMatchController {
 			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
 			if (typeof pageNumber === "number") {
 				this.refreshPageHighlights(pageNumber);
+				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+					this.scheduleActiveMatchScroll(pageNumber);
+				}
 			}
 			refreshNativeFragmentJoins();
 		});
@@ -669,7 +947,12 @@ export class PdfMatchController {
 
 		const unsubTextLayerMatches = this.adapter.on(
 			"updatetextlayermatches",
-			refreshNativeFragmentJoins
+			() => {
+				refreshNativeFragmentJoins();
+				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+					this.scheduleActiveMatchScroll();
+				}
+			}
 		);
 		this.unsubscribers.push(unsubTextLayerMatches);
 
@@ -698,6 +981,10 @@ export class PdfMatchController {
 		this.unsubscribers.push(unsubRotation);
 
 		const unsubScroll = this.adapter.on("scroll", () => {
+			if (!this.isProgrammaticScrolling) {
+				this.userHasManuallyScrolled = true;
+				this.cancelPendingMatchScroll();
+			}
 			this.refreshAllVisibleHighlights();
 		});
 		this.unsubscribers.push(unsubScroll);
@@ -713,6 +1000,9 @@ export class PdfMatchController {
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
 				refreshNativeFragmentJoins();
+				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+					this.scheduleActiveMatchScroll();
+				}
 			}
 		});
 		this.unsubscribers.push(unsubFindCount);
@@ -724,6 +1014,9 @@ export class PdfMatchController {
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
 				refreshNativeFragmentJoins();
+				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+					this.scheduleActiveMatchScroll();
+				}
 			}
 		});
 		this.unsubscribers.push(unsubFindState);
@@ -774,6 +1067,12 @@ export class PdfMatchController {
 
 		clearAllPdfHighlights(this.adapter.containerEl);
 		clearSecondaryHighlights(this.adapter.containerEl);
+
+		if (query.length > 0) {
+			this.requestMatchScroll();
+		} else {
+			this.cancelPendingMatchScroll();
+		}
 
 		// Toggle CSS visibility class for native text layer highlights
 		if (this.shouldShowAllMatches()) {
@@ -1022,6 +1321,7 @@ export class PdfMatchController {
 	}
 
 	advance(direction: SearchDirection) {
+		this.requestMatchScroll();
 		this.state.direction = direction;
 
 		if (this.adapter.executeNativeFind && this.state.query) {
@@ -1038,6 +1338,11 @@ export class PdfMatchController {
 				caseSensitive: isCaseSensitive(this.state.query),
 			});
 			this.notifyStateChange();
+			window.requestAnimationFrame(() => {
+				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+					this.scheduleActiveMatchScroll();
+				}
+			});
 			return;
 		}
 
@@ -1067,6 +1372,7 @@ export class PdfMatchController {
 
 	setActiveIndex(index: number) {
 		if (index < 0 || index >= this.state.matches.length) return;
+		this.requestMatchScroll();
 		this.state.activeIndex = index;
 		this.notifyStateChange();
 
@@ -1080,10 +1386,20 @@ export class PdfMatchController {
 
 	scrollToMatch(match: PdfMatch | null) {
 		if (!match) return;
+		this.requestMatchScroll(match.pageNumber);
 
-		// If rects already computed, scroll to rect; otherwise scroll page into view
+		// If rects already computed, scroll to union of rects; otherwise scroll page into view
 		if (match.rects && match.rects.length > 0) {
-			this.adapter.scrollToRect(match.pageNumber, match.rects[0]);
+			const unionRect = match.rects.reduce(
+				(acc, r) => ({
+					top: Math.min(acc.top, r.top),
+					left: Math.min(acc.left, r.left),
+					width: Math.max(acc.left + acc.width, r.left + r.width) - Math.min(acc.left, r.left),
+					height: Math.max(acc.top + acc.height, r.top + r.height) - Math.min(acc.top, r.top),
+				}),
+				{ ...match.rects[0] }
+			);
+			this.adapter.scrollToRect(match.pageNumber, unionRect);
 		} else {
 			this.adapter.scrollPageIntoView(match.pageNumber);
 		}
@@ -1112,14 +1428,15 @@ export class PdfMatchController {
 
 	destroy() {
 		logDebug("pdf", "PdfMatchController destroy called");
+		this.cancelPendingMatchScroll();
+		if (this.programmaticScrollTimeout) {
+			window.clearTimeout(this.programmaticScrollTimeout);
+			this.programmaticScrollTimeout = undefined;
+		}
 		this.scanGeneration++;
 		this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
 		this.adapter.containerEl.classList.remove("incsearch-active-pdf");
 		clearPdfColors(this.adapter.containerEl);
-		if (this.cleanupScrollProperty) {
-			this.cleanupScrollProperty();
-			this.cleanupScrollProperty = undefined;
-		}
 		if (this.originalElementScrollIntoView) {
 			HTMLElement.prototype.scrollIntoView = this.originalElementScrollIntoView;
 			this.originalElementScrollIntoView = undefined;
@@ -1132,15 +1449,18 @@ export class PdfMatchController {
 			this.adapter.findController.scrollMatchIntoView = this.originalScrollMatchIntoView;
 			this.originalScrollMatchIntoView = undefined;
 		}
+		for (const [pv, orig] of this.originalViewerSetCurrentPageNumbers.entries()) {
+			pv._setCurrentPageNumber = orig;
+		}
+		this.originalViewerSetCurrentPageNumbers.clear();
 		for (const [pv, orig] of this.originalViewerScrollIntoViews.entries()) {
 			pv._scrollIntoView = orig;
 		}
 		this.originalViewerScrollIntoViews.clear();
-		const pdfViewer = this.adapter.findController?._pdfViewer || this.adapter.pdfViewer;
-		if (pdfViewer && this.originalPdfViewerScrollPageIntoView) {
-			pdfViewer.scrollPageIntoView = this.originalPdfViewerScrollPageIntoView;
-			this.originalPdfViewerScrollPageIntoView = undefined;
+		for (const [pv, orig] of this.originalViewerScrollPageIntoViews.entries()) {
+			pv.scrollPageIntoView = orig;
 		}
+		this.originalViewerScrollPageIntoViews.clear();
 		if (this.adapter.executeNativeFind) {
 			this.adapter.executeNativeFind({
 				query: "",

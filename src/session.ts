@@ -12,6 +12,7 @@ import {
 import { computeMatches } from "./engine";
 import { removeWidget, showWidgetTableToast, hideWidgetTableToast } from "./widget";
 import { logDebug } from "./utils/logger";
+import { scrollTargetIntoViewIfNeeded, scrollEditorMatchIntoView } from "./utils/scroll";
 
 interface AutoFoldedRange {
 	from: number;
@@ -476,7 +477,6 @@ function highlightMatchedTextInCallout(
 	walk(container);
 
 	if (activeRef.span) {
-		// 1. Scroll CM6 scrollDOM directly to bypass callout overflow: hidden
 		const scroller = view.scrollDOM;
 		if (
 			scroller &&
@@ -485,22 +485,9 @@ function highlightMatchedTextInCallout(
 		) {
 			try {
 				const spanRect = activeRef.span.getBoundingClientRect();
-				const scrollerRect = scroller.getBoundingClientRect();
-				if (spanRect.height > 0 && scrollerRect.height > 0) {
-					const spanCenterY = spanRect.top + spanRect.height / 2;
-					const scrollerCenterY = scrollerRect.top + scrollerRect.height / 2;
-					const deltaY = spanCenterY - scrollerCenterY;
-					scroller.scrollTop += deltaY;
+				if (spanRect.height > 0 || spanRect.width > 0) {
+					scrollTargetIntoViewIfNeeded(spanRect, scroller, { behavior: "smooth" });
 				}
-			} catch {
-				// Ignore
-			}
-		}
-
-		// 2. Standard scrollIntoView fallback
-		if (typeof activeRef.span.scrollIntoView === "function") {
-			try {
-				activeRef.span.scrollIntoView({ block: "center", inline: "nearest" });
 			} catch {
 				// Ignore
 			}
@@ -659,12 +646,7 @@ export function scrollToMatch(view: EditorView, match: MatchRange, isTyping = fa
 		}
 	}
 
-	view.dispatch({
-		effects: EditorView.scrollIntoView(EditorSelection.range(match.from, match.to), {
-			y: "center",
-			x: "nearest",
-		}),
-	});
+	scrollEditorMatchIntoView(view, match);
 
 	applyLivePreviewHighlights(view, match);
 	if (typeof window !== "undefined") {
@@ -1007,7 +989,7 @@ export function commitMatch(
 			effects: [
 				setSession.of(null),
 				EditorView.scrollIntoView(EditorSelection.range(m.from, m.to), {
-					y: "center",
+					y: "nearest",
 					x: "nearest",
 				}),
 			],

@@ -1,9 +1,9 @@
 import { MatchRect, PdfTextItem, PdfViewportAnchor, PdfScrollPosition } from "./types";
 import {
-	isOffScreenVertically,
-	isOffScreenHorizontally,
 	isPageCompletelyOffScreen,
 	computeVerticalCenterDelta,
+	scrollTargetIntoViewIfNeeded,
+	getCompoundMatchBoundingRect,
 } from "../utils/scroll";
 import { logDebug, describeElement } from "../utils/logger";
 
@@ -130,29 +130,60 @@ function resolveViewerComponents(view: any): {
 }
 
 /**
+ * Helper to check if an element is a valid scrollable container.
+ */
+function isScrollableElement(el: HTMLElement | null | undefined): boolean {
+	if (!el || typeof el.getBoundingClientRect !== "function") return false;
+	try {
+		const style = window.getComputedStyle(el);
+		const overflow = `${style.overflow} ${style.overflowY} ${style.overflowX}`;
+		if (/(auto|scroll|overlay)/.test(overflow)) {
+			return true;
+		}
+	} catch {
+		// Ignore if getComputedStyle fails in mock environments
+	}
+	return Boolean(el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
+}
+
+/**
  * Finds the actual scrollable element containing the PDF pages.
  */
 export function getScrollContainer(containerEl: HTMLElement, pageEl?: HTMLElement | null): HTMLElement {
-	let cur = pageEl?.parentElement || containerEl.querySelector(".page")?.parentElement;
+	// 1. Look for known PDF.js / Obsidian scrollable container classes first
+	const knownCandidates = [
+		containerEl.querySelector?.("#viewerContainer"),
+		containerEl.querySelector?.(".viewerContainer"),
+		containerEl.querySelector?.(".pdf-container"),
+		containerEl.querySelector?.(".pdf-viewer-container"),
+		containerEl.classList?.contains("pdf-container") ? containerEl : null,
+	].filter(Boolean) as HTMLElement[];
+
+	for (const el of knownCandidates) {
+		if (isScrollableElement(el)) {
+			return el;
+		}
+	}
+
+	// 2. Walk up from pageEl to containerEl looking for the scrollable ancestor
+	let cur = (pageEl?.parentElement || containerEl.querySelector?.(".page")?.parentElement) as HTMLElement | null;
 	while (cur && cur !== document.body && cur !== document.documentElement) {
-		if (cur.scrollHeight > cur.clientHeight) {
+		if (isScrollableElement(cur)) {
 			return cur;
 		}
 		if (cur === containerEl) break;
 		cur = cur.parentElement;
 	}
 
-	const candidates = [
-		containerEl.querySelector?.(".pdf-container"),
-		containerEl.querySelector?.(".pdfViewer"),
-		containerEl.querySelector?.(".viewerContainer"),
-		containerEl,
-	].filter(Boolean) as HTMLElement[];
+	// 3. Prefer containerEl itself when it is scrollable, before falling back to a
+	// known candidate that failed the scrollability check above (e.g. before the PDF
+	// viewer's overflow container has any overflow yet).
+	if (isScrollableElement(containerEl)) {
+		return containerEl;
+	}
 
-	for (const el of candidates) {
-		if (el && el.scrollHeight > el.clientHeight) {
-			return el;
-		}
+	if (knownCandidates.length > 0) {
+		return knownCandidates[0];
 	}
 
 	return containerEl;
@@ -451,7 +482,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 					return;
 				}
 				logDebug("pdf", `adapter.scrollPageIntoView: page ${pageNumber} is off-screen, centering page`);
-				pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+				scrollTargetIntoViewIfNeeded(pageBounds, scrollContainer, { behavior: "smooth" });
 				return;
 			}
 
@@ -498,65 +529,78 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				return;
 			}
 
-			// 1. If an active match element is present in DOM
-			const currentHighlight = pageEl.querySelector(
-				".incsearch-pdf-match.is-current, .highlight.selected"
-			) as HTMLElement | null;
-
-			if (currentHighlight && typeof currentHighlight.scrollIntoView === "function") {
-				if (containerRect && typeof currentHighlight.getBoundingClientRect === "function") {
-					const hlRect = currentHighlight.getBoundingClientRect();
-					const isOffScreen = isOffScreenVertically(hlRect, containerRect);
-					logDebug(
-						"pdf",
-						`adapter.scrollToRect: hlRect=[${hlRect.top.toFixed(1)}, ${hlRect.bottom.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
-					);
-					if (!isOffScreen) {
-						logDebug("pdf", "adapter.scrollToRect: highlight is already on-screen, skipping scroll");
-						return;
-					}
-				}
-				logDebug("pdf", "adapter.scrollToRect: scrolling highlight into center");
-				currentHighlight.scrollIntoView({
-					block: "center",
-					inline: "nearest",
-					behavior: "smooth",
-				});
-				return;
-			}
-
-			// 2. Otherwise calculate scroll offset relative to the scroll container
+			// 1. If rect is provided, calculate target rect directly from page bounds and match rect
 			if (rect && scrollContainer && containerRect) {
 				const pageBounds = pageEl.getBoundingClientRect();
-				const targetTop = pageBounds.top + rect.top;
-				const targetBottom = targetTop + rect.height;
-				const isOffScreen = isOffScreenVertically(
-					{ top: targetTop, bottom: targetBottom, left: 0, right: 0 },
-					containerRect
-				);
+				const isPageOff = isPageCompletelyOffScreen(pageBounds, containerRect);
+				const scaleX = pageEl.offsetWidth > 0 ? pageBounds.width / pageEl.offsetWidth : 1;
+				const scaleY = pageEl.offsetHeight > 0 ? pageBounds.height / pageEl.offsetHeight : 1;
+
+				const targetTop = pageBounds.top + rect.top * scaleY;
+				const targetBottom = targetTop + rect.height * scaleY;
+				const targetLeft = pageBounds.left + rect.left * scaleX;
+				const targetRight = targetLeft + rect.width * scaleX;
+				const targetWidth = rect.width * scaleX;
+				const targetHeight = rect.height * scaleY;
+
+				const targetRect = {
+					top: targetTop,
+					bottom: targetBottom,
+					left: targetLeft,
+					right: targetRight,
+					width: targetWidth,
+					height: targetHeight,
+				};
 
 				logDebug(
 					"pdf",
-					`adapter.scrollToRect: rectTarget=[${targetTop.toFixed(1)}, ${targetBottom.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}], isOffScreen=${isOffScreen}`
+					`adapter.scrollToRect: rectTarget=[${targetTop.toFixed(1)}, ${targetBottom.toFixed(1)}, ${targetLeft.toFixed(1)}, ${targetRight.toFixed(1)}], containerRect=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}, ${containerRect.left.toFixed(1)}, ${containerRect.right.toFixed(1)}]`
 				);
 
-				if (!isOffScreen) {
+				const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
+					behavior: "smooth",
+					forceCenter: isPageOff,
+				});
+				if (!scrolled) {
 					logDebug("pdf", "adapter.scrollToRect: rect is already on-screen, skipping scroll");
-					return;
-				}
-
-				const targetY = targetTop + rect.height / 2;
-				const deltaY = targetY - (containerRect.top + containerRect.height / 2);
-				logDebug("pdf", `adapter.scrollToRect: scrolling container by deltaY=${deltaY.toFixed(1)}`);
-
-				if (typeof scrollContainer.scrollBy === "function") {
-					scrollContainer.scrollBy({ top: deltaY, behavior: "smooth" });
 				} else {
-					scrollContainer.scrollTop += deltaY;
+					logDebug("pdf", "adapter.scrollToRect: scrolled container for rect");
 				}
-			} else {
-				pageEl.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+				return;
 			}
+
+			// 2. Otherwise try to measure current active match element in DOM
+			const compoundRect = getCompoundMatchBoundingRect(containerEl, pageEl);
+			const currentHighlight = compoundRect
+				? null
+				: (pageEl.querySelector(
+						".incsearch-pdf-match.is-current, .highlight.selected"
+				  ) as HTMLElement | null);
+
+			const targetRect = compoundRect ?? (currentHighlight?.getBoundingClientRect() ?? null);
+			const targetHeight = targetRect?.height ?? (targetRect ? targetRect.bottom - targetRect.top : 0);
+			const targetWidth = targetRect?.width ?? (targetRect ? targetRect.right - targetRect.left : 0);
+
+			if (targetRect && (targetHeight > 0 || targetWidth > 0) && scrollContainer) {
+				const pageBounds = pageEl.getBoundingClientRect();
+				const isPageOff = isPageCompletelyOffScreen(pageBounds, containerRect ?? scrollContainer.getBoundingClientRect());
+				logDebug(
+					"pdf",
+					`adapter.scrollToRect: targetRect=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}, ${targetRect.left.toFixed(1)}, ${targetRect.right.toFixed(1)}], containerRect=[${containerRect?.top.toFixed(1) ?? 0}, ${containerRect?.bottom.toFixed(1) ?? 0}, ${containerRect?.left.toFixed(1) ?? 0}, ${containerRect?.right.toFixed(1) ?? 0}]`
+				);
+				const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
+					behavior: "smooth",
+					forceCenter: isPageOff,
+				});
+				if (!scrolled) {
+					logDebug("pdf", "adapter.scrollToRect: highlight is already on-screen, skipping scroll");
+				} else {
+					logDebug("pdf", "adapter.scrollToRect: scrolled container for highlight");
+				}
+				return;
+			}
+
+			this.scrollPageIntoView(pageNumber);
 		},
 
 		executeNativeFind(command: {
