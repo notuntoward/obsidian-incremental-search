@@ -53,7 +53,7 @@ To search for a literal quote character inside a quoted phrase, escape it with a
 **Extra spaces are literal.** One space between words is a flexible gap; two or more spaces require that many literal spaces in the note.
 
 > [!TIP]
-> In PDFs, matches must start at word boundaries and gaps between words are bounded. This still lets you type a prefix like `modalit` to match `modalities`, while avoiding false matches that start mid-word or span unrelated paragraphs.
+> In PDFs, gaps between words are bounded. This still lets you type a prefix like `modalit` to match `modalities`, while avoiding false matches that span unrelated paragraphs.
 
 ## Commands & keyboard shortcuts
 

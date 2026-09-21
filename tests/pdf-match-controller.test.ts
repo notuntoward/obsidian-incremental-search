@@ -6,6 +6,7 @@ import {
 	deduplicateRepeatedPdfMatches,
 	decorateNativeSelectedHighlightFragments,
 } from "../src/pdf/pdf-match-controller";
+import { findWildcardMatches } from "../src/engine";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
 import * as colors from "../src/utils/colors";
@@ -113,14 +114,23 @@ describe("deduplicateRepeatedPdfMatches", () => {
 	});
 });
 
+// PDF.js normalizes every end-of-line marker to a single space before handing page
+// text to findController.match(), so the page arrives as one unbroken string with no
+// line structure left to anchor to (paragraph breaks are not preserved either).
+// Unbounded, findWildcardMatches() is free to pair the first occurrence of the
+// leading token anywhere on the page with the last occurrence of the trailing token,
+// producing a match that runs from near the first character of the page to near the
+// last one (e.g. an unquoted "d factor" spanning from an early "d" to a late
+// "factor"). Commit 63a8e48 "Fix native PDF wildcard search and navigation" added
+// the guard exercised below: each flexible gap is bounded, so unrelated paragraphs
+// are not swallowed while incremental prefix matching such as "modalit" ->
+// "modalities" still works. The guard is about gap size, not about confining a match
+// to one visual line: a match may legitimately span several visual lines as long as
+// each gap stays within the bound. Non-greedy tightening comes from the shared
+// Layer 1 kernel, so PDF and Markdown match identically.
 describe("findPdfWildcardMatches", () => {
-	it("keeps wildcard token sequences within PDF.js line boundaries", () => {
-		const pageContent = [
-			"PEDro criteria apply across intervention modalities.",
-			"interventions, for which PEDro is widely accepted.",
-			"instrument across all intervention types was preferred.",
-			"exercise modality and intensity were analyzed.",
-		].join("\n");
+	it("keeps incremental prefix matching such as 'modalit' matching 'modalities'", () => {
+		const pageContent = "PEDro criteria apply across intervention modalities.";
 
 		const matches = findPdfWildcardMatches(pageContent, "intervention modalit", false);
 
@@ -128,6 +138,14 @@ describe("findPdfWildcardMatches", () => {
 		expect(pageContent.slice(matches[0].from, matches[0].to)).toBe(
 			"intervention modalit"
 		);
+	});
+
+	it("rejects a token pair whose flexible gap exceeds the bound", () => {
+		const pageContent = `intervention ${"x".repeat(300)} modalities`;
+
+		const matches = findPdfWildcardMatches(pageContent, "intervention modalit", false);
+
+		expect(matches).toHaveLength(0);
 	});
 
 	it("skips distant first tokens after PDF.js removes visual line boundaries", () => {
@@ -143,6 +161,62 @@ describe("findPdfWildcardMatches", () => {
 		expect(matches).toHaveLength(1);
 		const matchedText = pageContent.slice(matches[0].from, matches[0].to);
 		expect(matchedText).toBe("to better");
+	});
+});
+
+describe("Bug 2: unquoted space-as-wildcard must use the markdown matching kernel", () => {
+	// Page 2 of Moroney02ciecam02ColorAppearance.pdf, "Data Sets" section, flattened
+	// the way PDF.js hands page text to findController.match(): every end-of-line
+	// marker has been normalized to a single space. This is the exact text behind
+	// Screenshot 2B, where an unquoted "d factor" produced a 4-line mangled envelope
+	// from "color appearance experiments..." down to "D factor".
+	const dataSetsPage2 = [
+		"collection of color appearance experiments. The",
+		"corresponding color data sets9,10 were used for the",
+		"optimization of the chromatic adaptation transform and the",
+		"D factor. The LUTCHI color appearance data11,12 was the",
+	].join(" ");
+
+	it("tightens \"d factor\" to the nearest 'd' instead of drawing the 4-line envelope", () => {
+		const matches = findPdfWildcardMatches(dataSetsPage2, "d factor", false);
+
+		expect(matches).toHaveLength(1);
+		expect(dataSetsPage2.slice(matches[0].from, matches[0].to).toLowerCase()).toBe(
+			"d factor"
+		);
+	});
+
+	it("returns exactly the ranges the markdown kernel returns for the same page text", () => {
+		const expected = findWildcardMatches(dataSetsPage2, "d factor", 0, false).map((m) => ({
+			from: m.from,
+			to: m.to,
+		}));
+		const actual = findPdfWildcardMatches(dataSetsPage2, "d factor", false).map((m) => ({
+			from: m.from,
+			to: m.to,
+		}));
+
+		expect(actual).toEqual(expected);
+	});
+
+	it("tightens every 'factor' occurrence to its nearest preceding 'd'", () => {
+		const page = "color data sets and the D factor plus a degree of D factor";
+
+		const matches = findPdfWildcardMatches(page, "d factor", false);
+
+		expect(matches.map((m) => page.slice(m.from, m.to).toLowerCase())).toEqual([
+			"d factor",
+			"d factor",
+		]);
+	});
+
+	it("lets a wildcard match span visual line breaks, exactly like markdown", () => {
+		const page = "the model is defined\nin terms of degree\nfactors are important";
+
+		const matches = findPdfWildcardMatches(page, "d factor", false);
+
+		expect(matches).toHaveLength(1);
+		expect(page.slice(matches[0].from, matches[0].to)).toContain("\n");
 	});
 });
 

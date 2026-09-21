@@ -1,5 +1,5 @@
 import { SearchDirection, IncrementalSearchSettings, shouldShowAllMatches } from "../types";
-import { isCaseSensitive, parseWildcardQuery } from "../engine";
+import { findWildcardMatches, isCaseSensitive, isWithinMaxGap, parseWildcardQuery } from "../engine";
 import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition } from "./types";
 import { PdfViewAdapter } from "./pdf-view-adapter";
 import { clearAllPdfHighlights } from "./highlight-layer";
@@ -45,65 +45,33 @@ export function processPdfQuery(
 }
 
 /**
- * Applies markdown's line-scoped wildcard semantics to PDF.js page text while
+ * Bound on the flexible gap between consecutive wildcard tokens in PDF page text.
+ *
+ * PDF.js flattens every end-of-line marker to a space before it hands page text to
+ * the find controller, so the page arrives as one unbroken string with no line
+ * structure. Without a bound, an unquoted query such as "d factor" could pair the
+ * first "d" on the page with the last "factor" and return a single match spanning
+ * the whole page. Bounding the gap keeps a match to a local neighborhood while
+ * still allowing it to span visual lines.
+ */
+export const PDF_WILDCARD_MAX_GAP_CHARS = 256;
+
+/**
+ * Applies markdown's space-as-wildcard semantics to PDF.js page text while
  * preserving the page-relative offsets expected by the native find controller.
+ *
+ * Token sequencing and non-greedy tightening come from the shared Layer 1 kernel
+ * (`findWildcardMatches`), so PDF and Markdown match identically. Page text has
+ * already had every end-of-line marker normalized to a space by PDF.js, so a match
+ * may span visual lines; only the flexible gap between its tokens is bounded, via
+ * the same `isWithinMaxGap` rule the kernel applies for `maxGapChars`.
  */
 export function findPdfWildcardMatches(pageContent: string, query: string, caseSensitive: boolean) {
 	const tokens = parseWildcardQuery(query, caseSensitive);
 	if (tokens.length === 0) return [];
-	const haystack = caseSensitive ? pageContent : pageContent.toLowerCase();
-	const matches = [];
-	let lineStart = 0;
-	const findTokenStart = (token: string, from: number, lineEnd: number) => {
-		let tokenStart = haystack.indexOf(token, from);
-		while (tokenStart !== -1 && tokenStart < lineEnd) {
-			if (tokenStart === 0 || !/[\p{L}\p{N}_]/u.test(haystack[tokenStart - 1])) {
-				return tokenStart;
-			}
-			tokenStart = haystack.indexOf(token, tokenStart + 1);
-		}
-		return -1;
-	};
-
-	while (lineStart <= pageContent.length) {
-		const newlineIndex = pageContent.indexOf("\n", lineStart);
-		const lineEnd = newlineIndex === -1 ? pageContent.length : newlineIndex;
-		let firstTokenStart = findTokenStart(tokens[0], lineStart, lineEnd);
-		while (firstTokenStart !== -1 && firstTokenStart < lineEnd) {
-			const chars = [{ from: firstTokenStart, to: firstTokenStart + tokens[0].length }];
-			let previousEnd = chars[0].to;
-			let valid = true;
-
-			for (let i = 1; i < tokens.length; i++) {
-				const tokenStart = findTokenStart(tokens[i], previousEnd, lineEnd);
-				// PDF.js removes EOL markers during normalization. Bound each wildcard
-				// gap to prevent a token on one visual line consuming later paragraphs.
-				if (tokenStart === -1 || tokenStart >= lineEnd || tokenStart - previousEnd > 256) {
-					valid = false;
-					break;
-				}
-				const tokenEnd = tokenStart + tokens[i].length;
-				chars.push({ from: tokenStart, to: tokenEnd });
-				previousEnd = tokenEnd;
-			}
-
-			if (valid) {
-				matches.push({ from: firstTokenStart, to: previousEnd, chars });
-			}
-			firstTokenStart = findTokenStart(tokens[0], firstTokenStart + 1, lineEnd);
-		}
-		if (newlineIndex === -1) break;
-		lineStart = newlineIndex + 1;
-	}
-
-	const nonOverlappingMatches = [];
-	let previousEnd = -1;
-	for (const match of matches) {
-		if (match.from < previousEnd) continue;
-		nonOverlappingMatches.push(match);
-		previousEnd = match.to;
-	}
-	return nonOverlappingMatches;
+	return findWildcardMatches(pageContent, tokens, 0, caseSensitive).filter((match) =>
+		isWithinMaxGap(match.chars, PDF_WILDCARD_MAX_GAP_CHARS)
+	);
 }
 
 const MAX_PDF_MATCH_REPEAT_DISTANCE = 512;
