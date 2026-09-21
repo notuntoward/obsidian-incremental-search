@@ -866,7 +866,7 @@ describe("session: markdown smart search scrolling", () => {
     expect(scrollBySpy).not.toHaveBeenCalled();
   });
 
-  it("scrolls and centers vertically when next match is off-screen vertically", () => {
+  it("scrolls with minimal delta vertically when next match is partially off-screen vertically", () => {
     const scrollBySpy = vi.fn();
     const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
     const scrollDOM = {
@@ -876,14 +876,14 @@ describe("session: markdown smart search scrolling", () => {
       scrollTop: 0,
     };
 
-    const state = EditorState.create({ doc: "first line\nsecond line" });
+    const state = EditorState.create({ doc: "first line\nsecond line\nthird line" });
     const view: any = {
       state,
       scrollDOM,
       dom: {
         querySelector: () => null,
       },
-      // Target [590, 610], center 600. Container [100, 600], center 350. deltaY = 250
+      // Target [590, 610] is partially visible in container [100, 600]. Minimal deltaY = 610 - 600 = 10
       coordsAtPos: () => ({
         top: 590,
         bottom: 610,
@@ -896,12 +896,47 @@ describe("session: markdown smart search scrolling", () => {
     scrollToMatch(view, { from: 20, to: 30 });
     expect(scrollBySpy).toHaveBeenCalledWith({
       left: 0,
-      top: 250,
+      top: 18,
       behavior: "smooth",
     });
   });
 
-  it("scrolls and centers horizontally when note is zoomed and next match is off-screen horizontally", () => {
+  it("scrolls and centers vertically when next match is entirely off-screen vertically", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "first line\nsecond line\nthird line" });
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      // Target [700, 720], center 710. Container [100, 600], center 350. deltaY = 360
+      coordsAtPos: () => ({
+        top: 700,
+        bottom: 720,
+        left: 50,
+        right: 150,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 20, to: 30 });
+    expect(scrollBySpy).toHaveBeenCalledWith({
+      left: 0,
+      top: 360,
+      behavior: "smooth",
+    });
+  });
+
+  it("scrolls with minimal delta horizontally when note is zoomed and next match is partially off-screen horizontally", () => {
     const scrollBySpy = vi.fn();
     const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
     const scrollDOM = {
@@ -918,7 +953,7 @@ describe("session: markdown smart search scrolling", () => {
       dom: {
         querySelector: () => null,
       },
-      // Target [780, 850], center 815. Container [0, 800], center 400. deltaX = 415. Vertical is on-screen (top 200, bottom 220).
+      // Target [780, 850], container [0, 800]. Minimal deltaX = 850 - 800 = 50. Vertical is on-screen (top 200, bottom 220) -> deltaY = 0.
       coordsAtPos: () => ({
         top: 200,
         bottom: 220,
@@ -930,7 +965,43 @@ describe("session: markdown smart search scrolling", () => {
 
     scrollToMatch(view, { from: 50, to: 60 });
     expect(scrollBySpy).toHaveBeenCalledWith({
-      left: 415,
+      left: 58,
+      top: 0,
+      behavior: "smooth",
+    });
+  });
+
+  it("scrolls and centers horizontally when note is zoomed and next match is entirely off-screen horizontally", () => {
+    const scrollBySpy = vi.fn();
+    const containerRect = { top: 100, bottom: 600, left: 0, right: 800, width: 800, height: 500 };
+    const scrollDOM = {
+      getBoundingClientRect: () => containerRect,
+      scrollBy: scrollBySpy,
+      scrollLeft: 0,
+      scrollTop: 0,
+    };
+
+    const state = EditorState.create({ doc: "very long line with zoomed text" });
+    const view: any = {
+      state,
+      scrollDOM,
+      dom: {
+        querySelector: () => null,
+      },
+      // Target left 850, right 920, center 885. Container [0, 800], center 400 -> deltaX = 485.
+      // Vertical center 210, container center 350 -> deltaY = -140.
+      coordsAtPos: () => ({
+        top: 200,
+        bottom: 220,
+        left: 850,
+        right: 920,
+      }),
+      dispatch: vi.fn(),
+    };
+
+    scrollToMatch(view, { from: 50, to: 60 });
+    expect(scrollBySpy).toHaveBeenCalledWith({
+      left: 485,
       top: -140,
       behavior: "smooth",
     });

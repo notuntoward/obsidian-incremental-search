@@ -10,6 +10,8 @@ export interface BoundingRectLike {
 	width?: number;
 }
 
+export const DEFAULT_SCROLL_PADDING = 8;
+
 /**
  * Checks whether a target bounding box is completely or partially outside
  * the top or bottom boundaries of the container viewport (i.e. not fully visible).
@@ -18,7 +20,7 @@ export interface BoundingRectLike {
 export function isOffScreenVertically(
 	target: BoundingRectLike,
 	viewport: BoundingRectLike,
-	padding = 0
+	padding = DEFAULT_SCROLL_PADDING
 ): boolean {
 	return target.top < viewport.top + padding || target.bottom > viewport.bottom - padding;
 }
@@ -31,7 +33,7 @@ export function isOffScreenVertically(
 export function isOffScreenHorizontally(
 	target: BoundingRectLike,
 	viewport: BoundingRectLike,
-	padding = 0
+	padding = DEFAULT_SCROLL_PADDING
 ): boolean {
 	return target.left < viewport.left + padding || target.right > viewport.right - padding;
 }
@@ -45,6 +47,52 @@ export function isPageCompletelyOffScreen(
 	viewport: BoundingRectLike
 ): boolean {
 	return pageBounds.bottom < viewport.top || pageBounds.top > viewport.bottom;
+}
+
+/**
+ * Checks whether a target bounding box is completely disjoint from the container viewport
+ * along either the vertical or horizontal axis (i.e. entirely off-screen).
+ */
+export function isTargetCompletelyOffScreen(
+	target: BoundingRectLike,
+	viewport: BoundingRectLike
+): boolean {
+	return isPageCompletelyOffScreen(target, viewport) ||
+		target.right <= viewport.left ||
+		target.left >= viewport.right;
+}
+
+/**
+ * Calculates the minimal delta required to bring a target span inside a container span
+ * along a single axis (nearest edge scroll).
+ * If the target is already within [containerStart + padding, containerStart + containerSize - padding],
+ * returns 0.
+ */
+export function computeMinimalAxisDelta(
+	targetStart: number,
+	targetSize: number,
+	containerStart: number,
+	containerSize: number,
+	padding = DEFAULT_SCROLL_PADDING
+): number {
+	const minBound = containerStart + padding;
+	const maxBound = containerStart + containerSize - padding;
+
+	// If target is larger than container viewport, align to nearest boundary (minBound first)
+	if (targetSize > containerSize - 2 * padding) {
+		if (targetStart !== minBound) {
+			return targetStart - minBound;
+		}
+		return 0;
+	}
+
+	if (targetStart < minBound) {
+		return targetStart - minBound;
+	}
+	if (targetStart + targetSize > maxBound) {
+		return (targetStart + targetSize) - maxBound;
+	}
+	return 0;
 }
 
 /**
@@ -74,6 +122,7 @@ export interface ComputeScrollDeltasOptions {
 	padding?: number;
 	forceCenter?: boolean;
 	isZoomedH?: boolean;
+	widgetRect?: BoundingRectLike | null;
 }
 
 export interface ScrollTargetOptions {
@@ -81,44 +130,68 @@ export interface ScrollTargetOptions {
 	behavior?: ScrollBehavior;
 	forceCenter?: boolean;
 	isZoomedH?: boolean;
+	widgetRect?: BoundingRectLike | null;
 }
 
 /**
- * Calculates the horizontal and vertical deltas required to center a target
- * within a container viewport if it is outside the viewport.
- * If the target is not off-screen along any axis and forceCenter is false,
- * both deltas are 0.
- * If the target is off-screen (or forceCenter is true), deltaY centers the
- * target vertically, and deltaX centers the target horizontally if off-screen
- * horizontally, zoomed, or forceCenter.
+ * Calculates the horizontal and vertical deltas required to bring a target
+ * within a container viewport.
+ * - If the target is fully within the viewport (and forceCenter is false), both deltas are 0.
+ * - If the target is partially visible (truncated at an edge), minimal scroll deltas ("just enough")
+ *   are computed to bring the target fully into view without jumping to center.
+ * - If the target is entirely off-screen (or forceCenter is true), it centers the target in the
+ *   viewport (vertically, and horizontally if off-screen/zoomed).
  */
 export function computeScrollDeltas(
 	target: BoundingRectLike,
 	containerRect: BoundingRectLike,
-	options: number | ComputeScrollDeltasOptions = 0
+	options: number | ComputeScrollDeltasOptions = DEFAULT_SCROLL_PADDING
 ): ScrollCenterDelta {
-	const padding = typeof options === "number" ? options : (options.padding ?? 0);
+	const padding = typeof options === "number" ? options : (options.padding ?? DEFAULT_SCROLL_PADDING);
 	const forceCenter = typeof options === "object" ? Boolean(options.forceCenter) : false;
 	const isZoomedH = typeof options === "object" ? options.isZoomedH : undefined;
+	const widgetRect = typeof options === "object" ? options.widgetRect : null;
 
 	const isOffV = isOffScreenVertically(target, containerRect, padding);
 	const isOffH = isOffScreenHorizontally(target, containerRect, padding);
-
-	if (!forceCenter && !isOffV && !isOffH) {
-		return { isOffV: false, isOffH: false, deltaX: 0, deltaY: 0 };
-	}
 
 	const targetWidth = target.width ?? (target.right - target.left);
 	const targetHeight = target.height ?? (target.bottom - target.top);
 	const containerWidth = containerRect.width ?? (containerRect.right - containerRect.left);
 	const containerHeight = containerRect.height ?? (containerRect.bottom - containerRect.top);
 
-	const deltaY = computeAxisCenterDelta(target.top, targetHeight, containerRect.top, containerHeight);
+	const isEntirelyOff = isTargetCompletelyOffScreen(target, containerRect);
 
-	const shouldCenterH = isOffH || isZoomedH === true;
-	const deltaX = shouldCenterH
-		? computeAxisCenterDelta(target.left, targetWidth, containerRect.left, containerWidth)
-		: 0;
+	// Case 1: Entirely off-screen or forceCenter -> Center the target
+	if (forceCenter || isEntirelyOff) {
+		const deltaY = computeAxisCenterDelta(target.top, targetHeight, containerRect.top, containerHeight);
+		const shouldCenterH = isOffH || isZoomedH === true;
+		const deltaX = shouldCenterH
+			? computeAxisCenterDelta(target.left, targetWidth, containerRect.left, containerWidth)
+			: 0;
+		return { isOffV, isOffH, deltaX, deltaY };
+	}
+
+	// Case 2: Target is at least partially visible within the viewport
+	// Compute minimal "just enough" delta to bring truncated edges and outline box into view
+	let deltaY = computeMinimalAxisDelta(target.top, targetHeight, containerRect.top, containerHeight, padding);
+	let deltaX = computeMinimalAxisDelta(target.left, targetWidth, containerRect.left, containerWidth, padding);
+
+	// Check if target overlaps the search box widget
+	if (widgetRect && deltaY === 0 && deltaX === 0) {
+		const overlapsWidget =
+			target.bottom > widgetRect.top &&
+			target.top < widgetRect.bottom &&
+			target.right > widgetRect.left &&
+			target.left < widgetRect.right;
+		if (overlapsWidget && target.top < widgetRect.bottom + padding) {
+			deltaY = target.top - (widgetRect.bottom + padding);
+		}
+	}
+
+	if (!forceCenter && !isOffV && !isOffH && deltaY === 0 && deltaX === 0) {
+		return { isOffV: false, isOffH: false, deltaX: 0, deltaY: 0 };
+	}
 
 	return { isOffV, isOffH, deltaX, deltaY };
 }
@@ -140,7 +213,7 @@ export function scrollTargetIntoViewIfNeeded(
 	}
 
 	const containerRect = scrollContainer.getBoundingClientRect();
-	const padding = options.padding ?? 0;
+	const padding = options.padding ?? DEFAULT_SCROLL_PADDING;
 	const forceCenter = options.forceCenter ?? false;
 	const isZoomedH =
 		options.isZoomedH ??
@@ -152,9 +225,14 @@ export function scrollTargetIntoViewIfNeeded(
 		padding,
 		forceCenter,
 		isZoomedH,
+		widgetRect: options.widgetRect,
 	});
 
-	if (!forceCenter && !isOffV && !isOffH) {
+	if (!forceCenter && !isOffV && !isOffH && deltaX === 0 && deltaY === 0) {
+		return false;
+	}
+
+	if (deltaX === 0 && deltaY === 0) {
 		return false;
 	}
 
@@ -277,6 +355,11 @@ export const CURRENT_MATCH_SELECTOR_PARTS = [
  * it was produced by PDF.js natively or injected by this plugin.
  */
 export const CURRENT_MATCH_SELECTOR = CURRENT_MATCH_SELECTOR_PARTS.join(", ");
+
+/**
+ * Selector that matches all search match elements (active or inactive) in PDF.js or plugin layers.
+ */
+export const ALL_MATCHES_SELECTOR = ".highlight, .incsearch-pdf-match";
 
 /**
  * Deliberately narrower than CURRENT_MATCH_SELECTOR: only PDF.js's own selected fragments

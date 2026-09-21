@@ -69,6 +69,78 @@ before editing, and extend the cited test alongside your change.
   (`incremental-search:forward`, etc.) — do not reintroduce the old id or
   string-match against it anywhere.
 
+- **Never mutate `pdfViewer.currentPageNumber` before `executeNativeFind` to
+  "steer" the initial match selection.** PDF.js's `PDFFindController` uses
+  its own internal `_selected.pageIdx / _selected.matchIdx` state — not
+  `currentPageNumber` — to decide where scanning begins. Setting
+  `currentPageNumber` before a search is a side-effectful no-op at best and
+  actively harmful at worst: it can cause PDF.js to start scanning from the
+  wrong page and select matches that are completely above or below the
+  visible viewport. An earlier `alignToViewportPage()` helper was an example
+  of this anti-pattern and was removed. Do not re-introduce it.
+
+- **Scroll suppression must use match-element geometry, not page geometry.**
+  `isPageCompletelyOffScreen` answers "is any pixel of this page visible?",
+  not "is this specific match visible?". A page can be 90% off-screen with
+  only its footer in view while the selected match is near its header. Always
+  reach for `getCompoundMatchBoundingRect` + `scrollTargetIntoViewIfNeeded`
+  (from `src/utils/scroll.ts`) to make the visibility decision, regardless of
+  whether PDF.js provides an `element` argument in `scrollMatchIntoView` or
+  only page-level `{ pageIdx, matchIdx }` params. The page-level path is a
+  timing-only fallback (element not yet in the DOM), not a different code path
+  with different geometry logic.
+
+- **Tests for PDF scroll behaviour must use realistic element geometry, not
+  just internal-state assertions.** A test that only checks "was
+  `currentPageNumber` set?" or "was `executeNativeFind` called?" does not
+  prove that the viewport moved (or did not move). Every scroll-suppression
+  fix must be accompanied by a test that:
+  1. Creates actual `HTMLElement` mocks with `getBoundingClientRect` returning
+     real viewport-relative coordinates.
+  2. Attaches those elements to the mock `containerEl` so
+     `getCompoundMatchBoundingRect` can find them via `querySelectorAll`.
+  3. Asserts `scrollBy` / `scrollTo` are **not** called when the match is
+     already within the container rect, and **are** called with the correct
+     delta when the match is outside it.
+  Tests that skip geometry mocks give false confidence and have historically
+  allowed the bugs described above to ship.
+
+- **Initial search steering across multi-page/boundary viewports must queue
+  deferred matches (`pendingSteeredMatches`) to avoid skipping matches on
+  forward advance.** When a PDF view straddles a boundary between visible pages
+  (e.g., bottom of Page 3 and top of Page 4), PDF.js often delivers an on-screen
+  match on the later page because its internal cursor started there, even though
+  an earlier match is visible in the viewport on the preceding page.
+  `setupFindControllerHook` steers the initial selection to the true earliest
+  visible match in reading order. Crucially, PDF.js's native `PDFFindController`
+  stores its selection in private state (`#selected`); mutating
+  `findController._selected` does NOT change PDF.js's internal pointer. If the
+  controller immediately dispatches `executeNativeFind({ type: "again" })` on the
+  next user advance, PDF.js advances from its own delivered match rather than our
+  steered match, skipping all intermediate matches (e.g., jumping from Match 17
+  to 18, skipping 17). Therefore, steering must populate
+  `pendingSteeredMatches`, and `advance("forward")` must consume this queue
+  before delegating to native find. Any change to `advance()` or initial
+  search steering must preserve this synchronization; see
+  `tests/pdf-match-controller.test.ts` ("does not skip the true next match when
+  advancing forward after initial search steering").
+
+- **Minimal scrolling ("just enough") must expose the complete match outline box
+  in all four directions using `DEFAULT_SCROLL_PADDING`.** Current match
+  elements have CSS outline styling (`2px solid`, `outline-offset: 1px`,
+  `margin: -2px -1px`) that extends 3–5px beyond the text node's bounding rect.
+  If minimal scrolling (`computeMinimalAxisDelta`, `computeScrollDeltas`,
+  `scrollTargetIntoViewIfNeeded`) uses zero padding, elements touching or flush
+  with the viewport edge will report `delta = 0` and `isOff = false`, cutting off
+  the outline border against the container or toolbar edge. Always default to
+  `DEFAULT_SCROLL_PADDING = 8` (defined in `src/utils/scroll.ts`) across all four
+  directions (above, below, left, right). Do not pass `padding: 0` or remove
+  padding buffers. Minimal scroll applies when a match is partially visible; if a
+  match is entirely off-screen along an axis, it centers. This is guarded by
+  "performs minimal scroll in all four directions (above, below, left, right) to
+  expose the full match box with padding buffer" and "never passes padding: 0" in
+  `tests/scroll.test.ts`.
+
 ## Build verification rule
 
 This project produces a pre-built artifact (`main.js`) that the Obsidian runtime

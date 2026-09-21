@@ -9,10 +9,14 @@ import { logDebug, describeElement } from "../utils/logger";
 import { getScrollContainer } from "./pdf-view-adapter";
 import {
 	isPageCompletelyOffScreen,
+	isTargetCompletelyOffScreen,
 	scrollTargetIntoViewIfNeeded,
 	getCompoundMatchBoundingRect,
 	isMatchElementCandidate,
+	CURRENT_MATCH_SELECTOR,
+	ALL_MATCHES_SELECTOR,
 	NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR,
+	BoundingRectLike,
 } from "../utils/scroll";
 
 /**
@@ -347,8 +351,10 @@ export class PdfMatchController {
 	originalViewerScrollPageIntoViews: Map<any, any> = new Map();
 	userHasManuallyScrolled = false;
 	matchScrollPending = false;
+	isInitialSearchPending = false;
 	isProgrammaticScrolling = false;
 	pendingTargetPage?: number;
+	pendingSteeredMatches: Array<{ el: HTMLElement; pageNumber: number; activeIndex: number }> = [];
 	private matchScrollTimeout?: number;
 	private programmaticScrollTimeout?: number;
 
@@ -405,6 +411,38 @@ export class PdfMatchController {
 				}, 40);
 			}
 		});
+	}
+
+	selectAndScrollMatch(matchEl: HTMLElement, pageNumber: number) {
+		const prevSelected = Array.from(
+			this.adapter.containerEl.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
+		);
+		for (const el of prevSelected) {
+			el.classList.remove("selected", "is-selected", "is-current");
+		}
+		matchEl.classList.add("selected");
+		if (matchEl.classList.contains("begin")) {
+			let next = matchEl.nextElementSibling as HTMLElement | null;
+			while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
+				next.classList.add("selected");
+				if (next.classList.contains("end")) break;
+				next = next.nextElementSibling as HTMLElement | null;
+			}
+		}
+
+		const scrollContainer = getScrollContainer(this.adapter.containerEl);
+		if (scrollContainer) {
+			const pageEl = this.adapter.getPageElement(pageNumber);
+			const targetRect =
+				getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ??
+				matchEl.getBoundingClientRect();
+			this.markProgrammaticScroll();
+			scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
+				behavior: "smooth",
+				forceCenter: false,
+			});
+			this.cancelPendingMatchScroll();
+		}
 	}
 
 	scrollActiveMatchIntoView(pageNumber?: number): boolean {
@@ -578,35 +616,10 @@ export class PdfMatchController {
 				const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
 				if (!scrollContainer || !containerRect) return;
 
-				const targetEl = (params?.element ?? (typeof params === "object" ? params : null)) as HTMLElement | undefined;
-				if (targetEl && typeof targetEl.getBoundingClientRect === "function") {
-					const pageEl = targetEl.closest?.(".page") as HTMLElement | null;
-					const targetRect =
-						getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ??
-						targetEl.getBoundingClientRect();
-					const targetHeight = targetRect.height ?? (targetRect.bottom - targetRect.top);
-					const targetWidth = targetRect.width ?? (targetRect.right - targetRect.left);
-					if (targetHeight > 0 || targetWidth > 0) {
-						logDebug(
-							"pdf",
-							`findController.scrollMatchIntoView: match=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}, ${targetRect.left.toFixed(1)}, ${targetRect.right.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}, ${containerRect.left.toFixed(1)}, ${containerRect.right.toFixed(1)}]`
-						);
-						this.markProgrammaticScroll();
-						const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
-							behavior: "smooth",
-							forceCenter: hadPendingTargetPage,
-						});
-						if (!scrolled) {
-							logDebug("pdf", "findController.scrollMatchIntoView: match is already on-screen, skipping scroll!");
-						} else {
-							logDebug("pdf", "findController.scrollMatchIntoView: match is off-screen, scrolled container");
-						}
-						this.cancelPendingMatchScroll();
-						return;
-					}
-				}
+				let targetEl = (params?.element ??
+					(typeof params === "object" && typeof (params as any)?.getBoundingClientRect === "function" ? params : null)) as HTMLElement | undefined;
 
-				const pageIndex =
+				let pageIndex =
 					typeof params === "number"
 						? params
 						: typeof params?.pageIndex === "number"
@@ -615,11 +628,173 @@ export class PdfMatchController {
 								? params.selected.pageIdx
 								: (this.adapter.getActiveFindMatchInfo?.()?.pageIndex ?? -1);
 
-				const pageNumber = pageIndex >= 0 ? pageIndex + 1 : -1;
+				let pageNumber = pageIndex >= 0 ? pageIndex + 1 : -1;
+				let pageEl = targetEl?.closest?.(".page") as HTMLElement | null
+					?? (pageNumber > 0 ? this.adapter.getPageElement(pageNumber) : null);
+
+				let targetRect: BoundingRectLike | null = targetEl
+					? (getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ?? targetEl.getBoundingClientRect())
+					: getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl);
+
+				if (this.isInitialSearchPending) {
+					const visiblePages = this.adapter.getVisiblePageNumbers().slice().sort((a, b) => a - b);
+					let visibleMatchEl: HTMLElement | null = null;
+					let visibleMatchRect: BoundingRectLike | null = null;
+					let visiblePageNum = -1;
+
+					for (const pNum of visiblePages) {
+						const pEl = this.adapter.getPageElement(pNum);
+						if (!pEl) continue;
+						const candidates = Array.from(
+							pEl.querySelectorAll<HTMLElement>(ALL_MATCHES_SELECTOR)
+						);
+						for (const candidate of candidates) {
+							if (typeof candidate.getBoundingClientRect !== "function") continue;
+							const r = candidate.getBoundingClientRect();
+							if (r.width === 0 && r.height === 0) continue;
+							if (!isTargetCompletelyOffScreen(r, containerRect)) {
+								// Found a visible match fragment. Resolve head element if it's a join fragment.
+								let headEl = candidate;
+								if (headEl.classList.contains("middle") || headEl.classList.contains("end")) {
+									let prev = headEl.previousElementSibling as HTMLElement | null;
+									while (prev && (prev.classList.contains("middle") || prev.classList.contains("begin"))) {
+										headEl = prev;
+										if (prev.classList.contains("begin")) break;
+										prev = prev.previousElementSibling as HTMLElement | null;
+									}
+								}
+								visibleMatchEl = headEl;
+								visibleMatchRect = r;
+								visiblePageNum = pNum;
+								break;
+							}
+						}
+						if (visibleMatchEl) break;
+					}
+
+					if (visibleMatchEl && visibleMatchRect && visibleMatchEl !== targetEl) {
+						logDebug(
+							"pdf",
+							`findController.scrollMatchIntoView: steering initial search to visible match on page ${visiblePageNum}`
+						);
+						const deliveredTargetEl = targetEl;
+
+						// Gather all match head elements in DOM order across visible pages
+						const allMatchHeads: Array<{ el: HTMLElement; pageNum: number }> = [];
+						for (const pNum of visiblePages) {
+							const pEl = this.adapter.getPageElement(pNum);
+							if (!pEl) continue;
+							const heads = Array.from(
+								pEl.querySelectorAll<HTMLElement>(
+									".highlight:not(.middle):not(.end), .incsearch-pdf-match"
+								)
+							);
+							for (const h of heads) {
+								allMatchHeads.push({ el: h, pageNum: pNum });
+							}
+						}
+
+						const firstIdx = allMatchHeads.findIndex((m) => m.el === visibleMatchEl);
+						const deliveredIdx = deliveredTargetEl
+							? allMatchHeads.findIndex((m) => m.el === deliveredTargetEl)
+							: -1;
+
+						const prevSelected = Array.from(
+							this.adapter.containerEl.querySelectorAll<HTMLElement>(
+								CURRENT_MATCH_SELECTOR
+							)
+						);
+						for (const el of prevSelected) {
+							el.classList.remove("selected", "is-selected", "is-current");
+						}
+						visibleMatchEl.classList.add("selected");
+						if (visibleMatchEl.classList.contains("begin")) {
+							let next = visibleMatchEl.nextElementSibling as HTMLElement | null;
+							while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
+								next.classList.add("selected");
+								if (next.classList.contains("end")) break;
+								next = next.nextElementSibling as HTMLElement | null;
+							}
+						}
+
+						targetEl = visibleMatchEl;
+						pageNumber = visiblePageNum;
+						pageIndex = visiblePageNum - 1;
+						pageEl = this.adapter.getPageElement(visiblePageNum);
+						targetRect = getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ?? visibleMatchRect;
+
+						let baseActiveIndex = 0;
+						if (findController) {
+							const pageMatches = pageEl
+								? Array.from(pageEl.querySelectorAll<HTMLElement>(".highlight:not(.middle):not(.end), .incsearch-pdf-match"))
+								: [];
+							const matchIdx = Math.max(0, pageMatches.indexOf(visibleMatchEl));
+							if (findController._selected) {
+								findController._selected.pageIdx = pageIndex;
+								findController._selected.matchIdx = matchIdx;
+							}
+							if (findController.selected) {
+								findController.selected.pageIdx = pageIndex;
+								findController.selected.matchIdx = matchIdx;
+							}
+
+							const pageMatchesArr = (findController as any)?.pageMatches || (findController as any)?._pageMatches;
+							if (Array.isArray(pageMatchesArr)) {
+								let countBefore = 0;
+								for (let p = 0; p < pageIndex && p < pageMatchesArr.length; p++) {
+									if (Array.isArray(pageMatchesArr[p])) {
+										countBefore += pageMatchesArr[p].length;
+									}
+								}
+								baseActiveIndex = countBefore + matchIdx;
+								this.state.activeIndex = baseActiveIndex;
+								this.notifyStateChange();
+							}
+						}
+
+						// Build pendingSteeredMatches queue for deferred matches up to deliveredTarget
+						this.pendingSteeredMatches = [];
+						if (firstIdx !== -1) {
+							const stopIdx = deliveredIdx > firstIdx ? deliveredIdx : allMatchHeads.length - 1;
+							for (let i = firstIdx + 1; i <= stopIdx; i++) {
+								const item = allMatchHeads[i];
+								this.pendingSteeredMatches.push({
+									el: item.el,
+									pageNumber: item.pageNum,
+									activeIndex: baseActiveIndex + (i - firstIdx),
+								});
+							}
+						}
+					}
+				}
+				this.isInitialSearchPending = false;
+
+				const targetHeight = targetRect ? (targetRect.height ?? (targetRect.bottom - targetRect.top)) : 0;
+				const targetWidth = targetRect ? (targetRect.width ?? (targetRect.right - targetRect.left)) : 0;
+
+				if (targetRect && (targetHeight > 0 || targetWidth > 0)) {
+					logDebug(
+						"pdf",
+						`findController.scrollMatchIntoView: match=[${targetRect.top.toFixed(1)}, ${targetRect.bottom.toFixed(1)}, ${targetRect.left.toFixed(1)}, ${targetRect.right.toFixed(1)}], container=[${containerRect.top.toFixed(1)}, ${containerRect.bottom.toFixed(1)}, ${containerRect.left.toFixed(1)}, ${containerRect.right.toFixed(1)}]`
+					);
+					this.markProgrammaticScroll();
+					const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
+						behavior: "smooth",
+						forceCenter: hadPendingTargetPage,
+					});
+					if (!scrolled) {
+						logDebug("pdf", "findController.scrollMatchIntoView: match is already on-screen, skipping scroll!");
+					} else {
+						logDebug("pdf", "findController.scrollMatchIntoView: match is off-screen, scrolled container");
+					}
+					this.cancelPendingMatchScroll();
+					return;
+				}
+
 				if (pageNumber > 0) {
-					const pageEl = this.adapter.getPageElement(pageNumber);
-					if (pageEl && typeof pageEl.getBoundingClientRect === "function") {
-						const pageBounds = pageEl.getBoundingClientRect();
+					const pageElForCheck = pageEl ?? this.adapter.getPageElement(pageNumber);
+					if (pageElForCheck && typeof pageElForCheck.getBoundingClientRect === "function") {
+						const pageBounds = pageElForCheck.getBoundingClientRect();
 						const isOffScreen = isPageCompletelyOffScreen(pageBounds, containerRect);
 						if (!isOffScreen) {
 							this.requestMatchScroll();
@@ -945,9 +1120,12 @@ export class PdfMatchController {
 		clearAllPdfHighlights(this.adapter.containerEl);
 		clearSecondaryHighlights(this.adapter.containerEl);
 
+		this.pendingSteeredMatches = [];
 		if (query.length > 0) {
+			this.isInitialSearchPending = true;
 			this.requestMatchScroll();
 		} else {
+			this.isInitialSearchPending = false;
 			this.cancelPendingMatchScroll();
 		}
 
@@ -1032,8 +1210,40 @@ export class PdfMatchController {
 	}
 
 	advance(direction: SearchDirection) {
+		this.isInitialSearchPending = false;
 		this.requestMatchScroll();
 		this.state.direction = direction;
+
+		if (direction === "forward" && this.pendingSteeredMatches.length > 0) {
+			const next = this.pendingSteeredMatches.shift()!;
+			this.selectAndScrollMatch(next.el, next.pageNumber);
+			this.state.activeIndex = next.activeIndex;
+			this.notifyStateChange();
+			return;
+		}
+
+		if (direction === "backward" && this.pendingSteeredMatches.length > 0) {
+			const steps = this.pendingSteeredMatches.length + 1;
+			this.pendingSteeredMatches = [];
+			if (this.adapter.executeNativeFind && this.state.query) {
+				const { processedQuery, phraseSearch } = processPdfQuery(
+					this.state.query,
+					this.settings.spaceAsWildcard
+				);
+				for (let i = 0; i < steps; i++) {
+					this.adapter.executeNativeFind({
+						query: processedQuery,
+						type: "again",
+						findPrevious: true,
+						highlightAll: this.shouldShowAllMatches(),
+						phraseSearch,
+						caseSensitive: isCaseSensitive(this.state.query),
+					});
+				}
+				this.notifyStateChange();
+			}
+			return;
+		}
 
 		if (this.adapter.executeNativeFind && this.state.query) {
 			const { processedQuery, phraseSearch } = processPdfQuery(
@@ -1082,6 +1292,7 @@ export class PdfMatchController {
 	destroy() {
 		logDebug("pdf", "PdfMatchController destroy called");
 		this.cancelPendingMatchScroll();
+		this.pendingSteeredMatches = [];
 		if (this.programmaticScrollTimeout) {
 			window.clearTimeout(this.programmaticScrollTimeout);
 			this.programmaticScrollTimeout = undefined;
