@@ -49,8 +49,10 @@ before editing, and extend the cited test alongside your change.
   hard-code `.highlight.selected`, `.highlight.is-selected`, or
   `.incsearch-pdf-match.is-current` anywhere under `src/pdf/`. Import
   `NATIVE_CURRENT_MATCH_SELECTOR`, `NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR`,
-  `CURRENT_MATCH_SELECTOR`, `MATCH_ELEMENT_CLASS_TOKENS`, or
-  `isMatchElementCandidate` from `src/utils/scroll.ts` instead (see the
+  `CURRENT_MATCH_SELECTOR`, `MATCH_ELEMENT_CLASS_TOKENS`,
+  `isMatchElementCandidate`, `ALL_MATCHES_SELECTOR`, or
+  `ALL_MATCH_HEADS_SELECTOR` (one entry per match, begin/middle/end fragments
+  excluded) from `src/utils/scroll.ts` instead (see the
   comment block above `NATIVE_CURRENT_MATCH_SELECTOR` there for why this
   exists). `tests/scroll.test.ts` has a static source-scan test, "never
   re-inlines a hardcoded current-match class string in src/pdf/**", that

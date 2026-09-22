@@ -15,6 +15,7 @@ import {
 	isMatchElementCandidate,
 	CURRENT_MATCH_SELECTOR,
 	ALL_MATCHES_SELECTOR,
+	ALL_MATCH_HEADS_SELECTOR,
 	NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR,
 	BoundingRectLike,
 } from "../utils/scroll";
@@ -388,6 +389,13 @@ export class PdfMatchController {
 	/** One-shot guard so the runtime context snapshot is logged once per query. */
 	private steeringContextLogged = false;
 	/**
+	 * Guards the steering re-assert so that several PDF.js events arriving in the
+	 * same frame (text-layer updates fire per page, plus the find-count events)
+	 * collapse into a single animation-frame callback instead of repeating the
+	 * full document scan for every event.
+	 */
+	private steerViewRafPending = false;
+	/**
 	 * Vertical window (in the scroll container's document space) that was on screen
 	 * when the query session started: the view the user was looking at when they
 	 * asked for the search.
@@ -436,6 +444,67 @@ export class PdfMatchController {
 		}, 400);
 	}
 
+	/**
+	 * Latches "the user has taken over the view" and ends the initial-search
+	 * steering window. The frozen search-time viewport is only valid while the
+	 * user has not scrolled since it was captured; once they have, the next query
+	 * must re-capture the window where the user is actually looking instead of
+	 * snapping the view back to the stale one.
+	 */
+	private markUserScrolled() {
+		this.userHasManuallyScrolled = true;
+		this.cancelPendingMatchScroll();
+		this.closeInitialSteering();
+	}
+
+	/**
+	 * Ends the initial-search steering window and discards the frozen search-time
+	 * view, so the next query session re-captures both from scratch.
+	 */
+	private closeInitialSteering() {
+		this.initialSteerWindowOpen = false;
+		this.steeredActiveIndex = -1;
+		this.steeredPageNumber = -1;
+		this.steerWindowStart = undefined;
+		this.steerWindowEnd = undefined;
+	}
+
+	/**
+	 * Moves the "current match" selection onto a match head element: clears every
+	 * element the canonical current-match selector matches, marks the head
+	 * selected, and extends the selection across the begin/middle/end fragments of
+	 * a match that wraps lines or text items.
+	 */
+	private selectMatchHead(headEl: HTMLElement) {
+		const prevSelected = Array.from(
+			this.adapter.containerEl.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
+		);
+		for (const el of prevSelected) {
+			el.classList.remove("selected", "is-selected", "is-current");
+		}
+		headEl.classList.add("selected");
+		if (headEl.classList.contains("begin")) {
+			let next = headEl.nextElementSibling as HTMLElement | null;
+			while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
+				next.classList.add("selected");
+				if (next.classList.contains("end")) break;
+				next = next.nextElementSibling as HTMLElement | null;
+			}
+		}
+	}
+
+	/**
+	 * The element currently marked as the active match: PDF.js's own selected
+	 * text-layer fragment when present, otherwise the plugin-injected mark.
+	 */
+	private getSelectedMatchElement(): HTMLElement | null {
+		return (
+			this.adapter.containerEl.querySelector<HTMLElement>(
+				NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR
+			) ?? this.adapter.containerEl.querySelector<HTMLElement>(CURRENT_MATCH_SELECTOR)
+		);
+	}
+
 	scheduleActiveMatchScroll(pageNumber?: number) {
 		if (this.userHasManuallyScrolled || !this.matchScrollPending) {
 			return;
@@ -466,21 +535,7 @@ export class PdfMatchController {
 	}
 
 	selectAndScrollMatch(matchEl: HTMLElement, pageNumber: number) {
-		const prevSelected = Array.from(
-			this.adapter.containerEl.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
-		);
-		for (const el of prevSelected) {
-			el.classList.remove("selected", "is-selected", "is-current");
-		}
-		matchEl.classList.add("selected");
-		if (matchEl.classList.contains("begin")) {
-			let next = matchEl.nextElementSibling as HTMLElement | null;
-			while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
-				next.classList.add("selected");
-				if (next.classList.contains("end")) break;
-				next = next.nextElementSibling as HTMLElement | null;
-			}
-		}
+		this.selectMatchHead(matchEl);
 
 		const scrollContainer = getScrollContainer(this.adapter.containerEl);
 		if (scrollContainer) {
@@ -654,21 +709,7 @@ export class PdfMatchController {
 		const firstIdx = allMatchHeads.findIndex((m) => m.el === visibleMatchEl);
 		const deliveredIdx = deliveredEl ? allMatchHeads.findIndex((m) => m.el === deliveredEl) : -1;
 
-		const prevSelected = Array.from(
-			this.adapter.containerEl.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
-		);
-		for (const el of prevSelected) {
-			el.classList.remove("selected", "is-selected", "is-current");
-		}
-		visibleMatchEl.classList.add("selected");
-		if (visibleMatchEl.classList.contains("begin")) {
-			let next = visibleMatchEl.nextElementSibling as HTMLElement | null;
-			while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
-				next.classList.add("selected");
-				if (next.classList.contains("end")) break;
-				next = next.nextElementSibling as HTMLElement | null;
-			}
-		}
+		this.selectMatchHead(visibleMatchEl);
 
 		const pageIndex = visiblePageNum - 1;
 		const pageEl = this.adapter.getPageElement(visiblePageNum);
@@ -677,11 +718,7 @@ export class PdfMatchController {
 
 		if (findController) {
 			const pageMatches = pageEl
-				? Array.from(
-						pageEl.querySelectorAll<HTMLElement>(
-							".highlight:not(.middle):not(.end), .incsearch-pdf-match"
-						)
-					)
+				? Array.from(pageEl.querySelectorAll<HTMLElement>(ALL_MATCH_HEADS_SELECTOR))
 				: [];
 			const matchIdx = Math.max(0, pageMatches.indexOf(visibleMatchEl));
 			if (findController._selected) {
@@ -783,10 +820,7 @@ export class PdfMatchController {
 		const scrollContainer = getScrollContainer(this.adapter.containerEl);
 		if (!scrollContainer) return;
 		const containerRect = scrollContainer.getBoundingClientRect();
-		const selected =
-			this.adapter.containerEl.querySelector<HTMLElement>(
-				NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR
-			) ?? this.adapter.containerEl.querySelector<HTMLElement>(CURRENT_MATCH_SELECTOR);
+		const selected = this.getSelectedMatchElement();
 		if (!selected) return;
 		const rect = selected.getBoundingClientRect();
 		if (!isTargetCompletelyOffScreen(rect, containerRect)) return;
@@ -820,11 +854,7 @@ export class PdfMatchController {
 			logDebug("pdf", "reassertInitialSteering: no scroll container rect");
 			return;
 		}
-		const nativeSelected =
-			this.adapter.containerEl.querySelector<HTMLElement>(
-				NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR
-			) ??
-			this.adapter.containerEl.querySelector<HTMLElement>(CURRENT_MATCH_SELECTOR);
+		const nativeSelected = this.getSelectedMatchElement();
 		const steered = this.steerInitialSearch(nativeSelected, containerRect);
 		this.ensureSteeredMatchVisible();
 		logDebug(
@@ -1029,7 +1059,7 @@ export class PdfMatchController {
 				if (this.userHasManuallyScrolled) {
 					logDebug(
 						"pdf",
-						"findController.scrollMatchIntoView: SKIPPING (userHasManuallyScrolled=true) Ã¢â‚¬â€ steering did NOT run"
+						"findController.scrollMatchIntoView: SKIPPING (userHasManuallyScrolled=true) — steering did NOT run"
 					);
 					return;
 				}
@@ -1119,8 +1149,8 @@ export class PdfMatchController {
 					}
 					this.requestMatchScroll(pageNumber);
 					// If the selected page's match is already rendered, center the match itself
-					// with a single scroll. Only fall back to a page-level jump Ã¢â‚¬â€ which for a
-					// tall/zoomed page can leave the match barely visible at the viewport edge Ã¢â‚¬â€
+					// with a single scroll. Only fall back to a page-level jump — which for a
+					// tall/zoomed page can leave the match barely visible at the viewport edge —
 					// plus a deferred re-center when the match rect is not yet available (e.g.
 					// the page is still virtualized/rendering, so `textlayerrendered` will fire).
 					if (this.scrollActiveMatchIntoView(pageNumber)) {
@@ -1293,8 +1323,7 @@ export class PdfMatchController {
 					"onUserManualScroll: latching userHasManuallyScrolled=true (no programmatic scroll in flight); matchScrollPending was " +
 						String(this.matchScrollPending)
 				);
-				this.userHasManuallyScrolled = true;
-				this.cancelPendingMatchScroll();
+				this.markUserScrolled();
 			} else {
 				logDebug("pdf", "onUserManualScroll: ignoring scroll event (programmatic scroll in flight)");
 			}
@@ -1319,8 +1348,7 @@ export class PdfMatchController {
 			const target = evt.target as Node | null;
 			if (target && (container.contains(target) || target === container)) {
 				logDebug("pdf", "onWheelCapture: user wheel over PDF container, latching userHasManuallyScrolled=true");
-				this.userHasManuallyScrolled = true;
-				this.cancelPendingMatchScroll();
+				this.markUserScrolled();
 			}
 		};
 		window.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
@@ -1347,8 +1375,7 @@ export class PdfMatchController {
 		const onTouchMoveCapture = (evt: Event) => {
 			const target = evt.target as Node | null;
 			if (target && (container.contains(target) || target === container)) {
-				this.userHasManuallyScrolled = true;
-				this.cancelPendingMatchScroll();
+				this.markUserScrolled();
 			}
 		};
 		window.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
@@ -1375,7 +1402,12 @@ export class PdfMatchController {
 		 * match and drag the view away mid-typing.
 		 */
 		const driveSteeredView = () => {
-			window.requestAnimationFrame(() => this.reassertInitialSteering());
+			if (this.steerViewRafPending) return;
+			this.steerViewRafPending = true;
+			window.requestAnimationFrame(() => {
+				this.steerViewRafPending = false;
+				this.reassertInitialSteering();
+			});
 		};
 
 		// Listen to PDF.js text layer rendering events (when DOM spans are mounted)
@@ -1410,8 +1442,7 @@ export class PdfMatchController {
 
 		const unsubScroll = this.adapter.on("scroll", () => {
 			if (!this.isProgrammaticScrolling) {
-				this.userHasManuallyScrolled = true;
-				this.cancelPendingMatchScroll();
+				this.markUserScrolled();
 			}
 		});
 		this.unsubscribers.push(unsubScroll);
@@ -1428,37 +1459,28 @@ export class PdfMatchController {
 				? Math.max(0, Math.min(this.steeredActiveIndex, Math.max(0, total - 1)))
 				: clampIndex(current, total);
 
-		const unsubFindCount = this.adapter.on("updatefindmatchescount", (evt: any) => {
-			if (evt?.matchesCount) {
-				const { current, total } = evt.matchesCount;
-				this.state.activeIndex = resolveActiveIndex(current, total);
-				this.state.totalMatchesCount = total;
-				this.notifyStateChange();
-				refreshNativeFragmentJoins();
-				if (this.shouldReassertInitialSteering()) {
-					driveSteeredView();
-				} else if (!this.userHasManuallyScrolled && this.matchScrollPending) {
-					this.scheduleActiveMatchScroll();
-				}
+		// PDF.js reports its own cursor in both updatefindmatchescount and
+		// updatefindcontrolstate; the two events carry the same matchesCount shape
+		// and get the same treatment, so they share one handler. While the
+		// initial-search steering owns the selection the steered index must win,
+		// otherwise the counter snaps back to the match PDF.js picked before the
+		// steering ran.
+		const handleFindMatchesCount = (evt: any) => {
+			if (!evt?.matchesCount) return;
+			const { current, total } = evt.matchesCount;
+			this.state.activeIndex = resolveActiveIndex(current, total);
+			this.state.totalMatchesCount = total;
+			this.notifyStateChange();
+			refreshNativeFragmentJoins();
+			if (this.shouldReassertInitialSteering()) {
+				driveSteeredView();
+			} else if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+				this.scheduleActiveMatchScroll();
 			}
-		});
-		this.unsubscribers.push(unsubFindCount);
+		};
 
-		const unsubFindState = this.adapter.on("updatefindcontrolstate", (evt: any) => {
-			if (evt?.matchesCount) {
-				const { current, total } = evt.matchesCount;
-				this.state.activeIndex = resolveActiveIndex(current, total);
-				this.state.totalMatchesCount = total;
-				this.notifyStateChange();
-				refreshNativeFragmentJoins();
-				if (this.shouldReassertInitialSteering()) {
-					driveSteeredView();
-				} else if (!this.userHasManuallyScrolled && this.matchScrollPending) {
-					this.scheduleActiveMatchScroll();
-				}
-			}
-		});
-		this.unsubscribers.push(unsubFindState);
+		this.unsubscribers.push(this.adapter.on("updatefindmatchescount", handleFindMatchesCount));
+		this.unsubscribers.push(this.adapter.on("updatefindcontrolstate", handleFindMatchesCount));
 	}
 
 	private usesPluginWildcardSearch(query = this.state.query): boolean {
@@ -1587,14 +1609,9 @@ export class PdfMatchController {
 	advance(direction: SearchDirection) {
 		this.isInitialSearchPending = false;
 		// The user has taken over navigation: the steered selection no longer owns
-		// the match, and PDF.js's own cursor drives the counter again.
-		this.initialSteerWindowOpen = false;
-		this.steeredActiveIndex = -1;
-		this.steeredPageNumber = -1;
-		// The next query session captures the viewport again, wherever the user is
-		// looking by then.
-		this.steerWindowStart = undefined;
-		this.steerWindowEnd = undefined;
+		// the match, PDF.js's own cursor drives the counter again, and the next
+		// query session captures the viewport anew, wherever the user is by then.
+		this.closeInitialSteering();
 		logDebug(
 			"pdf",
 			`advance: direction=${direction} (queue=${this.pendingSteeredMatches.length}, queueDirection=${this.pendingSteeredMatchesDirection})`
@@ -1628,7 +1645,11 @@ export class PdfMatchController {
 						query: processedQuery,
 						type: "again",
 						findPrevious: direction === "backward",
-						highlightAll: this.shouldShowAllMatches(),
+						// Keep every match rendered, exactly like search() does: in
+						// on-demand mode the demand-peek toggle is CSS-only, and a
+						// highlightAll:false re-find would make PDF.js drop the spans
+						// the peek relies on.
+						highlightAll: true,
 						phraseSearch,
 						caseSensitive: isCaseSensitive(this.state.query),
 					});
@@ -1647,7 +1668,8 @@ export class PdfMatchController {
 				query: processedQuery,
 				type: "again",
 				findPrevious: direction === "backward",
-				highlightAll: this.shouldShowAllMatches(),
+				// See the matching comment in the queued-steps branch above.
+				highlightAll: true,
 				phraseSearch,
 				caseSensitive: isCaseSensitive(this.state.query),
 			});
@@ -1687,12 +1709,10 @@ export class PdfMatchController {
 		this.cancelPendingMatchScroll();
 		this.pendingSteeredMatches = [];
 		this.pendingSteeredMatchesDirection = "forward";
-		this.initialSteerWindowOpen = false;
-		this.steeredActiveIndex = -1;
-		this.steeredPageNumber = -1;
+		this.closeInitialSteering();
+		this.steeringContextLogged = false;
+		this.steerViewRafPending = false;
 		this.findControllerRef = undefined;
-		this.steerWindowStart = undefined;
-		this.steerWindowEnd = undefined;
 		if (this.programmaticScrollTimeout) {
 			window.clearTimeout(this.programmaticScrollTimeout);
 			this.programmaticScrollTimeout = undefined;

@@ -2138,6 +2138,268 @@ describe("PDF Match Controller", () => {
 			controller.destroy();
 		});
 
+		it("suppresses PDF.js _scrollIntoView page jumps while the search is being steered", () => {
+			mockAdapter.containerEl.getBoundingClientRect = () => ({
+				top: 100, bottom: 600, left: 0, right: 800, height: 500, width: 800,
+			} as DOMRect);
+
+			const originalScrollIntoView = vi.fn();
+			const pdfViewer: any = {
+				_scrollIntoView: originalScrollIntoView,
+				scrollPageIntoView: vi.fn(),
+			};
+			mockAdapter.pdfViewer = pdfViewer;
+			mockAdapter.findController = { _selected: { pageIdx: 0, matchIdx: 0 } };
+			mockAdapter.executeNativeFind = vi.fn(() => true);
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+
+			// Simulate the state left by a completed steering decision.
+			(controller as any).steeredPageNumber = 5;
+			(controller as any).initialSteerWindowOpen = true;
+			(controller as any).userHasManuallyScrolled = false;
+
+			// A jump to any other page is suppressed, so the view stays on the
+			// steered match.
+			pdfViewer._scrollIntoView({ pageDiv: pageElements.get(3)! });
+			expect(originalScrollIntoView).not.toHaveBeenCalled();
+
+			// A jump whose target page cannot be determined is suppressed too.
+			pdfViewer._scrollIntoView({});
+			expect(originalScrollIntoView).not.toHaveBeenCalled();
+
+			// A jump to the steered page itself is still allowed through.
+			const page5 = document.createElement("div");
+			page5.className = "page";
+			page5.setAttribute("data-page-number", "5");
+			mockAdapter.containerEl.appendChild(page5);
+			pdfViewer._scrollIntoView({ pageDiv: page5 });
+			expect(originalScrollIntoView).toHaveBeenCalledTimes(1);
+
+			controller.destroy();
+		});
+
+		it("resolves a wrapped match to its head fragment and selects every fragment of it", () => {
+			mockAdapter.containerEl.getBoundingClientRect = () => ({
+				top: 100, bottom: 600, left: 0, right: 800, height: 500, width: 800,
+			} as DOMRect);
+
+			const page3 = pageElements.get(3)!;
+			page3.getBoundingClientRect = () => ({
+				top: -400, bottom: 560, left: 0, right: 800, height: 960, width: 800,
+			} as DOMRect);
+
+			// PDF.js's own choice sits below the wrapped match on screen.
+			const deliveredMatch = document.createElement("span");
+			deliveredMatch.className = "highlight selected";
+			deliveredMatch.getBoundingClientRect = () => ({
+				top: 540, bottom: 560, left: 100, right: 300, height: 20, width: 200,
+			} as DOMRect);
+
+			// The match the steering must pick wraps across lines: begin/middle/end
+			// fragments in DOM order, with the middle fragment physically topmost,
+			// so the geometry scan hits a non-head fragment first.
+			const begin = document.createElement("span");
+			begin.className = "highlight begin";
+			begin.getBoundingClientRect = () => ({
+				top: 500, bottom: 520, left: 100, right: 300, height: 20, width: 200,
+			} as DOMRect);
+			const middle = document.createElement("span");
+			middle.className = "highlight middle";
+			middle.getBoundingClientRect = () => ({
+				top: 480, bottom: 500, left: 320, right: 520, height: 20, width: 200,
+			} as DOMRect);
+			const end = document.createElement("span");
+			end.className = "highlight end";
+			end.getBoundingClientRect = () => ({
+				top: 520, bottom: 540, left: 100, right: 260, height: 20, width: 160,
+			} as DOMRect);
+
+			const layer3 = page3.querySelector(".textLayer")!;
+			layer3.appendChild(begin);
+			layer3.appendChild(middle);
+			layer3.appendChild(end);
+			layer3.appendChild(deliveredMatch);
+
+			const findController: any = {
+				scrollMatchIntoView: vi.fn(),
+				_selected: { pageIdx: 2, matchIdx: 0 },
+				pageMatches: [[10], [20], [30, 31]],
+			};
+			mockAdapter.findController = findController;
+			mockAdapter.getVisiblePageNumbers = () => [3];
+			mockAdapter.executeNativeFind = vi.fn(() => true);
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+			controller.search("appearance", "forward");
+			findController.scrollMatchIntoView({ element: deliveredMatch, pageIndex: 2, matchIndex: 0 });
+
+			// The scan hits the topmost fragment (middle), but the selection must
+			// resolve to the head and cover the whole wrapped match.
+			expect(begin.classList.contains("selected")).toBe(true);
+			expect(middle.classList.contains("selected")).toBe(true);
+			expect(end.classList.contains("selected")).toBe(true);
+			expect(deliveredMatch.classList.contains("selected")).toBe(false);
+			// Counter: one match on each of pages 1-2 (pageMatches lengths), and
+			// the steered head is index 0 of page 3's matches.
+			expect(controller.state.activeIndex).toBe(2);
+
+			controller.destroy();
+		});
+
+		it("keeps the steered match index when PDF.js reports its cursor via updatefindcontrolstate", () => {
+			const { textLayer5, matchOnPage4 } = buildTrailingPageScenario();
+			mockAdapter.getVisiblePageNumbers = () => [4];
+
+			const matchOnPage5 = document.createElement("span");
+			matchOnPage5.className = "highlight";
+			matchOnPage5.getBoundingClientRect = () => ({
+				top: 565, bottom: 585, left: 100, right: 300, height: 20, width: 200,
+			} as DOMRect);
+			textLayer5.appendChild(matchOnPage5);
+
+			const findController: any = {
+				scrollMatchIntoView: vi.fn(),
+				_selected: { pageIdx: 3, matchIdx: 0 },
+				pageMatches: [[10], [20], [30], [40], [50]],
+			};
+			mockAdapter.findController = findController;
+			mockAdapter.executeNativeFind = vi.fn(() => true);
+			const emit = captureAdapterEvents();
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+			controller.search("this", "backward");
+			findController.scrollMatchIntoView({ element: matchOnPage4, pageIndex: 3, matchIndex: 0 });
+
+			expect(matchOnPage5.classList.contains("selected")).toBe(true);
+			expect(controller.state.activeIndex).toBe(4);
+
+			// The second cursor event PDF.js emits must not snap the counter back
+			// to PDF.js's own choice either.
+			emit("updatefindcontrolstate", { matchesCount: { current: 1, total: 5 } });
+			expect(controller.state.activeIndex).toBe(4);
+			expect(controller.state.totalMatchesCount).toBe(5);
+
+			controller.destroy();
+		});
+
+		// Regression guard for the steering-window contract: the frozen search-time
+		// view is only valid until the user scrolls. Latching the manual scroll
+		// without discarding the frozen window made the NEXT keystroke re-open the
+		// steering against the stale window and snap the view back to where the
+		// query started, undoing the user's own scroll.
+		it("re-captures the search-time view when the user scrolls away and keeps typing", async () => {
+			const { controller, emit, deliveredMatch, desiredLayer, desiredMatchFactory, scrollTo, scrollBySpy } =
+				buildScrolledAwayScenario("backward");
+			mockAdapter.containerEl.scrollBy = scrollBySpy;
+
+			// The user searches while looking at document position 1000 (window
+			// 1000-1500); the desired match (doc 1400) is the bottom-most visible
+			// one and gets steered.
+			controller.search("appearance", "backward");
+			const desiredMatch = desiredMatchFactory();
+			desiredLayer.appendChild(desiredMatch);
+			emit("updatetextlayermatches", { pageIndex: 4 });
+			await vi.waitFor(() => {
+				expect(desiredMatch.classList.contains("selected")).toBe(true);
+			});
+
+			// The user scrolls away. This must end the steering window and discard
+			// the frozen search-time view.
+			scrollTo(2000);
+			mockAdapter.containerEl.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
+			expect(controller.userHasManuallyScrolled).toBe(true);
+			expect((controller as any).initialSteerWindowOpen).toBe(false);
+			expect((controller as any).steerWindowStart).toBeUndefined();
+
+			// A match in the NEW view mounts; the next keystroke must steer from the
+			// re-captured window (2000-2500), not snap back to the stale one.
+			const newViewMatch = document.createElement("span");
+			newViewMatch.className = "highlight";
+			newViewMatch.getBoundingClientRect = () => ({
+				top: 200, bottom: 220, left: 100, right: 300, height: 20, width: 200,
+			} as DOMRect);
+			desiredLayer.appendChild(newViewMatch);
+
+			controller.search("appearances", "backward");
+			emit("updatetextlayermatches", { pageIndex: 4 });
+
+			await vi.waitFor(() => {
+				expect(newViewMatch.classList.contains("selected")).toBe(true);
+			});
+			expect(desiredMatch.classList.contains("selected")).toBe(false);
+			expect(deliveredMatch.classList.contains("selected")).toBe(false);
+
+			controller.destroy();
+		});
+
+		it("coalesces same-frame PDF.js events into a single steering re-assert", async () => {
+			const { textLayer5, matchOnPage4 } = buildTrailingPageScenario();
+			mockAdapter.getVisiblePageNumbers = () => [4];
+
+			const matchOnPage5 = document.createElement("span");
+			matchOnPage5.className = "highlight";
+			matchOnPage5.getBoundingClientRect = () => ({
+				top: 565, bottom: 585, left: 100, right: 300, height: 20, width: 200,
+			} as DOMRect);
+			textLayer5.appendChild(matchOnPage5);
+
+			const findController: any = {
+				scrollMatchIntoView: vi.fn(),
+				_selected: { pageIdx: 3, matchIdx: 0 },
+				pageMatches: [[10], [20], [30], [40], [50]],
+			};
+			mockAdapter.findController = findController;
+			mockAdapter.executeNativeFind = vi.fn(() => true);
+			const emit = captureAdapterEvents();
+
+			const controller = new PdfMatchController(mockAdapter, DEFAULT_SETTINGS);
+			const reassertSpy = vi.spyOn(controller as any, "reassertInitialSteering");
+
+			controller.search("this", "backward");
+			findController.scrollMatchIntoView({ element: matchOnPage4, pageIndex: 3, matchIndex: 0 });
+			expect(matchOnPage5.classList.contains("selected")).toBe(true);
+			reassertSpy.mockClear();
+
+			// Three events in the same frame: the re-assert (a full document scan)
+			// must run once, not once per event.
+			emit("updatetextlayermatches", { pageIndex: 3 });
+			emit("updatetextlayermatches", { pageIndex: 4 });
+			emit("updatefindmatchescount", { matchesCount: { current: 4, total: 5 } });
+
+			await vi.waitFor(() => {
+				expect(reassertSpy).toHaveBeenCalledTimes(1);
+			});
+			expect(matchOnPage5.classList.contains("selected")).toBe(true);
+
+			controller.destroy();
+		});
+
+		it("keeps every match rendered when advancing in on-demand mode so demand-peek still works", async () => {
+			const findSpy = vi.fn((_command: any) => true);
+			mockAdapter.executeNativeFind = findSpy;
+			mockAdapter.findController = { _selected: { pageIdx: 0, matchIdx: 0 } };
+
+			const controller = new PdfMatchController(mockAdapter, {
+				...DEFAULT_SETTINGS,
+				allMatchesDisplayMode: "on-demand",
+			});
+			await controller.search("appearance");
+			expect(findSpy.mock.calls[0][0].highlightAll).toBe(true);
+
+			findSpy.mockClear();
+			controller.advance("forward");
+
+			// The advance re-find must not drop the match spans: the demand-peek
+			// toggle is CSS-only and has nothing to reveal otherwise.
+			expect(findSpy).toHaveBeenCalled();
+			for (const cmd of findSpy.mock.calls.map((c) => c[0])) {
+				expect(cmd.highlightAll).toBe(true);
+			}
+
+			controller.destroy();
+		});
+
 		it("handles multiple intermediate pending steered matches sequentially before resuming native find", () => {
 			mockAdapter.containerEl.getBoundingClientRect = () => ({
 				top: 100, bottom: 600, left: 0, right: 800, height: 500, width: 800,

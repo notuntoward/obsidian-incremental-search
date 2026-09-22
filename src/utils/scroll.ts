@@ -362,6 +362,15 @@ export const CURRENT_MATCH_SELECTOR = CURRENT_MATCH_SELECTOR_PARTS.join(", ");
 export const ALL_MATCHES_SELECTOR = ".highlight, .incsearch-pdf-match";
 
 /**
+ * Selector for match HEAD fragments only: one element per match, in reading order.
+ * PDF.js splits a match that wraps across lines or text items into begin/middle/end
+ * fragments; the head is any fragment that is neither middle nor end. Use this
+ * wherever the plugin needs per-match entries (steering queues, match indices)
+ * instead of re-inlining the :not() chain.
+ */
+export const ALL_MATCH_HEADS_SELECTOR = ".highlight:not(.middle):not(.end), .incsearch-pdf-match";
+
+/**
  * Deliberately narrower than CURRENT_MATCH_SELECTOR: only PDF.js's own selected fragments
  * inside a text layer, because the geometry decorations that use it (join classes, CSS
  * Custom Highlight token painting) are meaningful only for native fragments. Plugin-injected
