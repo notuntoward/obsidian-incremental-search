@@ -302,6 +302,45 @@ export function decorateNativeSelectedHighlightFragments(containerEl: HTMLElemen
 	highlightNativeSelectedTokens(fragments, query);
 }
 
+/**
+ * Whether a match fragment reports no layout box (e.g. it is detached or hidden),
+ * in which case it cannot participate in visibility-based scanning.
+ */
+function isZeroSizeRect(rect: BoundingRectLike): boolean {
+	return rect.width === 0 && rect.height === 0;
+}
+
+/**
+ * Rounds a bounding rect for diagnostic logging.
+ */
+function rectSummary(rect: BoundingRectLike): { top: number; bottom: number; left: number; right: number } {
+	return {
+		top: Math.round(rect.top),
+		bottom: Math.round(rect.bottom),
+		left: Math.round(rect.left),
+		right: Math.round(rect.right),
+	};
+}
+
+/**
+ * Resolves the head fragment of a match. PDF.js splits a match that wraps across
+ * lines or text items into begin/middle/end fragments; the plugin always selects
+ * and queues the head.
+ */
+function resolveMatchHeadElement(fragment: HTMLElement): HTMLElement {
+	if (!fragment.classList.contains("middle") && !fragment.classList.contains("end")) {
+		return fragment;
+	}
+	let headEl = fragment;
+	let prev = headEl.previousElementSibling as HTMLElement | null;
+	while (prev && (prev.classList.contains("middle") || prev.classList.contains("begin"))) {
+		headEl = prev;
+		if (prev.classList.contains("begin")) break;
+		prev = prev.previousElementSibling as HTMLElement | null;
+	}
+	return headEl;
+}
+
 export class PdfMatchController {
 	adapter: PdfViewAdapter;
 	settings: IncrementalSearchSettings;
@@ -323,8 +362,45 @@ export class PdfMatchController {
 	isProgrammaticScrolling = false;
 	pendingTargetPage?: number;
 	pendingSteeredMatches: Array<{ el: HTMLElement; pageNumber: number; activeIndex: number }> = [];
+	/**
+	 * Direction the pending queue was built for. A forward initial search queues
+	 * the matches *after* the steered selection (consumed by advancing forward);
+	 * a backward initial search queues the matches *before* it in descending order
+	 * (consumed by advancing backward). Advancing against the queue's direction
+	 * has to step through the queued matches natively instead of shifting it.
+	 */
+	pendingSteeredMatchesDirection: SearchDirection = "forward";
+	/**
+	 * True from the start of a query until the user advances or scrolls. PDF.js
+	 * recreates highlight spans from its own selection on every text-layer update,
+	 * so the initial-search steering must be re-asserted for as long as this is
+	 * open, and the steered index must win over PDF.js's cursor in the counter.
+	 */
+	private initialSteerWindowOpen = false;
+	/** Index of the steered match, or -1 when the search did not steer. */
+	private steeredActiveIndex = -1;
+	/** Page of the steered match, or -1 when the search did not steer. */
+	private steeredPageNumber = -1;
 	private matchScrollTimeout?: number;
 	private programmaticScrollTimeout?: number;
+	/** The patched find controller, used when the steering is re-asserted. */
+	private findControllerRef?: any;
+	/** One-shot guard so the runtime context snapshot is logged once per query. */
+	private steeringContextLogged = false;
+	/**
+	 * Vertical window (in the scroll container's document space) that was on screen
+	 * when the query session started: the view the user was looking at when they
+	 * asked for the search.
+	 *
+	 * Steering must judge "visible" against this, not against the live scroll
+	 * position. PDF.js scrolls to its own match before the plugin gets to steer,
+	 * and once the viewport has moved, whatever PDF.js picked looks like the
+	 * correct "bottom-most visible" match, so every later attempt confirms it
+	 * instead of correcting it. Document space keeps the captured view valid even
+	 * after the scroll position changes.
+	 */
+	private steerWindowStart?: number;
+	private steerWindowEnd?: number;
 
 	requestMatchScroll(targetPage?: number) {
 		this.userHasManuallyScrolled = false;
@@ -362,6 +438,14 @@ export class PdfMatchController {
 
 	scheduleActiveMatchScroll(pageNumber?: number) {
 		if (this.userHasManuallyScrolled || !this.matchScrollPending) {
+			return;
+		}
+		// While the initial-search steering owns the selection, the compound-match
+		// geometry can still describe PDF.js's own (wrong) match, and scrolling to
+		// it is what drags the view away mid-typing. Keep the view on the steered
+		// match instead.
+		if (this.shouldReassertInitialSteering()) {
+			this.ensureSteeredMatchVisible();
 			return;
 		}
 		if (this.scrollActiveMatchIntoView(pageNumber)) {
@@ -443,6 +527,358 @@ export class PdfMatchController {
 			`scrollActiveMatchIntoView: no match rect found for pageArg=${String(pageNumber)} (returning false so caller can retry)`
 		);
 		return false;
+	}
+
+	/**
+	 * Page number a mounted match fragment belongs to, derived from the page
+	 * element that contains it. Returns -1 when the fragment is not inside a
+	 * numbered page (e.g. plugin-injected decorations outside a page).
+	 */
+	getMatchPageNumber(fragment: HTMLElement): number {
+		const pageEl = fragment.closest?.(".page") as HTMLElement | null;
+		const attr = pageEl?.getAttribute?.("data-page-number");
+		const pageNumber = attr ? parseInt(attr, 10) : NaN;
+		return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : -1;
+	}
+
+	/**
+	 * Selects the match an initial search starts from: the first visible match in
+	 * the search direction (earliest for forward, latest for backward).
+	 *
+	 * Forward and backward differ only in the order matches are scanned/queued, so
+	 * both directions run this one code path.
+	 *
+	 * This runs twice per search. First from the intercepted
+	 * `findController.scrollMatchIntoView`, where `deliveredEl` is PDF.js's own
+	 * choice. Then again from the text-layer update handlers: PDF.js recreates
+	 * highlight spans from its internal selection on every
+	 * `updatetextlayermatches`, which discards the steered selection, so the
+	 * steering has to be re-asserted until the user advances or scrolls.
+	 *
+	 * Returns the steered match, or null when there is nothing to steer to.
+	 */
+	private steerInitialSearch(
+		deliveredEl: HTMLElement | null,
+		containerRect: BoundingRectLike
+	): { el: HTMLElement; rect: BoundingRectLike; pageNumber: number } | null {
+		const backward = this.state.direction === "backward";
+
+		// Match fragments in reading order, with their layout rects. Reading order
+		// is DOM order (pages are mounted in page order), which is authoritative
+		// here: the viewer's visible-page API may not report a trailing page even
+		// though its content is on screen, and the per-match geometry check filters
+		// out anything genuinely off-screen.
+		const allFragments = Array.from(
+			this.adapter.containerEl.querySelectorAll<HTMLElement>(ALL_MATCHES_SELECTOR)
+		)
+			.filter((fragment) => typeof fragment.getBoundingClientRect === "function")
+			.map((fragment) => ({ el: fragment, rect: fragment.getBoundingClientRect() }))
+			.filter(({ rect }) => !isZeroSizeRect(rect));
+
+		// Match heads (one entry per match, in reading order) and the page each
+		// belongs to, used for the deferred-match queue and its indices.
+		const allMatchHeads: Array<{ el: HTMLElement; pageNum: number }> = [];
+		for (const { el } of allFragments) {
+			if (el.classList.contains("middle") || el.classList.contains("end")) continue;
+			const pageNum = this.getMatchPageNumber(el);
+			if (pageNum <= 0) continue;
+			allMatchHeads.push({ el, pageNum });
+		}
+
+		// Visible match fragments ordered by their position on screen: top to
+		// bottom, then left to right. This must be geometry, not DOM order: PDF.js
+		// appends text-layer spans in content-stream order, which for multi-column
+		// pages need not match visual order, and a DOM-ordered scan can then settle
+		// on a match in the wrong column.
+		const candidates = allFragments
+			.slice()
+			.sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left);
+
+		// Judge "visible" against the view the user was looking at when they asked
+		// for the search, not the live scroll position (see steerWindowStart).
+		const hasFrozenWindow = this.steerWindowStart !== undefined && this.steerWindowEnd !== undefined;
+		const frozenScrollTop = hasFrozenWindow
+			? (getScrollContainer(this.adapter.containerEl)?.scrollTop ?? 0)
+			: 0;
+		const isVisibleForSteering = (rect: BoundingRectLike): boolean => {
+			// Horizontal extent is taken from the live viewport: columns fit the
+			// viewer's width, and horizontal scrolling is not modelled here.
+			if (rect.right <= containerRect.left || rect.left >= containerRect.right) return false;
+			if (!hasFrozenWindow) return !isTargetCompletelyOffScreen(rect, containerRect);
+			// Map the live screen rect into the scroll container's document space so
+			// the comparison stays valid after PDF.js scrolls the view.
+			const docTop = rect.top - containerRect.top + frozenScrollTop;
+			const docBottom = rect.bottom - containerRect.top + frozenScrollTop;
+			return docBottom >= this.steerWindowStart! && docTop <= this.steerWindowEnd!;
+		};
+
+		// First visible match fragment in scan order: topmost for forward,
+		// bottom-most for backward.
+		const scanOrder = backward ? candidates.slice().reverse() : candidates;
+		let visibleMatchEl: HTMLElement | null = null;
+		let visibleMatchRect: BoundingRectLike | null = null;
+		let visiblePageNum = -1;
+		for (const { el, rect } of scanOrder) {
+			if (!isVisibleForSteering(rect)) continue;
+			visibleMatchEl = resolveMatchHeadElement(el);
+			visibleMatchRect = rect;
+			visiblePageNum = this.getMatchPageNumber(el);
+			break;
+		}
+
+		const viewportSource = hasFrozenWindow ? "search-time" : "live";
+		const windowSummary = hasFrozenWindow
+			? `scrollTop=${frozenScrollTop}, window=[${Math.round(this.steerWindowStart!)},${Math.round(this.steerWindowEnd!)}]`
+			: "no frozen window";
+		const inventory = allFragments
+			.slice(0, 6)
+			.map(
+				({ el, rect }) =>
+					`p${this.getMatchPageNumber(el)}${isVisibleForSteering(rect) ? "-on" : "-off"}@${Math.round(rect.top)}`
+			)
+			.join(",");
+
+		if (!visibleMatchEl || !visibleMatchRect || visibleMatchEl === deliveredEl) {
+			logDebug(
+				"pdf",
+				`steerInitialSearch: no steering (direction=${backward ? "backward" : "forward"}, viewport=${viewportSource}: ${windowSummary}, fragments=${allFragments.length}, heads=${allMatchHeads.length}, picked=${visibleMatchEl ? describeElement(visibleMatchEl) : "<none>"}, delivered=${deliveredEl ? describeElement(deliveredEl) : "<none>"}, inventory=[${inventory}])`
+			);
+			return null;
+		}
+		logDebug(
+			"pdf",
+			`steerInitialSearch: steering ${backward ? "backward" : "forward"} to visible match on page ${visiblePageNum} (viewport=${viewportSource}: ${windowSummary}, fragments=${allFragments.length}, heads=${allMatchHeads.length}, delivered=${deliveredEl ? describeElement(deliveredEl) : "<none>"}, inventory=[${inventory}])`
+		);
+
+		const findController = this.findControllerRef;
+		const firstIdx = allMatchHeads.findIndex((m) => m.el === visibleMatchEl);
+		const deliveredIdx = deliveredEl ? allMatchHeads.findIndex((m) => m.el === deliveredEl) : -1;
+
+		const prevSelected = Array.from(
+			this.adapter.containerEl.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
+		);
+		for (const el of prevSelected) {
+			el.classList.remove("selected", "is-selected", "is-current");
+		}
+		visibleMatchEl.classList.add("selected");
+		if (visibleMatchEl.classList.contains("begin")) {
+			let next = visibleMatchEl.nextElementSibling as HTMLElement | null;
+			while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
+				next.classList.add("selected");
+				if (next.classList.contains("end")) break;
+				next = next.nextElementSibling as HTMLElement | null;
+			}
+		}
+
+		const pageIndex = visiblePageNum - 1;
+		const pageEl = this.adapter.getPageElement(visiblePageNum);
+		const targetRect =
+			getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ?? visibleMatchRect;
+
+		if (findController) {
+			const pageMatches = pageEl
+				? Array.from(
+						pageEl.querySelectorAll<HTMLElement>(
+							".highlight:not(.middle):not(.end), .incsearch-pdf-match"
+						)
+					)
+				: [];
+			const matchIdx = Math.max(0, pageMatches.indexOf(visibleMatchEl));
+			if (findController._selected) {
+				findController._selected.pageIdx = pageIndex;
+				findController._selected.matchIdx = matchIdx;
+			}
+			if (findController.selected) {
+				findController.selected.pageIdx = pageIndex;
+				findController.selected.matchIdx = matchIdx;
+			}
+
+			const pageMatchesArr =
+				(findController as any)?.pageMatches || (findController as any)?._pageMatches;
+			if (Array.isArray(pageMatchesArr)) {
+				let countBefore = 0;
+				for (let p = 0; p < pageIndex && p < pageMatchesArr.length; p++) {
+					if (Array.isArray(pageMatchesArr[p])) {
+						countBefore += pageMatchesArr[p].length;
+					}
+				}
+				const baseActiveIndex = countBefore + matchIdx;
+				this.state.activeIndex = baseActiveIndex;
+				// PDF.js reports its own cursor in updatefindmatchescount/
+				// updatefindcontrolstate; while the steering window is open the
+				// steered index must win, otherwise the counter snaps back.
+				this.steeredActiveIndex = baseActiveIndex;
+				this.steeredPageNumber = visiblePageNum;
+				this.notifyStateChange();
+			}
+		}
+
+		// Build the pendingSteeredMatches queue for the matches between the steered
+		// selection and the match PDF.js delivered, nearest first in the search
+		// direction. The queue reconciles the plugin's selection with PDF.js's
+		// internal cursor: consuming it in the search direction walks the
+		// intermediate matches one by one instead of letting native find skip (or
+		// repeat) them.
+		this.pendingSteeredMatches = [];
+		this.pendingSteeredMatchesDirection = backward ? "backward" : "forward";
+		if (firstIdx !== -1) {
+			const step = backward ? -1 : 1;
+			const limit = backward
+				? deliveredIdx !== -1 && deliveredIdx < firstIdx
+					? deliveredIdx
+					: 0
+				: deliveredIdx > firstIdx
+					? deliveredIdx
+					: allMatchHeads.length - 1;
+			for (let i = firstIdx + step; backward ? i >= limit : i <= limit; i += step) {
+				const item = allMatchHeads[i];
+				this.pendingSteeredMatches.push({
+					el: item.el,
+					pageNumber: item.pageNum,
+					activeIndex: (this.steeredActiveIndex >= 0 ? this.steeredActiveIndex : 0) + (i - firstIdx),
+				});
+			}
+		}
+
+		return { el: visibleMatchEl, rect: targetRect, pageNumber: visiblePageNum };
+	}
+
+	/**
+	 * Whether the initial-search steering still owns the selection: true from the
+	 * start of a query until the user advances or scrolls the document.
+	 */
+	private shouldReassertInitialSteering(): boolean {
+		return (
+			this.initialSteerWindowOpen &&
+			!this.userHasManuallyScrolled &&
+			this.state.query.length > 0
+		);
+	}
+
+	/**
+	 * While the initial search is being steered the plugin owns which match is
+	 * selected, and that match is already inside the view the user was looking at.
+	 * PDF.js still jumps to its own, different match on every keystroke, which
+	 * drags the view away from the correct match, so those jumps are suppressed
+	 * until the user advances or scrolls.
+	 */
+	private shouldSuppressViewerPageJump(targetPageNumber?: number): boolean {
+		if (!this.initialSteerWindowOpen || this.userHasManuallyScrolled) return false;
+		if (this.steeredPageNumber <= 0) return false;
+		if (typeof targetPageNumber !== "number" || !Number.isFinite(targetPageNumber)) {
+			return true;
+		}
+		return targetPageNumber !== this.steeredPageNumber;
+	}
+
+	/**
+	 * Brings the steered match back into view when PDF.js has scrolled somewhere
+	 * else (its own match, or a page jump the plugin could not suppress). Restoring
+	 * the view is what keeps incremental typing from wandering off: the steered
+	 * match is in the view the user started from, so no scroll should be needed at
+	 * all, and any that happened must be undone.
+	 */
+	private ensureSteeredMatchVisible(): void {
+		if (!this.shouldReassertInitialSteering()) return;
+		const scrollContainer = getScrollContainer(this.adapter.containerEl);
+		if (!scrollContainer) return;
+		const containerRect = scrollContainer.getBoundingClientRect();
+		const selected =
+			this.adapter.containerEl.querySelector<HTMLElement>(
+				NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR
+			) ?? this.adapter.containerEl.querySelector<HTMLElement>(CURRENT_MATCH_SELECTOR);
+		if (!selected) return;
+		const rect = selected.getBoundingClientRect();
+		if (!isTargetCompletelyOffScreen(rect, containerRect)) return;
+		this.markProgrammaticScroll();
+		const scrolled = scrollTargetIntoViewIfNeeded(rect, scrollContainer, {
+			behavior: "auto",
+			forceCenter: false,
+		});
+		logDebug(
+			"pdf",
+			`ensureSteeredMatchVisible: selected match was off-screen; ${scrolled ? "scrolled back to it" : "no scroll applied"}`
+		);
+	}
+
+	/**
+	 * Re-applies the initial-search steering after PDF.js re-rendered text-layer
+	 * highlights (which recreates the spans and restores PDF.js's own selection),
+	 * so the steered match stays selected and its position stays in the counter.
+	 */
+	private reassertInitialSteering(): void {
+		if (!this.shouldReassertInitialSteering()) {
+			logDebug(
+				"pdf",
+				`reassertInitialSteering: skipped (windowOpen=${this.initialSteerWindowOpen}, manuallyScrolled=${this.userHasManuallyScrolled}, query="${this.state.query}")`
+			);
+			return;
+		}
+		const scrollContainer = getScrollContainer(this.adapter.containerEl);
+		const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+		if (!containerRect) {
+			logDebug("pdf", "reassertInitialSteering: no scroll container rect");
+			return;
+		}
+		const nativeSelected =
+			this.adapter.containerEl.querySelector<HTMLElement>(
+				NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR
+			) ??
+			this.adapter.containerEl.querySelector<HTMLElement>(CURRENT_MATCH_SELECTOR);
+		const steered = this.steerInitialSearch(nativeSelected, containerRect);
+		this.ensureSteeredMatchVisible();
+		logDebug(
+			"pdf",
+			`reassertInitialSteering: ran (nativeSelected=${describeElement(nativeSelected)}, steered=${steered ? `page ${steered.pageNumber}` : "no"})`
+		);
+	}
+
+	/**
+	 * One-shot diagnostic snapshot of the runtime state the initial-match steering
+	 * depends on: which element actually is the container, the scroll element that
+	 * was resolved, the pages mounted, and the match spans that exist in the DOM.
+	 *
+	 * It is recorded in the always-on log ring buffer
+	 * (window.getIncSearchLogs()) so a single reproduction shows which assumption
+	 * about the real viewer is wrong.
+	 */
+	private logSteeringContext(targetEl: HTMLElement | null, containerRect: BoundingRectLike | null): void {
+		if (this.steeringContextLogged) return;
+		this.steeringContextLogged = true;
+		const container = this.adapter.containerEl;
+		const scrollContainer = getScrollContainer(container);
+		const pages = Array.from(container.querySelectorAll<HTMLElement>(".page[data-page-number]"));
+		const fragments = Array.from(container.querySelectorAll<HTMLElement>(ALL_MATCHES_SELECTOR));
+		logDebug("pdf", "steering context snapshot", {
+			direction: this.state.direction,
+			query: this.state.query,
+			isInitialSearchPending: this.isInitialSearchPending,
+			steerWindowOpen: this.initialSteerWindowOpen,
+			userHasManuallyScrolled: this.userHasManuallyScrolled,
+			container: describeElement(container),
+			containerRect: containerRect ? rectSummary(containerRect) : null,
+			scrollContainer: describeElement(scrollContainer),
+			scrollRect: scrollContainer ? rectSummary(scrollContainer.getBoundingClientRect()) : null,
+			visiblePagesFromAdapter: this.adapter.getVisiblePageNumbers?.() ?? null,
+			pageElements: pages.length,
+			pages: pages
+				.slice(0, 8)
+				.map((p) => ({ n: p.getAttribute("data-page-number"), ...rectSummary(p.getBoundingClientRect()) })),
+			textLayers: container.querySelectorAll(".textLayer").length,
+			matchFragmentCount: fragments.length,
+			matchFragments: fragments.slice(0, 8).map((el) => ({
+				cls: el.className,
+				page: this.getMatchPageNumber(el),
+				...rectSummary(el.getBoundingClientRect()),
+			})),
+			delivered: targetEl
+				? {
+						el: describeElement(targetEl),
+						page: this.getMatchPageNumber(targetEl),
+						...rectSummary(targetEl.getBoundingClientRect()),
+					}
+				: null,
+		});
 	}
 
 	constructor(
@@ -530,6 +966,7 @@ export class PdfMatchController {
 
 		// 2. Intercept PDF.js findController matching
 		const findController = this.adapter.findController;
+		this.findControllerRef = findController;
 		const pdfViewer =
 			this.adapter.pdfViewer ||
 			(findController as any)?._pdfViewer ||
@@ -570,9 +1007,30 @@ export class PdfMatchController {
 		if (findController && typeof findController.scrollMatchIntoView === "function") {
 			this.originalScrollMatchIntoView = findController.scrollMatchIntoView;
 			findController.scrollMatchIntoView = (params: any) => {
-				logDebug("pdf", "findController.scrollMatchIntoView called:", params);
+				const paramsSummary = {
+					element: describeElement(params?.element),
+					pageIndex: params?.pageIndex,
+					matchIndex: params?.matchIndex,
+					selected: params?.selected
+						? { pageIdx: params.selected.pageIdx, matchIdx: params.selected.matchIdx }
+						: null,
+					keys: params && typeof params === "object" ? Object.keys(params).slice(0, 8) : [],
+				};
+				logDebug("pdf", "findController.scrollMatchIntoView called", {
+					params: paramsSummary,
+					direction: this.state.direction,
+					query: this.state.query,
+					isInitialSearchPending: this.isInitialSearchPending,
+					steerWindowOpen: this.initialSteerWindowOpen,
+					userHasManuallyScrolled: this.userHasManuallyScrolled,
+					matchScrollPending: this.matchScrollPending,
+					pendingSteeredMatches: this.pendingSteeredMatches.length,
+				});
 				if (this.userHasManuallyScrolled) {
-					logDebug("pdf", "findController.scrollMatchIntoView: user has manually scrolled, skipping scroll!");
+					logDebug(
+						"pdf",
+						"findController.scrollMatchIntoView: SKIPPING (userHasManuallyScrolled=true) Ã¢â‚¬â€ steering did NOT run"
+					);
 					return;
 				}
 				// Capture before requestMatchScroll() clears it below, so the compound-match
@@ -605,134 +1063,19 @@ export class PdfMatchController {
 					: getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl);
 
 				if (this.isInitialSearchPending) {
-					const visiblePages = this.adapter.getVisiblePageNumbers().slice().sort((a, b) => a - b);
-					let visibleMatchEl: HTMLElement | null = null;
-					let visibleMatchRect: BoundingRectLike | null = null;
-					let visiblePageNum = -1;
-
-					for (const pNum of visiblePages) {
-						const pEl = this.adapter.getPageElement(pNum);
-						if (!pEl) continue;
-						const candidates = Array.from(
-							pEl.querySelectorAll<HTMLElement>(ALL_MATCHES_SELECTOR)
-						);
-						for (const candidate of candidates) {
-							if (typeof candidate.getBoundingClientRect !== "function") continue;
-							const r = candidate.getBoundingClientRect();
-							if (r.width === 0 && r.height === 0) continue;
-							if (!isTargetCompletelyOffScreen(r, containerRect)) {
-								// Found a visible match fragment. Resolve head element if it's a join fragment.
-								let headEl = candidate;
-								if (headEl.classList.contains("middle") || headEl.classList.contains("end")) {
-									let prev = headEl.previousElementSibling as HTMLElement | null;
-									while (prev && (prev.classList.contains("middle") || prev.classList.contains("begin"))) {
-										headEl = prev;
-										if (prev.classList.contains("begin")) break;
-										prev = prev.previousElementSibling as HTMLElement | null;
-									}
-								}
-								visibleMatchEl = headEl;
-								visibleMatchRect = r;
-								visiblePageNum = pNum;
-								break;
-							}
-						}
-						if (visibleMatchEl) break;
-					}
-
-					if (visibleMatchEl && visibleMatchRect && visibleMatchEl !== targetEl) {
+					this.logSteeringContext(targetEl ?? null, containerRect);
+					const steered = this.steerInitialSearch(targetEl ?? null, containerRect);
+					if (steered) {
+						targetEl = steered.el;
+						pageNumber = steered.pageNumber;
+						pageIndex = steered.pageNumber - 1;
+						pageEl = this.adapter.getPageElement(steered.pageNumber);
+						targetRect = steered.rect;
+					} else {
 						logDebug(
 							"pdf",
-							`findController.scrollMatchIntoView: steering initial search to visible match on page ${visiblePageNum}`
+							"findController.scrollMatchIntoView: initial search did NOT steer; PDF.js's own match stands"
 						);
-						const deliveredTargetEl = targetEl;
-
-						// Gather all match head elements in DOM order across visible pages
-						const allMatchHeads: Array<{ el: HTMLElement; pageNum: number }> = [];
-						for (const pNum of visiblePages) {
-							const pEl = this.adapter.getPageElement(pNum);
-							if (!pEl) continue;
-							const heads = Array.from(
-								pEl.querySelectorAll<HTMLElement>(
-									".highlight:not(.middle):not(.end), .incsearch-pdf-match"
-								)
-							);
-							for (const h of heads) {
-								allMatchHeads.push({ el: h, pageNum: pNum });
-							}
-						}
-
-						const firstIdx = allMatchHeads.findIndex((m) => m.el === visibleMatchEl);
-						const deliveredIdx = deliveredTargetEl
-							? allMatchHeads.findIndex((m) => m.el === deliveredTargetEl)
-							: -1;
-
-						const prevSelected = Array.from(
-							this.adapter.containerEl.querySelectorAll<HTMLElement>(
-								CURRENT_MATCH_SELECTOR
-							)
-						);
-						for (const el of prevSelected) {
-							el.classList.remove("selected", "is-selected", "is-current");
-						}
-						visibleMatchEl.classList.add("selected");
-						if (visibleMatchEl.classList.contains("begin")) {
-							let next = visibleMatchEl.nextElementSibling as HTMLElement | null;
-							while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
-								next.classList.add("selected");
-								if (next.classList.contains("end")) break;
-								next = next.nextElementSibling as HTMLElement | null;
-							}
-						}
-
-						targetEl = visibleMatchEl;
-						pageNumber = visiblePageNum;
-						pageIndex = visiblePageNum - 1;
-						pageEl = this.adapter.getPageElement(visiblePageNum);
-						targetRect = getCompoundMatchBoundingRect(this.adapter.containerEl, pageEl) ?? visibleMatchRect;
-
-						let baseActiveIndex = 0;
-						if (findController) {
-							const pageMatches = pageEl
-								? Array.from(pageEl.querySelectorAll<HTMLElement>(".highlight:not(.middle):not(.end), .incsearch-pdf-match"))
-								: [];
-							const matchIdx = Math.max(0, pageMatches.indexOf(visibleMatchEl));
-							if (findController._selected) {
-								findController._selected.pageIdx = pageIndex;
-								findController._selected.matchIdx = matchIdx;
-							}
-							if (findController.selected) {
-								findController.selected.pageIdx = pageIndex;
-								findController.selected.matchIdx = matchIdx;
-							}
-
-							const pageMatchesArr = (findController as any)?.pageMatches || (findController as any)?._pageMatches;
-							if (Array.isArray(pageMatchesArr)) {
-								let countBefore = 0;
-								for (let p = 0; p < pageIndex && p < pageMatchesArr.length; p++) {
-									if (Array.isArray(pageMatchesArr[p])) {
-										countBefore += pageMatchesArr[p].length;
-									}
-								}
-								baseActiveIndex = countBefore + matchIdx;
-								this.state.activeIndex = baseActiveIndex;
-								this.notifyStateChange();
-							}
-						}
-
-						// Build pendingSteeredMatches queue for deferred matches up to deliveredTarget
-						this.pendingSteeredMatches = [];
-						if (firstIdx !== -1) {
-							const stopIdx = deliveredIdx > firstIdx ? deliveredIdx : allMatchHeads.length - 1;
-							for (let i = firstIdx + 1; i <= stopIdx; i++) {
-								const item = allMatchHeads[i];
-								this.pendingSteeredMatches.push({
-									el: item.el,
-									pageNumber: item.pageNum,
-									activeIndex: baseActiveIndex + (i - firstIdx),
-								});
-							}
-						}
 					}
 				}
 				this.isInitialSearchPending = false;
@@ -776,8 +1119,8 @@ export class PdfMatchController {
 					}
 					this.requestMatchScroll(pageNumber);
 					// If the selected page's match is already rendered, center the match itself
-					// with a single scroll. Only fall back to a page-level jump — which for a
-					// tall/zoomed page can leave the match barely visible at the viewport edge —
+					// with a single scroll. Only fall back to a page-level jump Ã¢â‚¬â€ which for a
+					// tall/zoomed page can leave the match barely visible at the viewport edge Ã¢â‚¬â€
 					// plus a deferred re-center when the match rect is not yet available (e.g.
 					// the page is still virtualized/rendering, so `textlayerrendered` will fire).
 					if (this.scrollActiveMatchIntoView(pageNumber)) {
@@ -837,6 +1180,19 @@ export class PdfMatchController {
 						return;
 					}
 					const pageDiv = params?.pageDiv || params?.div || (params?.id ? this.adapter.getPageElement(params.id) : null);
+					const targetPageAttr = pageDiv?.getAttribute?.("data-page-number");
+					const targetPage = typeof params?.pageNumber === "number"
+						? params.pageNumber
+						: targetPageAttr
+							? parseInt(targetPageAttr, 10)
+							: undefined;
+					if (this.shouldSuppressViewerPageJump(targetPage)) {
+						logDebug(
+							"pdf",
+							`pdfViewer._scrollIntoView: suppressed jump to page ${String(targetPage)} (steering owns page ${this.steeredPageNumber})`
+						);
+						return;
+					}
 					const scrollContainer = getScrollContainer(this.adapter.containerEl);
 					const containerRect = scrollContainer?.getBoundingClientRect();
 					if (pageDiv && scrollContainer && containerRect) {
@@ -860,6 +1216,13 @@ export class PdfMatchController {
 						return;
 					}
 					const pageNum = typeof params === "number" ? params : params?.pageNumber;
+					if (this.shouldSuppressViewerPageJump(pageNum)) {
+						logDebug(
+							"pdf",
+							`pdfViewer.scrollPageIntoView: suppressed jump to page ${String(pageNum)} (steering owns page ${this.steeredPageNumber})`
+						);
+						return;
+					}
 					const scrollContainer = getScrollContainer(this.adapter.containerEl);
 					const containerRect = scrollContainer?.getBoundingClientRect();
 					if (typeof pageNum === "number" && scrollContainer && containerRect) {
@@ -1004,10 +1367,23 @@ export class PdfMatchController {
 			});
 		};
 
+		/**
+		 * While the initial-search steering owns the selection, the view is driven
+		 * from the steered match: the selection is re-asserted after PDF.js's own
+		 * text-layer update has run, and then brought back on screen. Letting the
+		 * normal active-match scroll run here would target PDF.js's still-selected
+		 * match and drag the view away mid-typing.
+		 */
+		const driveSteeredView = () => {
+			window.requestAnimationFrame(() => this.reassertInitialSteering());
+		};
+
 		// Listen to PDF.js text layer rendering events (when DOM spans are mounted)
 		const unsubTextLayerRendered = this.adapter.on("textlayerrendered", (evt: any) => {
 			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
-			if (typeof pageNumber === "number") {
+			if (this.shouldReassertInitialSteering()) {
+				driveSteeredView();
+			} else if (typeof pageNumber === "number") {
 				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 					this.scheduleActiveMatchScroll(pageNumber);
 				}
@@ -1019,10 +1395,15 @@ export class PdfMatchController {
 		const unsubTextLayerMatches = this.adapter.on(
 			"updatetextlayermatches",
 			() => {
-				refreshNativeFragmentJoins();
-				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+				// PDF.js rebuilds the highlight spans from its own selection here, so
+				// re-assert the steered selection after all listeners for this event
+				// have run (the page's own text layer handler is one of them).
+				if (this.shouldReassertInitialSteering()) {
+					driveSteeredView();
+				} else if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 					this.scheduleActiveMatchScroll();
 				}
+				refreshNativeFragmentJoins();
 			}
 		);
 		this.unsubscribers.push(unsubTextLayerMatches);
@@ -1039,14 +1420,24 @@ export class PdfMatchController {
 		const clampIndex = (current: number, total: number) =>
 			Math.max(0, Math.min(current - 1, Math.max(0, total - 1)));
 
+		// PDF.js reports its own cursor here. While the initial-search steering owns
+		// the selection, the steered index must win, otherwise the counter snaps
+		// back to the match PDF.js picked before the steering ran.
+		const resolveActiveIndex = (current: number, total: number) =>
+			this.shouldReassertInitialSteering() && this.steeredActiveIndex >= 0
+				? Math.max(0, Math.min(this.steeredActiveIndex, Math.max(0, total - 1)))
+				: clampIndex(current, total);
+
 		const unsubFindCount = this.adapter.on("updatefindmatchescount", (evt: any) => {
 			if (evt?.matchesCount) {
 				const { current, total } = evt.matchesCount;
-				this.state.activeIndex = clampIndex(current, total);
+				this.state.activeIndex = resolveActiveIndex(current, total);
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
 				refreshNativeFragmentJoins();
-				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+				if (this.shouldReassertInitialSteering()) {
+					driveSteeredView();
+				} else if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 					this.scheduleActiveMatchScroll();
 				}
 			}
@@ -1056,11 +1447,13 @@ export class PdfMatchController {
 		const unsubFindState = this.adapter.on("updatefindcontrolstate", (evt: any) => {
 			if (evt?.matchesCount) {
 				const { current, total } = evt.matchesCount;
-				this.state.activeIndex = clampIndex(current, total);
+				this.state.activeIndex = resolveActiveIndex(current, total);
 				this.state.totalMatchesCount = total;
 				this.notifyStateChange();
 				refreshNativeFragmentJoins();
-				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
+				if (this.shouldReassertInitialSteering()) {
+					driveSteeredView();
+				} else if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 					this.scheduleActiveMatchScroll();
 				}
 			}
@@ -1084,16 +1477,36 @@ export class PdfMatchController {
 		this.state.activeIndex = 0;
 		this.state.totalMatchesCount = undefined;
 		this.state.isScanning = query.length > 0;
+		logDebug("pdf", `search: query="${query}" direction=${direction}`);
 
 		clearAllPdfHighlights(this.adapter.containerEl);
 		clearSecondaryHighlights(this.adapter.containerEl);
 
 		this.pendingSteeredMatches = [];
+		this.pendingSteeredMatchesDirection = "forward";
+		this.steeredActiveIndex = -1;
+		this.steeredPageNumber = -1;
+		this.initialSteerWindowOpen = query.length > 0;
+		this.steeringContextLogged = false;
 		if (query.length > 0) {
+			// Capture the viewport once per query session (the first keystroke after
+			// the query was empty). Later keystrokes keep it, so refinements cannot
+			// drift with PDF.js's own scrolling.
+			if (this.steerWindowStart === undefined) {
+				const steerContainer = getScrollContainer(this.adapter.containerEl);
+				if (steerContainer) {
+					const steerRect = steerContainer.getBoundingClientRect();
+					const height = steerRect.height || steerContainer.clientHeight || 0;
+					this.steerWindowStart = steerContainer.scrollTop;
+					this.steerWindowEnd = steerContainer.scrollTop + height;
+				}
+			}
 			this.isInitialSearchPending = true;
 			this.requestMatchScroll();
 		} else {
 			this.isInitialSearchPending = false;
+			this.steerWindowStart = undefined;
+			this.steerWindowEnd = undefined;
 			this.cancelPendingMatchScroll();
 		}
 
@@ -1127,7 +1540,13 @@ export class PdfMatchController {
 				query: processedQuery,
 				type: "",
 				findPrevious: direction === "backward",
-				highlightAll: this.shouldShowAllMatches(),
+				// PDF.js only renders match spans for non-selected pages when
+				// highlightAll is set (TextLayer._updateMatches returns early
+				// otherwise), and the initial-match steering has nothing to choose
+				// from without them. Ask for all matches so every page and column is
+				// visible to the scan; what the user actually sees is governed by the
+				// plugin's own CSS (incsearch-pdf-hide-other-matches) in on-demand mode.
+				highlightAll: true,
 				phraseSearch,
 				caseSensitive: isCaseSensitive(query),
 			});
@@ -1148,25 +1567,13 @@ export class PdfMatchController {
 	setDemandPeekActive(active: boolean) {
 		if (this.state.isDemandPeekActive === active) return;
 		this.state.isDemandPeekActive = active;
-		const highlightAll = this.shouldShowAllMatches();
-		if (highlightAll) {
+		// Visibility is a CSS concern only: the find already rendered every match
+		// (highlightAll: true), and re-dispatching a find here would make PDF.js
+		// re-select its own match, discarding the initial-search steering.
+		if (this.shouldShowAllMatches()) {
 			this.adapter.containerEl.classList.remove("incsearch-pdf-hide-other-matches");
 		} else {
 			this.adapter.containerEl.classList.add("incsearch-pdf-hide-other-matches");
-		}
-		if (this.adapter.executeNativeFind && this.state.query) {
-			const { processedQuery, phraseSearch } = processPdfQuery(
-				this.state.query,
-				this.settings.spaceAsWildcard
-			);
-			this.adapter.executeNativeFind({
-				query: processedQuery,
-				type: "",
-				findPrevious: false,
-				highlightAll,
-				phraseSearch,
-				caseSensitive: isCaseSensitive(this.state.query),
-			});
 		}
 		this.notifyStateChange();
 	}
@@ -1179,18 +1586,36 @@ export class PdfMatchController {
 
 	advance(direction: SearchDirection) {
 		this.isInitialSearchPending = false;
+		// The user has taken over navigation: the steered selection no longer owns
+		// the match, and PDF.js's own cursor drives the counter again.
+		this.initialSteerWindowOpen = false;
+		this.steeredActiveIndex = -1;
+		this.steeredPageNumber = -1;
+		// The next query session captures the viewport again, wherever the user is
+		// looking by then.
+		this.steerWindowStart = undefined;
+		this.steerWindowEnd = undefined;
+		logDebug(
+			"pdf",
+			`advance: direction=${direction} (queue=${this.pendingSteeredMatches.length}, queueDirection=${this.pendingSteeredMatchesDirection})`
+		);
 		this.requestMatchScroll();
 		this.state.direction = direction;
 
-		if (direction === "forward" && this.pendingSteeredMatches.length > 0) {
-			const next = this.pendingSteeredMatches.shift()!;
-			this.selectAndScrollMatch(next.el, next.pageNumber);
-			this.state.activeIndex = next.activeIndex;
-			this.notifyStateChange();
-			return;
-		}
+		if (this.pendingSteeredMatches.length > 0) {
+			if (direction === this.pendingSteeredMatchesDirection) {
+				// Advancing along the queue: step to the next queued match without
+				// asking PDF.js (whose internal cursor may skip or repeat matches).
+				const next = this.pendingSteeredMatches.shift()!;
+				this.selectAndScrollMatch(next.el, next.pageNumber);
+				this.state.activeIndex = next.activeIndex;
+				this.notifyStateChange();
+				return;
+			}
 
-		if (direction === "backward" && this.pendingSteeredMatches.length > 0) {
+			// Advancing against the queue's direction: PDF.js's internal cursor is at
+			// the delivered match, so stepping past the queued matches plus one lands
+			// on the match adjacent to the steered selection.
 			const steps = this.pendingSteeredMatches.length + 1;
 			this.pendingSteeredMatches = [];
 			if (this.adapter.executeNativeFind && this.state.query) {
@@ -1202,7 +1627,7 @@ export class PdfMatchController {
 					this.adapter.executeNativeFind({
 						query: processedQuery,
 						type: "again",
-						findPrevious: true,
+						findPrevious: direction === "backward",
 						highlightAll: this.shouldShowAllMatches(),
 						phraseSearch,
 						caseSensitive: isCaseSensitive(this.state.query),
@@ -1261,6 +1686,13 @@ export class PdfMatchController {
 		logDebug("pdf", "PdfMatchController destroy called");
 		this.cancelPendingMatchScroll();
 		this.pendingSteeredMatches = [];
+		this.pendingSteeredMatchesDirection = "forward";
+		this.initialSteerWindowOpen = false;
+		this.steeredActiveIndex = -1;
+		this.steeredPageNumber = -1;
+		this.findControllerRef = undefined;
+		this.steerWindowStart = undefined;
+		this.steerWindowEnd = undefined;
 		if (this.programmaticScrollTimeout) {
 			window.clearTimeout(this.programmaticScrollTimeout);
 			this.programmaticScrollTimeout = undefined;
