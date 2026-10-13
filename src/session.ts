@@ -643,14 +643,16 @@ export function scrollToMatch(view: EditorView, match: MatchRange, isTyping = fa
 	scrollEditorMatchIntoView(view, match);
 
 	applyLivePreviewHighlights(view, match);
-	if (typeof window !== "undefined") {
-		if (typeof window.requestAnimationFrame === "function") {
-			window.requestAnimationFrame(() => {
+	// Schedule on the editor's own window: a pop-out's frames/timers are not the main window's.
+	const win = view.dom?.ownerDocument?.defaultView ?? (typeof window !== "undefined" ? window : null);
+	if (win) {
+		if (typeof win.requestAnimationFrame === "function") {
+			win.requestAnimationFrame(() => {
 				applyLivePreviewHighlights(view, match);
 			});
 		}
-		if (typeof window.setTimeout === "function") {
-			window.setTimeout(() => {
+		if (typeof win.setTimeout === "function") {
+			win.setTimeout(() => {
 				applyLivePreviewHighlights(view, match);
 			}, 50);
 		}

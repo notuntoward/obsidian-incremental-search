@@ -143,6 +143,14 @@ before editing, and extend the cited test alongside your change.
   expose the full match box with padding buffer" and "never passes padding: 0" in
   `tests/scroll.test.ts`.
 
+- **Pop-out windows:** follow the global "Obsidian pop-out windows" rule in
+  `~/.config/kilo/AGENTS.md`. Project specifics: leaf-interaction listeners are
+  hooked per window (`window-open` + `hookDocument` in `main.ts`);
+  `SearchSessionController.accept(refocus)` must get `refocus=false` when
+  focus moved elsewhere. `tests/popout-safety.test.ts` statically scans
+  `src/main.ts`, `widget.ts` and `session.ts`; `tests/widget.test.ts` and
+  `tests/plugin.test.ts` ("pop-out" blocks) cover behavior. Do not weaken them.
+
 ## Build verification rule
 
 This project produces a pre-built artifact (`main.js`) that the Obsidian runtime
