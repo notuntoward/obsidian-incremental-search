@@ -805,4 +805,118 @@ describe("widget: unified SearchSessionController & adapters", () => {
   });
 });
 
+describe("widget: blur focus hand-off and pop-out windows", () => {
+  const settings: any = { searchExitBehavior: "emacs" };
 
+  const makeController = (containerEl: HTMLElement) => {
+    const accept = vi.fn();
+    const controller: SearchSessionController = {
+      containerEl,
+      getCounterState: () => ({ current: 0, total: 0, direction: "forward", inTable: false }),
+      onInput: () => { },
+      advance: () => { },
+      toggleDemandHighlights: () => { },
+      accept,
+      cancel: () => { },
+    };
+    return { controller, accept };
+  };
+
+  /** Mounts a container in `doc`, renders the widget, and expires the focus guard. */
+  const mount = (doc: Document) => {
+    const container = doc.createElement("div");
+    doc.body.appendChild(container);
+    const { controller, accept } = makeController(container);
+    renderSearchWidget(controller, settings, "q", "forward");
+    const input = getActiveWidget()!.querySelector(".incsearch-input") as HTMLInputElement;
+    vi.advanceTimersByTime(250); // guard (200ms) expires
+    return { container, input, accept };
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    removeAllWidgets();
+    document.body.innerHTML = "";
+    vi.useRealTimers();
+  });
+
+  it("blur to a real element elsewhere accepts WITHOUT refocusing the editor (regression: bounce back after clicking another pane)", () => {
+    const { input, accept } = mount(document);
+    const other = document.createElement("textarea");
+    document.body.appendChild(other);
+    other.focus(); // jsdom fires a real blur on the input
+
+    vi.advanceTimersByTime(110);
+
+    expect(input.isConnected).toBe(true);
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(accept).toHaveBeenCalledWith(false);
+  });
+
+  it("blur that leaves focus on body accepts and still asks to refocus the editor", () => {
+    const { input, accept } = mount(document);
+    input.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    input.dispatchEvent(new FocusEvent("blur"));
+    vi.advanceTimersByTime(110);
+
+    expect(accept).toHaveBeenCalledWith(true);
+  });
+
+  it("markdown controller forwards refocus=false to commitMatch so view.focus() is not called", () => {
+    const focus = vi.fn();
+    const session = {
+      query: "w",
+      direction: "forward",
+      matches: [{ from: 0, to: 1 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    };
+    const view: any = {
+      state: { field: () => session },
+      dispatch: () => { },
+      dom: { parentElement: document.createElement("div") },
+      focus,
+    };
+    const ctrl = createMarkdownSessionController(view, {
+      app: {} as any,
+      settings: { lastQuery: "" } as any,
+      saveSettings: async () => { },
+    });
+    ctrl.accept(false);
+    expect(focus).not.toHaveBeenCalled();
+    ctrl.accept();
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("evaluates focus against the widget's own (pop-out) document, not the main document", () => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    const { input, accept } = mount(popout);
+    const other = popout.createElement("textarea");
+    popout.body.appendChild(other);
+    // jsdom does not track focus for documents without a browsing context, so stub it.
+    Object.defineProperty(popout, "activeElement", { get: () => other, configurable: true });
+    // The main document has nothing focused; a main-document check would see <body> here.
+    expect(document.activeElement).toBe(document.body);
+
+    input.dispatchEvent(new FocusEvent("blur"));
+    vi.advanceTimersByTime(110);
+
+    expect(accept).toHaveBeenCalledWith(false);
+  });
+
+  it("removeAllWidgets removes a widget living in a pop-out document", () => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    mount(popout);
+    expect(popout.querySelectorAll(".incsearch-widget").length).toBe(1);
+
+    removeAllWidgets();
+
+    expect(popout.querySelectorAll(".incsearch-widget").length).toBe(0);
+    expect(getActiveWidget()).toBeNull();
+  });
+});

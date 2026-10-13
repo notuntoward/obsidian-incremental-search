@@ -963,14 +963,15 @@ export function recomputeQuery(
  */
 export function commitMatch(
 	view: EditorView,
-	plugin: { settings: { lastQuery: string }; saveSettings: () => Promise<void> }
+	plugin: { settings: { lastQuery: string }; saveSettings: () => Promise<void> },
+	refocus = true
 ) {
 	try {
 		const session = view.state.field(searchSessionField, false);
 		logDebug("session", `commitMatch: hasSession=${Boolean(session)}, matches=${session?.matches?.length ?? 0}`);
 		if (!session || session.matches.length === 0) {
 			closeSession(view, plugin);
-			view.focus();
+			if (refocus) view.focus();
 			return;
 		}
 
@@ -991,12 +992,12 @@ export function commitMatch(
 		restoreAutoUnfoldedStructures(view, m.from);
 		clearAllTableHighlights(view);
 		removeWidget(view);
-		view.focus();
+		if (refocus) view.focus();
 	} catch (e) {
 		console.error("Incremental Search: commitMatch error", e);
 		restoreAutoUnfoldedStructures(view);
 		removeWidget(view);
-		view.focus();
+		if (refocus) view.focus();
 	}
 }
 

@@ -43,7 +43,8 @@ export interface SearchSessionController {
 	toggleDemandHighlights(): void;
 
 	/** Called when search is committed (Enter in Emacs mode, Esc in Obsidian mode). */
-	accept(): void;
+	/** `refocus` is false when focus deliberately moved elsewhere (e.g. a click in another pane). */
+	accept(refocus?: boolean): void;
 
 	/** Called when search is cancelled (Esc in Emacs mode, Ctrl+G). */
 	cancel(): void;
@@ -101,9 +102,9 @@ export function createMarkdownSessionController(
 		toggleDemandHighlights() {
 			toggleDemandHighlights(view);
 		},
-		accept() {
+		accept(refocus = true) {
 			logDebug("widget", "createMarkdownSessionController: accept called");
-			commitMatch(view, plugin);
+			commitMatch(view, plugin, refocus);
 		},
 		cancel() {
 			logDebug("widget", "createMarkdownSessionController: cancel called");
@@ -472,7 +473,10 @@ export function renderSearchWidget(
 				"widget",
 				`blur timeout: focus lost to ${describeElement(activeEl)} after guard expired, calling controller.accept()`
 			);
-			controller.accept();
+			// Focus moved to a real element elsewhere (e.g. a click in another pane/window):
+			// close the search but do not steal focus back to the editor.
+			const focusMovedElsewhere = Boolean(activeEl) && activeEl !== doc.body;
+			controller.accept(!focusMovedElsewhere);
 		}, 100);
 	});
 

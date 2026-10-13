@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import IncrementalSearchPlugin from "../src/main";
 import { getActiveWidget } from "../src/widget";
 import * as colors from "../src/utils/colors";
@@ -548,4 +548,88 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
   });
 });
 
+describe("IncrementalSearchPlugin multi-window (pop-out) handling", () => {
+  let handlers: Record<string, (...args: any[]) => void>;
+  let leaves: any[];
+  let plugin: any;
+  let registered: Array<{ el: any; type: string }>;
 
+  const realActiveDocument = Object.getOwnPropertyDescriptor(globalThis, "activeDocument");
+
+  beforeEach(async () => {
+    handlers = {};
+    leaves = [];
+    registered = [];
+    const app = {
+      workspace: {
+        on: (name: string, cb: any) => {
+          handlers[name] = cb;
+        },
+        onLayoutReady: (cb: any) => cb(),
+        iterateAllLeaves: (cb: any) => leaves.forEach(cb),
+        getActiveFile: () => null,
+      },
+      metadataCache: { getFileCache: () => null },
+    };
+    plugin = new IncrementalSearchPlugin(app as any, {} as any);
+    plugin.addCommand = () => {};
+    plugin.registerDomEvent = (el: any, type: string) => registered.push({ el, type });
+    plugin.loadData = async () => ({});
+    plugin.saveData = async () => {};
+    await plugin.onload();
+  });
+
+  afterEach(() => {
+    if (realActiveDocument) Object.defineProperty(globalThis, "activeDocument", realActiveDocument);
+  });
+
+  it("hooks pointerdown/mousedown on the main document and on each newly opened pop-out document once", () => {
+    expect(registered.filter((r) => r.el === document).map((r) => r.type).sort()).toEqual([
+      "mousedown",
+      "pointerdown",
+    ]);
+
+    const popout = document.implementation.createHTMLDocument("popout");
+    handlers["window-open"]({}, { document: popout });
+    handlers["window-open"]({}, { document: popout }); // duplicate event must not double-register
+
+    expect(registered.filter((r) => r.el === popout).map((r) => r.type).sort()).toEqual([
+      "mousedown",
+      "pointerdown",
+    ]);
+  });
+
+  it("hooks pop-out documents that already exist at layout-ready time", async () => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    const leafEl = popout.createElement("div");
+    leaves.push({ containerEl: leafEl, view: {} });
+    registered.length = 0;
+    handlers = {};
+    plugin.app.workspace.onLayoutReady = (cb: any) => cb();
+    // Re-run onload so layout-ready sees the existing pop-out leaf.
+    await plugin.onload();
+    expect(registered.some((r) => r.el === popout && r.type === "pointerdown")).toBe(true);
+  });
+
+  it("resolves the search target from the active (pop-out) document, not the main one", () => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    const popoutLeafEl = popout.createElement("div");
+    const popoutInput = popout.createElement("div");
+    popoutLeafEl.appendChild(popoutInput);
+    popout.body.appendChild(popoutLeafEl);
+
+    const mainEditor = { cm: {}, id: "main" };
+    const popoutEditor = { cm: {}, id: "popout" };
+    const mainLeaf = { containerEl: document.createElement("div"), view: { editor: mainEditor } };
+    const popoutLeaf = { containerEl: popoutLeafEl, view: { editor: popoutEditor } };
+    leaves.push(mainLeaf, popoutLeaf);
+
+    // The user last clicked the main-window leaf, but focus is now inside the pop-out.
+    plugin.lastInteractedLeaf = mainLeaf;
+    Object.defineProperty(popout, "activeElement", { get: () => popoutInput, configurable: true });
+    Object.defineProperty(globalThis, "activeDocument", { get: () => popout, configurable: true });
+
+    const target = plugin.getActiveTarget();
+    expect(target).toEqual({ type: "editor", editor: popoutEditor });
+  });
+});

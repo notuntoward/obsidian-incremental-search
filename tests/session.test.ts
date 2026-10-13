@@ -285,6 +285,38 @@ describe("session: termination & query persistence", () => {
     expect(lastDispatch.selection.anchor).toBe(15);
   });
 
+  it("commitMatch refocuses the editor by default but not when refocus=false (focus moved to another pane)", () => {
+    const session = {
+      query: "found",
+      direction: "forward",
+      matches: [{ from: 10, to: 15 }],
+      activeIndex: 0,
+      originSelection: { anchor: 0, head: 0 },
+    } as SearchSessionState;
+
+    const view = createView(session);
+    const focus = vi.fn();
+    view.focus = focus;
+    commitMatch(view, mockPlugin);
+    expect(focus).toHaveBeenCalledTimes(1);
+
+    const view2 = createView({ ...session });
+    const focus2 = vi.fn();
+    view2.focus = focus2;
+    commitMatch(view2, mockPlugin, false);
+    expect(focus2).not.toHaveBeenCalled();
+    expect(currentSession).toBeNull();
+    expect(dispatches[0].selection.head).toBe(15);
+
+    // Also for the no-matches path
+    const view3 = createView({ ...session, matches: [] });
+    const focus3 = vi.fn();
+    view3.focus = focus3;
+    commitMatch(view3, mockPlugin, false);
+    expect(focus3).not.toHaveBeenCalled();
+    expect(currentSession).toBeNull();
+  });
+
   it("commitMatch with no matches closes session without throwing or restoring origin", () => {
     const view = createView({
       query: "nomatch",
