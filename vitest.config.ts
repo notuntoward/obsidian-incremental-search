@@ -11,6 +11,7 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    setupFiles: ['tests/setup-obsidian-globals.ts'],
     environment: 'jsdom',
     pool: 'vmThreads', // Vitest 4.x: only vm* pools properly collect tests
     include: ['tests/**/*.test.ts'],

@@ -346,7 +346,9 @@ export function removeAllWidgets() {
 		activeKeyCleanup();
 		activeKeyCleanup = null;
 	}
-	document.querySelectorAll(".incsearch-widget").forEach((w) => w.remove());
+	const docs = new Set<Document>([document]);
+	if (activeWidgetEl) docs.add(activeWidgetEl.ownerDocument);
+	docs.forEach((d) => d.querySelectorAll(".incsearch-widget").forEach((w) => w.remove()));
 	if (activeWidgetEl) {
 		activeWidgetEl = null;
 	}
@@ -367,6 +369,11 @@ export function renderSearchWidget(
 	);
 	removeWidget();
 
+	const container = controller.containerEl;
+	// Pop-out windows have their own document/window; the globals refer to the main window.
+	const doc = container.ownerDocument;
+	const win = doc.defaultView ?? window;
+
 	const onGlobalKeyDown = (evt: KeyboardEvent) => {
 		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
 		const isEnter =
@@ -382,12 +389,11 @@ export function renderSearchWidget(
 			controller.toggleDemandHighlights();
 		}
 	};
-	window.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+	win.addEventListener("keydown", onGlobalKeyDown, { capture: true });
 	activeKeyCleanup = () => {
-		window.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+		win.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
 	};
 
-	const container = controller.containerEl;
 	const el = container.createDiv({ cls: "incsearch-widget" });
 
 	el.createSpan({
@@ -433,13 +439,13 @@ export function renderSearchWidget(
 
 	input.addEventListener("blur", (evt) => {
 		const related = evt.relatedTarget as HTMLElement | null;
-		const activeNow = document.activeElement;
+		const activeNow = doc.activeElement;
 		logDebug(
 			"widget",
 			`input blur event fired! relatedTarget=${describeElement(related)}, activeElementNow=${describeElement(activeNow)}`
 		);
-		window.setTimeout(() => {
-			const activeEl = document.activeElement;
+		win.setTimeout(() => {
+			const activeEl = doc.activeElement;
 			const now = Date.now();
 			const guardRemaining = focusGuardUntil - now;
 			logDebug(
@@ -543,9 +549,9 @@ export function renderSearchWidget(
 	});
 
 	setFocusGuard();
-	logDebug("widget", `renderSearchWidget: focusing input, activeElement before=${describeElement(document.activeElement)}`);
+	logDebug("widget", `renderSearchWidget: focusing input, activeElement before=${describeElement(doc.activeElement)}`);
 	input.focus();
-	logDebug("widget", `renderSearchWidget: focused input, activeElement after=${describeElement(document.activeElement)}`);
+	logDebug("widget", `renderSearchWidget: focused input, activeElement after=${describeElement(doc.activeElement)}`);
 	if (initialQuery.length > 0) {
 		input.select();
 	} else {
@@ -553,12 +559,12 @@ export function renderSearchWidget(
 		input.setSelectionRange(len, len);
 	}
 	updateCounter();
-	window.requestAnimationFrame(() => {
+	win.requestAnimationFrame(() => {
 		logDebug(
 			"widget",
-			`renderSearchWidget RAF: activeWidgetEl=${describeElement(activeWidgetEl)}, activeElement=${describeElement(document.activeElement)}`
+			`renderSearchWidget RAF: activeWidgetEl=${describeElement(activeWidgetEl)}, activeElement=${describeElement(doc.activeElement)}`
 		);
-		if (activeWidgetEl && document.activeElement !== input) {
+		if (activeWidgetEl && doc.activeElement !== input) {
 			logDebug("widget", "renderSearchWidget RAF: refocusing input");
 			input.focus();
 			if (initialQuery.length > 0) {

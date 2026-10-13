@@ -123,12 +123,31 @@ export default class IncrementalSearchPlugin extends Plugin {
 			});
 		};
 
-		this.registerDomEvent(document, "pointerdown", handleLeafInteraction, {
-			capture: true,
-		} as any);
-		this.registerDomEvent(document, "mousedown", handleLeafInteraction, {
-			capture: true,
-		} as any);
+		// Pop-out windows have their own document, so interaction listeners must be
+		// attached to each window's document, not just the main one.
+		const hookedDocs = new WeakSet<Document>();
+		const hookDocument = (doc: Document) => {
+			if (hookedDocs.has(doc)) return;
+			hookedDocs.add(doc);
+			this.registerDomEvent(doc, "pointerdown", handleLeafInteraction, {
+				capture: true,
+			} as any);
+			this.registerDomEvent(doc, "mousedown", handleLeafInteraction, {
+				capture: true,
+			} as any);
+		};
+		hookDocument(document);
+		this.app.workspace.onLayoutReady(() => {
+			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
+				const doc = leaf.containerEl?.ownerDocument;
+				if (doc) hookDocument(doc);
+			});
+		});
+		this.registerEvent(
+			this.app.workspace.on("window-open", (_win: any, win: Window) => {
+				hookDocument(win.document);
+			})
+		);
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -194,11 +213,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 	private getActiveTarget():
 		{ type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
-		const activeEl = document.activeElement;
+		const activeEl = activeDocument.activeElement;
 		logDebug("main", `getActiveTarget: activeElement=${describeElement(activeEl)}`);
 
 		// 1. If document.activeElement is inside a specific workspace leaf, use that leaf
-		if (activeEl && activeEl !== document.body) {
+		if (activeEl && activeEl !== activeDocument.body) {
 			let focusedLeaf: any = null;
 			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
 				if (leaf.containerEl?.contains(activeEl)) {
@@ -230,7 +249,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 
 		// 3. Check leaf with .mod-active in DOM
-		const modActiveLeafEl = document.querySelector(".workspace-leaf.mod-active");
+		const modActiveLeafEl = activeDocument.querySelector(".workspace-leaf.mod-active");
 		if (modActiveLeafEl) {
 			let activeLeafObj: any = null;
 			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
@@ -339,8 +358,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 					if (input) {
 						setFocusGuard();
 						input.focus();
-						window.requestAnimationFrame(() => {
-							if (getActiveWidget() && document.activeElement !== input) {
+						(input.ownerDocument.defaultView ?? window).requestAnimationFrame(() => {
+							if (getActiveWidget() && input.ownerDocument.activeElement !== input) {
 								logDebug("main", "invokePdf RAF: refocusing input");
 								input.focus();
 							}
@@ -368,7 +387,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 		const startingQuery =
 			typeof window !== "undefined"
-				? window.getSelection()?.toString().trim() ?? ""
+				? activeWindow.getSelection()?.toString().trim() ?? ""
 				: "";
 		logDebug("main", `invokePdf: rendering PDF widget with startingQuery="${startingQuery}"`);
 		renderPdfWidget(this.pdfController, this, startingQuery, direction, () => {
@@ -439,8 +458,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 					if (input) {
 						setFocusGuard();
 						input.focus();
-						window.requestAnimationFrame(() => {
-							if (getActiveWidget() && document.activeElement !== input) {
+						(input.ownerDocument.defaultView ?? window).requestAnimationFrame(() => {
+							if (getActiveWidget() && input.ownerDocument.activeElement !== input) {
 								logDebug("main", "invoke RAF: refocusing input");
 								input.focus();
 							}
