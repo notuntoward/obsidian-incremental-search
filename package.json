@@ -30,7 +30,7 @@
 		"@typescript-eslint/parser": "^8.60.1",
 		"@vitest/coverage-v8": "^4.0.0",
 		"@vitest/ui": "^4.0.0",
-		"builtin-modules": "^4.0.0",
+		"builtin-modules": "^5.4.0",
 		"esbuild": "^0.28.0",
 		"eslint": "^9.39.4",
 		"eslint-plugin-obsidianmd": "^0.3.0",
