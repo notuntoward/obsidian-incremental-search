@@ -47,11 +47,14 @@ export function getContrastRatio(lum1: number, lum2: number): number {
  * Pass `background` to evaluate against a surface other than the theme
  * (PDFs pass their actual page background and font color).
  */
-export function resolveOutlineColor(background?: string, fallbackOverride?: string): string {
-	if (typeof document === "undefined" || typeof window === "undefined" || !document.body) {
+export function resolveOutlineColor(background?: string, fallbackOverride?: string, doc?: Document): string {
+	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const targetWin = targetDoc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+
+	if (!targetDoc || !targetWin || !targetDoc.body) {
 		return "#705dcf";
 	}
-	const bodyStyle = window.getComputedStyle(document.body);
+	const bodyStyle = targetWin.getComputedStyle(targetDoc.body);
 
 	const appBg = bodyStyle.getPropertyValue("--background-primary").trim();
 	const accent = bodyStyle.getPropertyValue("--interactive-accent").trim();
@@ -65,7 +68,7 @@ export function resolveOutlineColor(background?: string, fallbackOverride?: stri
 	const rgbBg = parseCssColor(
 		background ||
 			appBg ||
-			(document.body.classList.contains("theme-dark") ? "#1e1e1e" : "#ffffff")
+			(targetDoc.body.classList.contains("theme-dark") ? "#1e1e1e" : "#ffffff")
 	);
 	const rgbAccent = parseCssColor(accent);
 
@@ -87,9 +90,11 @@ export function resolveOutlineColor(background?: string, fallbackOverride?: stri
  * with a filter, since canvas bitmaps cannot be recolored via background-color.
  */
 function hasInversionFilter(el: HTMLElement, root: HTMLElement): boolean {
+	const win = el.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	if (!win) return false;
 	let current: HTMLElement | null = el;
 	while (current) {
-		const filter = window.getComputedStyle(current).filter;
+		const filter = win.getComputedStyle(current).filter;
 		if (filter && filter !== "none") {
 			const match = filter.match(/invert\(\s*([\d.]+)(%)?\s*\)/);
 			if (match) {
@@ -108,23 +113,11 @@ function hasInversionFilter(el: HTMLElement, root: HTMLElement): boolean {
 
 /**
  * Detects the PDF's actual page background and font colors.
- *
- * PDF.js renders pages into a `<canvas>` bitmap, so CSS `background-color` set
- * on the canvas or its wrapper elements is never visible — the canvas bitmap
- * covers it entirely. The only reliable way a theme changes a PDF's visible
- * appearance is a CSS `filter: invert(...)` applied to the canvas or an
- * ancestor (the technique themes like Minimal use for "PDF dark mode").
- *
- * When a canvas is present: inverted → treated as a dark page; otherwise the
- * PDF is the untouched white-page-with-dark-text default, regardless of any
- * background-color set on surrounding elements.
- *
- * When no canvas is present (non-standard PDF renderer), falls back to reading
- * explicit background-color from page/text-layer elements.
  */
 function detectPdfAppearance(containerEl: HTMLElement): { background: RGBA; text: RGBA } {
 	const fallback = { background: { ...PDF_FALLBACK_BACKGROUND }, text: { ...LIGHT_THEME_TEXT } };
-	if (typeof window === "undefined") {
+	const win = containerEl.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	if (!win) {
 		return fallback;
 	}
 
@@ -137,7 +130,7 @@ function detectPdfAppearance(containerEl: HTMLElement): { background: RGBA; text
 	}
 
 	const readBackground = (el: HTMLElement): RGBA | null => {
-		const bgColor = window.getComputedStyle(el).backgroundColor;
+		const bgColor = win.getComputedStyle(el).backgroundColor;
 		if (!bgColor || bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
 			return null;
 		}
@@ -160,22 +153,21 @@ function detectPdfAppearance(containerEl: HTMLElement): { background: RGBA; text
 /**
  * Applies PDF match colors computed with the same outline and secondary
  * pipelines as markdown, evaluated against the PDF's actual page background
- * and font colors. The theme mode used is the one that best matches how the
- * PDF is styled (dark pages use the dark-theme algorithm, light pages use the
- * light-theme algorithm).
+ * and font colors.
  */
 export function applyPdfColors(
 	containerEl: HTMLElement,
 	settings?: Partial<IncrementalSearchSettings>
 ) {
+	const doc = containerEl.ownerDocument;
 	const { background: pdfBackground, text: pdfText } = detectPdfAppearance(containerEl);
 	const secondary = computePdfSecondaryStyle(pdfBackground, pdfText, settings);
-	const outline = resolveOutlineColor(rgbString(pdfBackground), rgbString(pdfText));
+	const outline = resolveOutlineColor(rgbString(pdfBackground), rgbString(pdfText), doc);
 	containerEl.style.setProperty("--incsearch-secondary-fill", secondary.fillCss);
 	containerEl.style.setProperty("--incsearch-secondary-edge", secondary.edgeCss);
 	containerEl.style.setProperty("--incsearch-current-outline-resolved", outline);
-	if (typeof document !== "undefined" && document.documentElement) {
-		document.documentElement.style.setProperty(
+	if (doc && doc.documentElement) {
+		doc.documentElement.style.setProperty(
 			"--incsearch-pdf-secondary-fill",
 			secondary.fillCss
 		);
@@ -189,16 +181,18 @@ export function clearPdfColors(containerEl: HTMLElement) {
 	containerEl.style.removeProperty("--incsearch-secondary-fill");
 	containerEl.style.removeProperty("--incsearch-secondary-edge");
 	containerEl.style.removeProperty("--incsearch-current-outline-resolved");
-	if (typeof document !== "undefined" && document.documentElement) {
-		document.documentElement.style.removeProperty("--incsearch-pdf-secondary-fill");
+	const doc = containerEl.ownerDocument;
+	if (doc && doc.documentElement) {
+		doc.documentElement.style.removeProperty("--incsearch-pdf-secondary-fill");
 	}
 }
 
 /**
  * Updates the `--incsearch-current-outline-resolved` CSS variable on the document body.
  */
-export function updateResolvedOutlineColor() {
-	if (typeof document === "undefined" || !document.body) return;
-	const resolved = resolveOutlineColor();
-	document.body.style.setProperty("--incsearch-current-outline-resolved", resolved);
+export function updateResolvedOutlineColor(doc?: Document) {
+	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	if (!targetDoc || !targetDoc.body) return;
+	const resolved = resolveOutlineColor(undefined, undefined, targetDoc);
+	targetDoc.body.style.setProperty("--incsearch-current-outline-resolved", resolved);
 }

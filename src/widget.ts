@@ -347,7 +347,9 @@ export function removeAllWidgets() {
 		activeKeyCleanup();
 		activeKeyCleanup = null;
 	}
-	const docs = new Set<Document>([document]);
+	const docs = new Set<Document>();
+	if (typeof activeDocument !== "undefined") docs.add(activeDocument);
+	if (typeof document !== "undefined") docs.add(document);
 	if (activeWidgetEl) docs.add(activeWidgetEl.ownerDocument);
 	docs.forEach((d) => d.querySelectorAll(".incsearch-widget").forEach((w) => w.remove()));
 	if (activeWidgetEl) {
@@ -475,7 +477,10 @@ export function renderSearchWidget(
 			);
 			// Focus moved to a real element elsewhere (e.g. a click in another pane/window):
 			// close the search but do not steal focus back to the editor.
-			const focusMovedElsewhere = Boolean(activeEl) && activeEl !== doc.body;
+			const isAnotherWindowActive =
+				Boolean(typeof activeWindow !== "undefined" && activeWindow && win && activeWindow !== win) ||
+				Boolean(typeof activeDocument !== "undefined" && activeDocument && doc && activeDocument !== doc);
+			const focusMovedElsewhere = isAnotherWindowActive || (Boolean(activeEl) && activeEl !== doc.body);
 			controller.accept(!focusMovedElsewhere);
 		}, 100);
 	});

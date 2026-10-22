@@ -1,3 +1,4 @@
+import { ownerWindow, setTimeoutIn } from "commons/windows";
 import { App, SuggestModal, Editor } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
@@ -79,22 +80,22 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				const localCharStart = c.from - line.from;
 				const localCharEnd = c.to - line.from;
 				textSpan.appendChild(
-					document.createTextNode(line.text.substring(last, localCharStart))
+					el.ownerDocument.createTextNode(line.text.substring(last, localCharStart))
 				);
 				const hl = textSpan.createSpan({ cls: "incsearch-match" });
 				hl.textContent = line.text.substring(localCharStart, localCharEnd);
 				last = localCharEnd;
 			}
-			textSpan.appendChild(document.createTextNode(line.text.substring(last)));
+			textSpan.appendChild(el.ownerDocument.createTextNode(line.text.substring(last)));
 		} else {
 			const localStart = m.from - line.from;
 			const localEnd = m.to - line.from;
 
 			if (localStart >= 0 && localEnd <= line.length) {
-				textSpan.appendChild(document.createTextNode(line.text.substring(0, localStart)));
+				textSpan.appendChild(el.ownerDocument.createTextNode(line.text.substring(0, localStart)));
 				const hl = textSpan.createSpan({ cls: "incsearch-match" });
 				hl.textContent = line.text.substring(localStart, localEnd);
-				textSpan.appendChild(document.createTextNode(line.text.substring(localEnd)));
+				textSpan.appendChild(el.ownerDocument.createTextNode(line.text.substring(localEnd)));
 			} else {
 				textSpan.textContent = line.text;
 			}
@@ -126,9 +127,10 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 				toggleDemandHighlights(this.cm);
 			}
 		};
-		window.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+		const win = ownerWindow(this.containerEl) ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+		win?.addEventListener("keydown", onGlobalKeyDown, { capture: true });
 		this.modalKeyCleanup = () => {
-			window.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+			win?.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
 		};
 
 		this.observer = new MutationObserver((mutations) => {
@@ -166,7 +168,8 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 
 		// Defer the teardown so that if onChooseSuggestion is firing in the same event loop
 		// (e.g. mouse click after blur, or specific Obsidian ENTER handlers), it can set this.chosen = true
-		window.setTimeout(() => {
+		const win = ownerWindow(this.containerEl) ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+		setTimeoutIn(win ?? (window as any), () => {
 			if (this.chosen) {
 				logDebug("modal", "onClose timeout: chosen is true, skipping cancellation");
 				return;

@@ -21,6 +21,7 @@ export class Plugin {
 	registerInterval(_id: number): number {
 		return _id;
 	}
+	register(_cb: any): void {}
 }
 
 export class PluginSettingTab {
@@ -119,6 +120,7 @@ export class Notice {
 export class Modal {
 	app: any;
 	contentEl: any;
+	scope: any = { register: () => {} };
 
 	constructor(app: any) {
 		this.app = app;
@@ -136,7 +138,7 @@ export class SuggestModal extends Modal {
   constructor(app: any) {
     super(app);
     this.inputEl = { value: "", dispatchEvent: () => {} };
-    this.resultContainerEl = { querySelector: () => null };
+    this.resultContainerEl = typeof document !== "undefined" ? document.createElement("div") : { querySelector: () => null };
   }
   setPlaceholder(text: string): void {}
 }

@@ -2,7 +2,7 @@
 	"id": "incremental-search",
 	"name": "Incremental Search",
 	"version": "0.1.0",
-	"minAppVersion": "1.13.1",
+	"minAppVersion": "1.14.0",
 	"description": "Interactive incremental search with directional navigation and live document highlighting.",
 	"author": "Scott Otterson",
 	"authorUrl": "https://github.com/notuntoward",

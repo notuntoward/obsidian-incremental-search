@@ -1,3 +1,5 @@
+import { focusLeafAndWindow, getActiveLeafInFocusedWindow, isLeafAttached, isLeafDetached } from "commons/workspace";
+import { forEachWindow, ownerWindow } from "commons/windows";
 import { Plugin, PluginSettingTab, App, Setting, Editor, View, type SettingDefinitionItem } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
@@ -90,7 +92,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
 				if (leaf.containerEl === leafEl) {
-					this.lastInteractedLeaf = leaf;
+					if (!isLeafDetached(leaf)) {
+						this.lastInteractedLeaf = leaf;
+					} else {
+						this.lastInteractedLeaf = null;
+					}
 					// `workspace.activeLeaf` is discouraged for reading "the current view" (use
 					// `getActiveViewOfType` for that), but there is no supported way to compare
 					// leaf identity to avoid a redundant `setActiveLeaf` call here. Reading the
@@ -102,7 +108,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 							"main",
 							`handleLeafInteraction setting activeLeaf to ${describeElement(leafEl)}`
 						);
-						this.app.workspace.setActiveLeaf(leaf, { focus: true });
+						focusLeafAndWindow(this.app, leaf);
 					}
 					if (activeWidget && !leafEl.contains(activeWidget)) {
 						logDebug(
@@ -126,8 +132,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 		// Pop-out windows have their own document, so interaction listeners must be
 		// attached to each window's document, not just the main one.
 		const hookedDocs = new WeakSet<Document>();
-		const hookDocument = (doc: Document) => {
-			if (hookedDocs.has(doc)) return;
+		const hookDocument = (doc: Document | null | undefined) => {
+			if (!doc || hookedDocs.has(doc)) return;
 			hookedDocs.add(doc);
 			this.registerDomEvent(doc, "pointerdown", handleLeafInteraction, {
 				capture: true,
@@ -136,18 +142,16 @@ export default class IncrementalSearchPlugin extends Plugin {
 				capture: true,
 			} as any);
 		};
-		hookDocument(document);
+
+		forEachWindow(this, (win) => {
+			hookDocument(win?.document);
+		});
 		this.app.workspace.onLayoutReady(() => {
 			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
 				const doc = leaf.containerEl?.ownerDocument;
 				if (doc) hookDocument(doc);
 			});
 		});
-		this.registerEvent(
-			this.app.workspace.on("window-open", (_win: any, win: Window) => {
-				hookDocument(win.document);
-			})
-		);
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -224,7 +228,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					focusedLeaf = leaf;
 				}
 			});
-			if (focusedLeaf?.view) {
+			if (focusedLeaf?.view && !isLeafDetached(focusedLeaf)) {
 				if (isPdfView(focusedLeaf.view)) {
 					logDebug("main", "getActiveTarget [1]: activeElement in focused leaf -> PDF view");
 					return { type: "pdf", view: focusedLeaf.view };
@@ -237,7 +241,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 
 		// 2. If the user recently clicked/interacted with a specific leaf
-		if (this.lastInteractedLeaf?.view) {
+		if (this.lastInteractedLeaf?.view && !isLeafDetached(this.lastInteractedLeaf)) {
 			if (isPdfView(this.lastInteractedLeaf.view)) {
 				logDebug("main", "getActiveTarget [2]: lastInteractedLeaf -> PDF view");
 				return { type: "pdf", view: this.lastInteractedLeaf.view };
@@ -246,6 +250,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 				logDebug("main", "getActiveTarget [2]: lastInteractedLeaf -> Editor view");
 				return { type: "editor", editor: this.lastInteractedLeaf.view.editor };
 			}
+		} else if (this.lastInteractedLeaf && isLeafDetached(this.lastInteractedLeaf)) {
+			this.lastInteractedLeaf = null;
 		}
 
 		// 3. Check leaf with .mod-active in DOM
@@ -257,7 +263,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 					activeLeafObj = leaf;
 				}
 			});
-			if (activeLeafObj?.view) {
+			if (activeLeafObj?.view && !isLeafDetached(activeLeafObj)) {
 				if (isPdfView(activeLeafObj.view)) {
 					logDebug("main", "getActiveTarget [3]: mod-active leaf -> PDF view");
 					return { type: "pdf", view: activeLeafObj.view };
@@ -269,30 +275,47 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}
 		}
 
-		// 4. Prefer the documented `getMostRecentLeaf()` API over reading `workspace.activeLeaf`
+		// 4. Prefer the active leaf in the focused window
+		const activeInWindow = getActiveLeafInFocusedWindow(this.app);
+		if (activeInWindow?.view && !isLeafDetached(activeInWindow)) {
+			if (isPdfView(activeInWindow.view)) {
+				logDebug("main", "getActiveTarget [4]: getActiveLeafInFocusedWindow -> PDF view");
+				return { type: "pdf", view: activeInWindow.view };
+			}
+			if ((activeInWindow.view as any).editor) {
+				logDebug("main", "getActiveTarget [4]: getActiveLeafInFocusedWindow -> Editor view");
+				return { type: "editor", editor: (activeInWindow.view as any).editor };
+			}
+		}
+
+		// 5. Prefer the documented `getMostRecentLeaf()` API over reading `workspace.activeLeaf`
 		// directly; fall back to the discouraged property only if that returns nothing.
 		const activeLeaf =
 			this.app.workspace.getMostRecentLeaf?.() || (this.app.workspace as any).activeLeaf;
 		const activeView = activeLeaf?.view;
 
-		if (activeView && isPdfView(activeView)) {
-			logDebug("main", "getActiveTarget [4]: getMostRecentLeaf -> PDF view");
-			return { type: "pdf", view: activeView };
-		}
-		if (activeView?.editor) {
-			logDebug("main", "getActiveTarget [4]: getMostRecentLeaf -> Editor view");
-			return { type: "editor", editor: activeView.editor };
+		if (activeView && !isLeafDetached(activeLeaf)) {
+			if (isPdfView(activeView)) {
+				logDebug("main", "getActiveTarget [5]: getMostRecentLeaf -> PDF view");
+				return { type: "pdf", view: activeView };
+			}
+			if (activeView?.editor) {
+				logDebug("main", "getActiveTarget [5]: getMostRecentLeaf -> Editor view");
+				return { type: "editor", editor: activeView.editor };
+			}
 		}
 
-		// 5. Fallback to activeLeaf on workspace
+		// 6. Fallback to activeLeaf on workspace
 		const fallbackView = this.app.workspace.getActiveViewOfType(View as any);
-		if (fallbackView && isPdfView(fallbackView)) {
-			logDebug("main", "getActiveTarget [5]: getActiveViewOfType -> PDF view");
-			return { type: "pdf", view: fallbackView };
-		}
-		if ((fallbackView as any)?.editor) {
-			logDebug("main", "getActiveTarget [5]: getActiveViewOfType -> Editor view");
-			return { type: "editor", editor: (fallbackView as any).editor };
+		if (fallbackView) {
+			if (isPdfView(fallbackView)) {
+				logDebug("main", "getActiveTarget [6]: getActiveViewOfType -> PDF view");
+				return { type: "pdf", view: fallbackView };
+			}
+			if ((fallbackView as any)?.editor) {
+				logDebug("main", "getActiveTarget [6]: getActiveViewOfType -> Editor view");
+				return { type: "editor", editor: (fallbackView as any).editor };
+			}
 		}
 
 		logDebug("main", "getActiveTarget: no active target found (returning null)");
@@ -314,6 +337,10 @@ export default class IncrementalSearchPlugin extends Plugin {
 		const target = this.getActiveTarget();
 		logDebug("main", `handleCommand: target=${target?.type ?? "null"}`);
 		if (!target) return false;
+
+		if (!checking && this.lastInteractedLeaf && !isLeafDetached(this.lastInteractedLeaf)) {
+			focusLeafAndWindow(this.app, this.lastInteractedLeaf);
+		}
 
 		if (target.type === "pdf") {
 			if (!checking) {

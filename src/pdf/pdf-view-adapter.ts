@@ -51,11 +51,14 @@ function resolveViewerComponents(view: any): {
 } | null {
 	if (!view) return null;
 
+	const doc = typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null);
+	const fallbackBody = doc?.body;
 	const containerEl: HTMLElement =
-		view.contentEl || view.containerEl || view.viewer?.child?.containerEl || document.body;
+		view.contentEl || view.containerEl || view.viewer?.child?.containerEl || (fallbackBody as HTMLElement);
 
 	// Check if PDF++ plugin API is present on window
-	const pdfPlus = (window as any).pdfPlus;
+	const win = containerEl?.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	const pdfPlus = (win as any)?.pdfPlus ?? (typeof window !== "undefined" ? (window as any).pdfPlus : undefined);
 	if (pdfPlus?.lib) {
 		try {
 			const pv =
@@ -120,7 +123,9 @@ function resolveViewerComponents(view: any): {
 function isScrollableElement(el: HTMLElement | null | undefined): boolean {
 	if (!el || typeof el.getBoundingClientRect !== "function") return false;
 	try {
-		const style = window.getComputedStyle(el);
+		const win = el.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+		const style = win ? win.getComputedStyle(el) : null;
+		if (!style) return false;
 		const overflow = `${style.overflow} ${style.overflowY} ${style.overflowX}`;
 		if (/(auto|scroll|overlay)/.test(overflow)) {
 			return true;
@@ -151,8 +156,9 @@ export function getScrollContainer(containerEl: HTMLElement, pageEl?: HTMLElemen
 	}
 
 	// 2. Walk up from pageEl to containerEl looking for the scrollable ancestor
+	const doc = containerEl.ownerDocument;
 	let cur = (pageEl?.parentElement || containerEl.querySelector?.(".page")?.parentElement) as HTMLElement | null;
-	while (cur && cur !== document.body && cur !== document.documentElement) {
+	while (cur && cur !== doc?.body && cur !== doc?.documentElement) {
 		if (isScrollableElement(cur)) {
 			return cur;
 		}

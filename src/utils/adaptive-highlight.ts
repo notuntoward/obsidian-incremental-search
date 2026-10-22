@@ -46,7 +46,8 @@ export function resolveAllCssVariables(
 	if (typeof document === "undefined" || typeof window === "undefined") {
 		return input.trim();
 	}
-	const target = el ?? document.body ?? document.documentElement;
+	const doc = el?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const target = el ?? doc?.body ?? doc?.documentElement;
 	if (!target) return input.trim();
 
 	let result = input.trim();
@@ -163,13 +164,15 @@ export function parseCssColor(value: string | null | undefined): RGBA {
 	}
 
 	// Browser DOM fallback for named colors
-	if (typeof document !== "undefined" && document.createElement) {
+	const doc = typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null);
+	const win = doc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	if (doc && doc.createElement && doc.body) {
 		try {
-			const probe = document.createElement("span");
+			const probe = doc.createElement("span");
 			probe.style.setProperty("color", trimmed);
 			probe.style.display = "none";
-			document.body.appendChild(probe);
-			const computed = window.getComputedStyle(probe).color;
+			doc.body.appendChild(probe);
+			const computed = win ? win.getComputedStyle(probe).color : "";
 			probe.remove();
 			if (computed && computed !== trimmed) {
 				return parseCssColor(computed);
@@ -322,19 +325,22 @@ export function ensurePerceptibleAccent(accent: RGBA, bg: RGBA, isDarkLegacy?: b
 /**
  * Walks up the DOM to find the first opaque background color.
  */
-export function firstOpaqueBackground(el: HTMLElement | null): RGBA {
+export function firstOpaqueBackground(el: HTMLElement | null, doc?: Document): RGBA {
+	const targetDoc = doc ?? el?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const targetWin = targetDoc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+
 	for (let node: HTMLElement | null = el; node; node = node.parentElement) {
-		if (typeof window !== "undefined") {
-			const color = parseCssColor(window.getComputedStyle(node).backgroundColor);
+		if (targetWin) {
+			const color = parseCssColor(targetWin.getComputedStyle(node).backgroundColor);
 			if (color.a > 0.05) return color;
 		}
 	}
-	if (typeof document !== "undefined" && typeof window !== "undefined" && document.body) {
-		const bodyBg = parseCssColor(window.getComputedStyle(document.body).backgroundColor);
+	if (targetDoc && typeof targetWin?.getComputedStyle === "function" && targetDoc.body) {
+		const bodyBg = parseCssColor(targetWin.getComputedStyle(targetDoc.body).backgroundColor);
 		if (bodyBg.a > 0.05) return bodyBg;
 
-		const varValue = window
-			.getComputedStyle(document.body)
+		const varValue = targetWin
+			.getComputedStyle(targetDoc.body)
 			.getPropertyValue("--background-primary")
 			.trim();
 		if (varValue) {
@@ -342,10 +348,7 @@ export function firstOpaqueBackground(el: HTMLElement | null): RGBA {
 			if (parsed.a > 0.05) return parsed;
 		}
 	}
-	const isDark =
-		typeof document !== "undefined" &&
-		document.body &&
-		document.body.classList.contains("theme-dark");
+	const isDark = targetDoc?.body?.classList.contains("theme-dark");
 	return isDark ? { r: 18, g: 18, b: 18, a: 1 } : { r: 255, g: 255, b: 255, a: 1 };
 }
 
@@ -353,12 +356,14 @@ export function firstOpaqueBackground(el: HTMLElement | null): RGBA {
  * Detects box/border/outline decoration on a match element or container.
  */
 export function detectBoxDecoration(matchEl: HTMLElement | null): CssBoxDecoration {
-	if (!matchEl || typeof window === "undefined") {
+	const win = matchEl?.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	const doc = matchEl?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	if (!matchEl || !win) {
 		return { source: "none", color: null, thicknessPx: null, raw: "" };
 	}
 
-	for (let el: HTMLElement | null = matchEl; el && el !== document.body; el = el.parentElement) {
-		const cs = window.getComputedStyle(el);
+	for (let el: HTMLElement | null = matchEl; el && el !== doc?.body; el = el.parentElement) {
+		const cs = win.getComputedStyle(el);
 		if (!cs) break;
 
 		for (const edge of ["top", "right", "bottom", "left"] as const) {
@@ -395,22 +400,16 @@ export function detectBoxDecoration(matchEl: HTMLElement | null): CssBoxDecorati
  * Measures the active appearance tokens from the live DOM or theme variables.
  */
 export function measureCurrentMatchAppearance(targetEl?: HTMLElement | null): MeasuredAppearance {
-	const isDark =
-		typeof document !== "undefined" &&
-		document.body &&
-		document.body.classList.contains("theme-dark");
+	const doc = targetEl?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const win = doc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	const isDark = doc?.body?.classList.contains("theme-dark");
 	const mode: "light" | "dark" = isDark ? "dark" : "light";
 
 	const currentMatchEl =
 		targetEl ??
-		(typeof document !== "undefined"
-			? (document.querySelector(".incsearch-match-exact.is-current") as HTMLElement | null)
-			: null);
+		(doc ? (doc.querySelector(".incsearch-match-exact.is-current") as HTMLElement | null) : null);
 
-	const bodyStyle =
-		typeof document !== "undefined" && typeof window !== "undefined" && document.body
-			? window.getComputedStyle(document.body)
-			: null;
+	const bodyStyle = doc?.body && typeof win?.getComputedStyle === "function" ? win.getComputedStyle(doc.body) : null;
 
 	const normalText = parseCssColor(
 		bodyStyle?.getPropertyValue("--text-normal") ||
@@ -435,8 +434,8 @@ export function measureCurrentMatchAppearance(targetEl?: HTMLElement | null): Me
 	let currentText = normalText;
 	let currentBox: CssBoxDecoration = { source: "none", color: null, thicknessPx: null, raw: "" };
 
-	if (currentMatchEl && typeof window !== "undefined") {
-		const cs = window.getComputedStyle(currentMatchEl);
+	if (currentMatchEl && win) {
+		const cs = win.getComputedStyle(currentMatchEl);
 		currentFill = parseCssColor(cs.backgroundColor);
 		currentText = parseCssColor(cs.color);
 		currentBox = detectBoxDecoration(currentMatchEl);
@@ -750,13 +749,11 @@ export function buildSecondaryStyle(
  */
 const appearanceCache = new Map<string, SecondaryStyle>();
 
-export function getAppearanceCacheKey(settings?: Partial<IncrementalSearchSettings>): string {
-	const isDark =
-		typeof document !== "undefined" &&
-		document.body &&
-		document.body.classList.contains("theme-dark");
+export function getAppearanceCacheKey(settings?: Partial<IncrementalSearchSettings>, doc?: Document): string {
+	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const isDark = targetDoc?.body?.classList.contains("theme-dark");
 	const mode = isDark ? "dark" : "light";
-	const className = typeof document !== "undefined" ? document.body?.className || "" : "";
+	const className = targetDoc?.body?.className || "";
 	const style = settings?.secondaryHighlightStyle || "adaptive";
 	const prom = settings?.secondaryProminence ?? 0.75;
 	const leg = settings?.secondaryEnforceLegibility ?? true;
@@ -817,12 +814,20 @@ export function getOrComputeSecondaryStyle(
 /**
  * Applies computed secondary style values to CSS custom properties.
  */
-export function applySecondaryStyle(style: SecondaryStyle): void {
-	if (typeof document === "undefined" || !document.documentElement || !document.body) {
+export function applySecondaryStyle(style: SecondaryStyle, target?: Document | HTMLElement | null): void {
+	let doc: Document | null = null;
+	if (target && "documentElement" in target && "body" in target) {
+		doc = target as Document;
+	} else if (target && "ownerDocument" in target) {
+		doc = (target as HTMLElement).ownerDocument;
+	} else {
+		doc = typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null);
+	}
+	if (!doc || !doc.documentElement || !doc.body) {
 		return;
 	}
-	document.documentElement.style.setProperty("--incsearch-secondary-fill", style.fillCss);
-	document.documentElement.style.setProperty("--incsearch-secondary-edge", style.edgeCss);
-	document.body.style.setProperty("--incsearch-secondary-fill", style.fillCss);
-	document.body.style.setProperty("--incsearch-secondary-edge", style.edgeCss);
+	doc.documentElement.style.setProperty("--incsearch-secondary-fill", style.fillCss);
+	doc.documentElement.style.setProperty("--incsearch-secondary-edge", style.edgeCss);
+	doc.body.style.setProperty("--incsearch-secondary-fill", style.fillCss);
+	doc.body.style.setProperty("--incsearch-secondary-edge", style.edgeCss);
 }

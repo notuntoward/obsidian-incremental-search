@@ -1,3 +1,4 @@
+import { ownerWindow, requestFrameIn, setTimeoutIn } from "commons/windows";
 import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet } from "@codemirror/view";
 import { StateField, StateEffect, EditorSelection } from "@codemirror/state";
 import { unfoldEffect, foldEffect, foldedRanges } from "@codemirror/language";
@@ -421,14 +422,15 @@ function highlightMatchedTextInCallout(
 			let lastPos = 0;
 			let idx = text.toLowerCase().indexOf(matchText.toLowerCase(), lastPos);
 			if (idx !== -1) {
-				const frag = document.createDocumentFragment();
+				const doc = callout.ownerDocument;
+				const frag = doc.createDocumentFragment();
 				while (idx !== -1) {
 					const before = text.slice(lastPos, idx);
-					if (before) frag.appendChild(document.createTextNode(before));
+					if (before) frag.appendChild(doc.createTextNode(before));
 					const matched = text.slice(idx, idx + matchText.length);
 					const isCurrent = currentOccur === activeIndexInCallout;
 					if (highlightAll || isCurrent) {
-						const mark = document.createElement("span");
+						const mark = doc.createElement("span");
 						mark.className = isCurrent
 							? "incsearch-callout-match incsearch-match-exact is-current"
 							: "incsearch-callout-match incsearch-match-exact";
@@ -438,7 +440,7 @@ function highlightMatchedTextInCallout(
 						}
 						frag.appendChild(mark);
 					} else {
-						frag.appendChild(document.createTextNode(matched));
+						frag.appendChild(doc.createTextNode(matched));
 					}
 					currentOccur++;
 					matchCount++;
@@ -446,7 +448,7 @@ function highlightMatchedTextInCallout(
 					idx = text.toLowerCase().indexOf(matchText.toLowerCase(), lastPos);
 				}
 				const after = text.slice(lastPos);
-				if (after) frag.appendChild(document.createTextNode(after));
+				if (after) frag.appendChild(doc.createTextNode(after));
 
 				const parent = node.parentNode;
 				if (parent) {
@@ -491,12 +493,13 @@ function highlightMatchedTextInCallout(
 
 function clearAllCalloutHighlights(view: EditorView) {
 	if (view.dom && typeof view.dom.querySelectorAll === "function") {
+		const doc = view.dom.ownerDocument;
 		const spans = Array.from(view.dom.querySelectorAll(".incsearch-callout-match"));
 		if (spans.length > 0) {
 			spans.forEach((span) => {
 				const parent = span.parentNode;
 				if (parent) {
-					parent.replaceChild(document.createTextNode(span.textContent || ""), span);
+					parent.replaceChild(doc.createTextNode(span.textContent || ""), span);
 					parent.normalize();
 				}
 			});
@@ -644,27 +647,24 @@ export function scrollToMatch(view: EditorView, match: MatchRange, isTyping = fa
 
 	applyLivePreviewHighlights(view, match);
 	// Schedule on the editor's own window: a pop-out's frames/timers are not the main window's.
-	const win = view.dom?.ownerDocument?.defaultView ?? (typeof window !== "undefined" ? window : null);
+	const win = ownerWindow(view.dom) ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
 	if (win) {
-		if (typeof win.requestAnimationFrame === "function") {
-			win.requestAnimationFrame(() => {
-				applyLivePreviewHighlights(view, match);
-			});
-		}
-		if (typeof win.setTimeout === "function") {
-			win.setTimeout(() => {
-				applyLivePreviewHighlights(view, match);
-			}, 50);
-		}
+		requestFrameIn(win, () => {
+			applyLivePreviewHighlights(view, match);
+		});
+		setTimeoutIn(win, () => {
+			applyLivePreviewHighlights(view, match);
+		}, 50);
 	}
 }
 
 function clearAllTableHighlights(view: EditorView) {
 	if (view.dom && typeof view.dom.querySelectorAll === "function") {
+		const doc = view.dom.ownerDocument;
 		Array.from(view.dom.querySelectorAll(".incsearch-table-cell-match")).forEach((span) => {
 			const parent = span.parentNode;
 			if (parent) {
-				parent.replaceChild(document.createTextNode(span.textContent || ""), span);
+				parent.replaceChild(doc.createTextNode(span.textContent || ""), span);
 				parent.normalize();
 			}
 		});
@@ -721,7 +721,8 @@ function highlightCellMatches(
 			let idx = text.toLowerCase().indexOf(matchText.toLowerCase());
 			let lastPos = 0;
 			if (idx !== -1) {
-				const frag = document.createDocumentFragment();
+				const doc = cell.ownerDocument;
+				const frag = doc.createDocumentFragment();
 				while (idx !== -1 && matchIndexInCell < cellMatches.length) {
 					nextMatch = cellMatches[matchIndexInCell];
 					const currentMatchText = nextMatch.match.tableMatchData
@@ -734,10 +735,10 @@ function highlightCellMatches(
 						: matchText;
 
 					const before = text.slice(lastPos, idx);
-					if (before) frag.appendChild(document.createTextNode(before));
+					if (before) frag.appendChild(doc.createTextNode(before));
 					const matched = text.slice(idx, idx + currentMatchText.length);
 
-					const mark = document.createElement("span");
+					const mark = doc.createElement("span");
 					mark.className = nextMatch.isCurrent
 						? "incsearch-table-cell-match incsearch-match-exact is-current"
 						: "incsearch-table-cell-match incsearch-match-exact";
@@ -763,7 +764,7 @@ function highlightCellMatches(
 					}
 				}
 				const after = text.slice(lastPos);
-				if (after) frag.appendChild(document.createTextNode(after));
+				if (after) frag.appendChild(doc.createTextNode(after));
 
 				const parent = node.parentNode;
 				if (parent) {

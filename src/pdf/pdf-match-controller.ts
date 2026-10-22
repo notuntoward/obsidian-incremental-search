@@ -1,3 +1,4 @@
+import { ownerWindow } from "commons/windows";
 import { SearchDirection, IncrementalSearchSettings, shouldShowAllMatches } from "../types";
 import { findWildcardMatches, isCaseSensitive, isWithinMaxGap, parseWildcardQuery } from "../engine";
 import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition } from "./types";
@@ -343,6 +344,9 @@ function resolveMatchHeadElement(fragment: HTMLElement): HTMLElement {
 }
 
 export class PdfMatchController {
+	private get ownerWin(): Window {
+		return ownerWindow(this.adapter.containerEl) ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : ({} as Window)));
+	}
 	adapter: PdfViewAdapter;
 	settings: IncrementalSearchSettings;
 	state: PdfSessionState;
@@ -415,9 +419,9 @@ export class PdfMatchController {
 		this.matchScrollPending = true;
 		this.pendingTargetPage = targetPage;
 		if (this.matchScrollTimeout) {
-			window.clearTimeout(this.matchScrollTimeout);
+			this.ownerWin.clearTimeout(this.matchScrollTimeout);
 		}
-		this.matchScrollTimeout = window.setTimeout(() => {
+		this.matchScrollTimeout = this.ownerWin.setTimeout(() => {
 			this.matchScrollPending = false;
 			this.pendingTargetPage = undefined;
 			this.matchScrollTimeout = undefined;
@@ -428,7 +432,7 @@ export class PdfMatchController {
 		this.matchScrollPending = false;
 		this.pendingTargetPage = undefined;
 		if (this.matchScrollTimeout) {
-			window.clearTimeout(this.matchScrollTimeout);
+			this.ownerWin.clearTimeout(this.matchScrollTimeout);
 			this.matchScrollTimeout = undefined;
 		}
 	}
@@ -436,9 +440,9 @@ export class PdfMatchController {
 	markProgrammaticScroll() {
 		this.isProgrammaticScrolling = true;
 		if (this.programmaticScrollTimeout) {
-			window.clearTimeout(this.programmaticScrollTimeout);
+			this.ownerWin.clearTimeout(this.programmaticScrollTimeout);
 		}
-		this.programmaticScrollTimeout = window.setTimeout(() => {
+		this.programmaticScrollTimeout = this.ownerWin.setTimeout(() => {
 			this.isProgrammaticScrolling = false;
 			this.programmaticScrollTimeout = undefined;
 		}, 400);
@@ -520,12 +524,12 @@ export class PdfMatchController {
 		if (this.scrollActiveMatchIntoView(pageNumber)) {
 			return;
 		}
-		window.requestAnimationFrame(() => {
+		this.ownerWin.requestAnimationFrame(() => {
 			if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 				if (this.scrollActiveMatchIntoView(pageNumber)) {
 					return;
 				}
-				window.setTimeout(() => {
+				this.ownerWin.setTimeout(() => {
 					if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 						this.scrollActiveMatchIntoView(pageNumber);
 					}
@@ -1311,9 +1315,9 @@ export class PdfMatchController {
 				);
 			}
 		};
-		window.addEventListener("scroll", globalScrollListener, { capture: true, passive: true });
+		this.ownerWin.addEventListener("scroll", globalScrollListener, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			window.removeEventListener("scroll", globalScrollListener, { capture: true } as any);
+			this.ownerWin.removeEventListener("scroll", globalScrollListener, { capture: true } as any);
 		});
 
 		const onUserManualScroll = () => {
@@ -1337,10 +1341,10 @@ export class PdfMatchController {
 				onUserManualScroll();
 			}
 		};
-		window.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
+		this.ownerWin.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
 		container.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			window.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
 			container.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
 		});
 
@@ -1351,10 +1355,10 @@ export class PdfMatchController {
 				this.markUserScrolled();
 			}
 		};
-		window.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
+		this.ownerWin.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
 		container.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			window.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
 			container.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
 		});
 
@@ -1365,10 +1369,10 @@ export class PdfMatchController {
 				this.cancelPendingMatchScroll();
 			}
 		};
-		window.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
+		this.ownerWin.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
 		container.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			window.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
 			container.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
 		});
 
@@ -1378,15 +1382,15 @@ export class PdfMatchController {
 				this.markUserScrolled();
 			}
 		};
-		window.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
+		this.ownerWin.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
 		container.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			window.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
 			container.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
 		});
 
 		const refreshNativeFragmentJoins = () => {
-			window.requestAnimationFrame(() => {
+			this.ownerWin.requestAnimationFrame(() => {
 				decorateNativeSelectedHighlightFragments(
 					this.adapter.containerEl,
 					this.state.query
@@ -1404,7 +1408,7 @@ export class PdfMatchController {
 		const driveSteeredView = () => {
 			if (this.steerViewRafPending) return;
 			this.steerViewRafPending = true;
-			window.requestAnimationFrame(() => {
+			this.ownerWin.requestAnimationFrame(() => {
 				this.steerViewRafPending = false;
 				this.reassertInitialSteering();
 			});
@@ -1674,7 +1678,7 @@ export class PdfMatchController {
 				caseSensitive: isCaseSensitive(this.state.query),
 			});
 			this.notifyStateChange();
-			window.requestAnimationFrame(() => {
+			this.ownerWin.requestAnimationFrame(() => {
 				if (!this.userHasManuallyScrolled && this.matchScrollPending) {
 					this.scheduleActiveMatchScroll();
 				}
@@ -1714,7 +1718,7 @@ export class PdfMatchController {
 		this.steerViewRafPending = false;
 		this.findControllerRef = undefined;
 		if (this.programmaticScrollTimeout) {
-			window.clearTimeout(this.programmaticScrollTimeout);
+			this.ownerWin.clearTimeout(this.programmaticScrollTimeout);
 			this.programmaticScrollTimeout = undefined;
 		}
 		this.isProgrammaticScrolling = false;

@@ -1,5 +1,16 @@
 # Agent Instructions for this Obsidian plugin template
 
+## Shared library: commons
+
+This plugin uses `commons` (repo `obsidian-commons`, normally `C:\Users\scott\repos\obsidian-commons`).
+Window, tab group, tab, pop-out, window-focus and modal-chooser logic (and later color
+logic) comes from `commons/*`. Never reimplement it here and never read Obsidian's
+undocumented fields (`leaf.detached`, `container.win`, `rootSplit`, `tabHeaderEl`,
+`chooser.setSelectedItem`, ...) in this plugin. If commons lacks something or is wrong,
+change commons and tell the user: see the global rule "Obsidian shared library" and
+`obsidian-commons/AGENTS.md`. Rules that moved to commons are enforced by its guardrail
+tests; the rules below are the plugin-specific ones that remain.
+
 ## Project-specific regression risks (read this first)
 
 This codebase has a small number of load-bearing invariants that are easy for

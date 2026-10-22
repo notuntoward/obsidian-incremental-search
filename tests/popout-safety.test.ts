@@ -20,7 +20,16 @@ function stripComments(src: string): string {
 }
 
 describe("pop-out window safety (static scan)", () => {
-  for (const file of ["src/main.ts", "src/widget.ts", "src/session.ts"]) {
+  for (const file of [
+    "src/main.ts",
+    "src/widget.ts",
+    "src/session.ts",
+    "src/modal.ts",
+    "src/pdf/pdf-match-controller.ts",
+    "src/pdf/pdf-view-adapter.ts",
+    "src/utils/adaptive-highlight.ts",
+    "src/utils/colors.ts"
+  ]) {
     it(`${file} never uses main-window document/window for focus, timers, or listeners`, () => {
       const src = stripComments(readFileSync(join(__dirname, "..", file), "utf8"));
       for (const [re, label] of FORBIDDEN) {
