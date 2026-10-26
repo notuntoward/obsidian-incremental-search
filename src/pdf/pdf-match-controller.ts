@@ -206,7 +206,7 @@ function clearNativeSelectedTokenHighlights(doc: Document) {
 	getCssHighlightApi(doc).registry?.delete(PDF_TOKEN_HIGHLIGHT_NAME);
 }
 
-function highlightNativeSelectedTokens(fragments: HTMLElement[], query: string) {
+function highlightNativeSelectedTokens(doc: Document, fragments: HTMLElement[], query: string) {
 	const { phraseSearch } = processPdfQuery(query, true);
 	if (phraseSearch) return;
 	const tokens = parseWildcardQuery(query, isCaseSensitive(query));
@@ -215,7 +215,9 @@ function highlightNativeSelectedTokens(fragments: HTMLElement[], query: string) 
 	const segments: { node: Text; start: number; end: number }[] = [];
 	let selectedText = "";
 	for (const fragment of fragments) {
-		const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+		const showText = fragment.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT;
+		if (showText === undefined) continue;
+		const walker = fragment.ownerDocument.createTreeWalker(fragment, showText);
 		let node = walker.nextNode();
 		while (node) {
 			const textNode = node as Text;
@@ -251,7 +253,7 @@ function highlightNativeSelectedTokens(fragments: HTMLElement[], query: string) 
 		}
 	}
 
-	const { Highlight, registry } = getCssHighlightApi(fragments[0]?.ownerDocument ?? document);
+	const { Highlight, registry } = getCssHighlightApi(doc);
 	if (Highlight && registry && highlightRanges.length > 0) {
 		registry.set(PDF_TOKEN_HIGHLIGHT_NAME, new Highlight(...highlightRanges));
 	}
@@ -301,7 +303,7 @@ export function decorateNativeSelectedHighlightFragments(containerEl: HTMLElemen
 		}
 	}
 
-	highlightNativeSelectedTokens(fragments, query);
+	highlightNativeSelectedTokens(containerEl.ownerDocument, fragments, query);
 }
 
 /**

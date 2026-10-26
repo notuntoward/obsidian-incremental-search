@@ -298,6 +298,39 @@ describe("decorateNativeSelectedHighlightFragments", () => {
 		);
 	});
 
+	it("walks PDF highlight fragments in their pop-out owner document", () => {
+		const popoutDocument = document.implementation.createHTMLDocument();
+		const container = popoutDocument.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span class="highlight begin selected">plugin </span>
+			<span class="highlight end selected">some</span>
+		</div>`;
+		const createTreeWalker = vi.spyOn(popoutDocument, "createTreeWalker");
+		const setHighlight = vi.fn();
+		const deleteHighlight = vi.fn();
+		const registeredRanges: Range[][] = [];
+		Object.defineProperty(popoutDocument, "defaultView", {
+			configurable: true,
+			value: {
+				NodeFilter: window.NodeFilter,
+				CSS: { highlights: { delete: deleteHighlight, set: setHighlight } },
+				Highlight: class {
+					constructor(...ranges: Range[]) {
+						registeredRanges.push(ranges);
+					}
+				},
+			},
+		});
+
+		decorateNativeSelectedHighlightFragments(container, "plugin some");
+
+		expect(createTreeWalker).toHaveBeenCalledTimes(2);
+		expect(createTreeWalker.mock.calls.every(([root]) => root.ownerDocument === popoutDocument)).toBe(true);
+		expect(deleteHighlight).toHaveBeenCalledWith("incsearch-pdf-current-token");
+		expect(registeredRanges).toHaveLength(1);
+		expect(registeredRanges[0].map((range) => range.toString())).toEqual(["plugin", "some"]);
+	});
+
 	it("does not add wildcard token spans for literal double-space queries", () => {
 		const container = document.createElement("div");
 		container.innerHTML = `<div class="textLayer">

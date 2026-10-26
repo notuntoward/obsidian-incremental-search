@@ -104,8 +104,10 @@ describe("commons adoption in obsidian-incremental-search", () => {
       };
 
       const container = document.createElement("div");
+      const doc = container.ownerDocument;
+      const originalDefaultView = Object.getOwnPropertyDescriptor(doc, "defaultView");
       // Define defaultView on container ownerDocument
-      Object.defineProperty(container.ownerDocument, "defaultView", {
+      Object.defineProperty(doc, "defaultView", {
         value: mockOwnerWindow,
         configurable: true,
       });
@@ -128,19 +130,27 @@ describe("commons adoption in obsidian-incremental-search", () => {
       );
       (modal as any).containerEl = container;
 
-      modal.onOpen();
-      expect(mockOwnerWindow.addEventListener).toHaveBeenCalledWith(
-        "keydown",
-        expect.any(Function),
-        { capture: true }
-      );
+      try {
+        modal.onOpen();
+        expect(mockOwnerWindow.addEventListener).toHaveBeenCalledWith(
+          "keydown",
+          expect.any(Function),
+          { capture: true }
+        );
 
-      modal.onClose();
-      expect(mockOwnerWindow.removeEventListener).toHaveBeenCalledWith(
-        "keydown",
-        expect.any(Function),
-        expect.anything()
-      );
+        modal.onClose();
+        expect(mockOwnerWindow.removeEventListener).toHaveBeenCalledWith(
+          "keydown",
+          expect.any(Function),
+          expect.anything()
+        );
+      } finally {
+        if (originalDefaultView) {
+          Object.defineProperty(doc, "defaultView", originalDefaultView);
+        } else {
+          Reflect.deleteProperty(doc, "defaultView");
+        }
+      }
     });
 
     it("creates suggestion text nodes on el.ownerDocument", () => {

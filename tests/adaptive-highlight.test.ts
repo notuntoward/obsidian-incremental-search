@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
 	parseCssColor,
 	composite,
@@ -83,6 +83,21 @@ describe("adaptive-highlight module", () => {
 		it("resolves basic variables", () => {
 			expect(resolveAllCssVariables("#ffffff")).toBe("#ffffff");
 			expect(resolveAllCssVariables("var(--not-existing, #123456)")).toBe("#123456");
+		});
+
+		it("uses the element owner window when resolving variables in a pop-out document", () => {
+			const popoutDocument = document.implementation.createHTMLDocument();
+			const getPropertyValue = vi.fn(() => "#123456");
+			const getComputedStyle = vi.fn(() => ({ getPropertyValue }) as unknown as CSSStyleDeclaration);
+			Object.defineProperty(popoutDocument, "defaultView", {
+				configurable: true,
+				value: { getComputedStyle },
+			});
+			const element = popoutDocument.createElement("span");
+
+			expect(resolveAllCssVariables("var(--popout-color)", element)).toBe("#123456");
+			expect(getComputedStyle).toHaveBeenCalledWith(element);
+			expect(getPropertyValue).toHaveBeenCalledWith("--popout-color");
 		});
 	});
 

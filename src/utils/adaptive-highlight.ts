@@ -43,15 +43,14 @@ export function resolveAllCssVariables(
 	el?: Element | null
 ): string {
 	if (!input) return "";
-	if (typeof document === "undefined" || typeof window === "undefined") {
-		return input.trim();
-	}
-	const doc = el?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const doc = el?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : null);
 	const target = el ?? doc?.body ?? doc?.documentElement;
 	if (!target) return input.trim();
+	const win = target.ownerDocument.defaultView;
+	if (!win) return input.trim();
 
 	let result = input.trim();
-	const cs = window.getComputedStyle(target);
+	const cs = win.getComputedStyle(target);
 
 	// Resolve direct var(...) or embedded var(...) in expressions up to 6 levels deep
 	for (let i = 0; i < 6; i++) {

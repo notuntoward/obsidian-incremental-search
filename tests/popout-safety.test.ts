@@ -12,7 +12,10 @@ import { join } from "node:path";
 // removeAllWidgets) are fine and are not matched by these patterns.
 const FORBIDDEN: Array<[RegExp, string]> = [
   [/(^|[^\w.])document\.(activeElement|querySelector|querySelectorAll|body)\b/, "document.<focus/query/body>"],
+  [/(^|[^\w.])document\.createTreeWalker\b/, "document.createTreeWalker"],
   [/(^|[^\w.])window\.(requestAnimationFrame|setTimeout|setInterval|addEventListener|removeEventListener|getSelection)\b/, "window.<timer/listener/selection>"],
+  [/(^|[^\w.])window\.getComputedStyle\b/, "window.getComputedStyle"],
+  [/(^|[^\w.])NodeFilter\./, "NodeFilter.<filter>"],
 ];
 
 function stripComments(src: string): string {
