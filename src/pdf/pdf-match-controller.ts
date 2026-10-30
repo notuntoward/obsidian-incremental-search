@@ -1,5 +1,5 @@
 import { ownerWindow } from "commons/windows";
-import { SearchDirection, IncrementalSearchSettings, shouldShowAllMatches } from "../types";
+import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode, shouldShowAllMatches } from "../types";
 import { findWildcardMatches, isCaseSensitive, isWithinMaxGap, parseWildcardQuery } from "../engine";
 import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition } from "./types";
 import { PdfViewAdapter } from "./pdf-view-adapter";
@@ -1595,6 +1595,17 @@ export class PdfMatchController {
 	setDemandPeekActive(active: boolean) {
 		if (this.state.isDemandPeekActive === active) return;
 		this.state.isDemandPeekActive = active;
+		this.updateAllMatchesVisibility();
+	}
+
+	setAllMatchesDisplayMode(mode: AllMatchesDisplayMode) {
+		this.settings.allMatchesDisplayMode = mode;
+		this.state.allMatchesDisplayMode = mode;
+		this.state.isDemandPeekActive = false;
+		this.updateAllMatchesVisibility();
+	}
+
+	private updateAllMatchesVisibility() {
 		// Visibility is a CSS concern only: the find already rendered every match
 		// (highlightAll: true), and re-dispatching a find here would make PDF.js
 		// re-select its own match, discarding the initial-search steering.

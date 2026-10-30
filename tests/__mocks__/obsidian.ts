@@ -178,7 +178,7 @@ function applyDomElementInfo(el: any, options?: any) {
 }
 
 function mockCreateEl(this: any, tag: string, options?: any, callback?: (el: any) => void) {
-  const el = document.createElement(tag);
+  const el = (this.ownerDocument ?? document).createElement(tag);
   applyDomElementInfo(el, options);
   if (typeof options === "object" && options?.parent) {
     options.parent.appendChild(el);
@@ -305,7 +305,7 @@ export function mockFileCache(overrides: Partial<CachedMetadataMock> = {}): Cach
 
 export function setIcon(parent: HTMLElement | any, _iconId: string): void {
   if (parent) {
-    const iconSpan = document.createElement("span");
+    const iconSpan = (parent.ownerDocument ?? document).createElement("span");
     iconSpan.className = "svg-icon lucide-" + _iconId;
     parent.appendChild(iconSpan);
   }

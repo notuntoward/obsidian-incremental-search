@@ -181,7 +181,7 @@
 }
 
 /* Floating Search Widget */
-.incsearch-widget {
+.incsearch-widget:not(.incsearch-widget-obsidian) {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -197,7 +197,7 @@
   box-shadow: var(--shadow-s);
 }
 
-.incsearch-widget .incsearch-input {
+.incsearch-widget:not(.incsearch-widget-obsidian) .incsearch-input {
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
@@ -211,7 +211,7 @@
   color: var(--text-normal);
 }
 
-.incsearch-widget .incsearch-input:focus {
+.incsearch-widget:not(.incsearch-widget-obsidian) .incsearch-input:focus {
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
@@ -229,6 +229,75 @@
   color: var(--text-muted);
   user-select: none;
   font-size: 11px;
+}
+
+/* Reserve space above the document instead of covering its first line. */
+.incsearch-bar-host {
+  display: flex;
+  flex-direction: column;
+}
+
+.incsearch-bar-host > .cm-editor,
+.incsearch-bar-host > .markdown-source-view,
+.incsearch-bar-host > .markdown-reading-view,
+.incsearch-bar-host > .pdf-container {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.incsearch-widget.incsearch-widget-obsidian {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.incsearch-widget-obsidian .document-search-input,
+.incsearch-widget-obsidian .incsearch-input {
+  min-width: 0;
+}
+
+.incsearch-widget-obsidian .incsearch-input {
+  padding-inline-end: calc(var(--size-4-16, 64px) + 16px);
+}
+
+.incsearch-widget-obsidian .incsearch-count-container {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1, 4px);
+}
+
+.incsearch-widget-obsidian .incsearch-dir {
+  display: none;
+}
+
+.incsearch-widget-obsidian .incsearch-counter {
+  font-size: inherit;
+  padding: 0;
+}
+
+.incsearch-widget-obsidian .incsearch-method-indicator {
+  font-size: 9px;
+  font-weight: var(--font-semibold, 600);
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
+.incsearch-widget-obsidian button.document-search-button {
+  flex: 0 0 auto;
+}
+
+.incsearch-widget-obsidian button.document-search-button:hover,
+.incsearch-widget-obsidian button.document-search-button.is-active {
+  background: var(--background-modifier-hover);
+}
+
+.incsearch-widget-obsidian button.document-search-button.is-active {
+  color: var(--text-accent);
+}
+
+.incsearch-widget-obsidian button.document-search-button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
 }
 
 .incsearch-line-number {

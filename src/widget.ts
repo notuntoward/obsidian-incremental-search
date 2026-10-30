@@ -1,6 +1,6 @@
 import { EditorView } from "@codemirror/view";
-import { App, setIcon } from "obsidian";
-import { SearchDirection, IncrementalSearchSettings } from "./types";
+import { App, Notice, setIcon } from "obsidian";
+import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode } from "./types";
 import {
 	searchSessionField,
 	recomputeQuery,
@@ -8,6 +8,7 @@ import {
 	cancelSession,
 	advance,
 	toggleDemandHighlights,
+	setAllMatchesDisplayMode,
 } from "./session";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
 import { logDebug, describeElement } from "./utils/logger";
@@ -41,6 +42,9 @@ export interface SearchSessionController {
 
 	/** Called when user toggles demand highlight peek (Ctrl+Enter). */
 	toggleDemandHighlights(): void;
+
+	/** Applies and persists a highlight mode without restarting the search. */
+	setAllMatchesDisplayMode(mode: AllMatchesDisplayMode): Promise<void>;
 
 	/** Called when search is committed (Enter in Emacs mode, Esc in Obsidian mode). */
 	/** `refocus` is false when focus deliberately moved elsewhere (e.g. a click in another pane). */
@@ -101,6 +105,11 @@ export function createMarkdownSessionController(
 		},
 		toggleDemandHighlights() {
 			toggleDemandHighlights(view);
+		},
+		async setAllMatchesDisplayMode(mode) {
+			plugin.settings.allMatchesDisplayMode = mode;
+			setAllMatchesDisplayMode(view, mode);
+			await plugin.saveSettings();
 		},
 		accept(refocus = true) {
 			logDebug("widget", "createMarkdownSessionController: accept called");
@@ -172,6 +181,11 @@ export function createPdfSessionController(
 		},
 		toggleDemandHighlights() {
 			controller.toggleDemandHighlights();
+		},
+		async setAllMatchesDisplayMode(mode) {
+			plugin.settings.allMatchesDisplayMode = mode;
+			controller.setAllMatchesDisplayMode(mode);
+			await plugin.saveSettings();
 		},
 		accept() {
 			logDebug("widget", "createPdfSessionController: accept called");
@@ -333,6 +347,7 @@ export function removeWidget(_view?: EditorView) {
 		activeKeyCleanup = null;
 	}
 	if (activeWidgetEl) {
+		activeWidgetEl.parentElement?.classList.remove("incsearch-bar-host");
 		activeWidgetEl.remove();
 		activeWidgetEl = null;
 	}
@@ -343,18 +358,15 @@ export function removeWidget(_view?: EditorView) {
  */
 export function removeAllWidgets() {
 	logDebug("widget", "removeAllWidgets called");
-	if (activeKeyCleanup) {
-		activeKeyCleanup();
-		activeKeyCleanup = null;
-	}
 	const docs = new Set<Document>();
 	if (typeof activeDocument !== "undefined") docs.add(activeDocument);
 	if (typeof document !== "undefined") docs.add(document);
 	if (activeWidgetEl) docs.add(activeWidgetEl.ownerDocument);
-	docs.forEach((d) => d.querySelectorAll(".incsearch-widget").forEach((w) => w.remove()));
-	if (activeWidgetEl) {
-		activeWidgetEl = null;
-	}
+	removeWidget();
+	docs.forEach((d) => d.querySelectorAll(".incsearch-widget").forEach((w) => {
+		w.parentElement?.classList.remove("incsearch-bar-host");
+		w.remove();
+	}));
 }
 
 /**
@@ -397,33 +409,107 @@ export function renderSearchWidget(
 		win.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
 	};
 
-	const el = container.createDiv({ cls: "incsearch-widget" });
+	const isObsidianBar = settings.searchInterface === "obsidian";
+	const host = isObsidianBar
+		? container.closest<HTMLElement>(".view-content") ?? container
+		: container;
+	const el = host.createDiv({
+		cls: isObsidianBar
+			? "incsearch-widget incsearch-widget-obsidian document-search-container"
+			: "incsearch-widget",
+		attr: { role: "search", "aria-label": "Incremental search" },
+	});
+	if (isObsidianBar) {
+		host.prepend(el);
+		host.classList.add("incsearch-bar-host");
+	}
 
-	el.createSpan({
+	const row = isObsidianBar ? el.createDiv({ cls: "document-search" }) : el;
+	const inputHost = isObsidianBar
+		? row.createDiv({ cls: "search-input-container document-search-input" })
+		: el;
+
+	inputHost.createSpan({
 		cls: "incsearch-dir",
 		text: initialDirection === "forward" ? "▼" : "▲",
 	});
 
-	const tableIcon = el.createSpan({
+	const tableIcon = inputHost.createSpan({
 		cls: "incsearch-table-icon is-hidden",
 		attr: { "aria-label": "In table" },
 	});
 	setIcon(tableIcon, "table");
 
-	const input = el.createEl("input", {
+	const input = inputHost.createEl("input", {
 		cls: "incsearch-input",
 		type: "text",
 		value: initialQuery,
+		placeholder: isObsidianBar ? "Find..." : "",
+		attr: { "aria-label": "Incremental search", spellcheck: "false" },
 	});
 
-	el.createSpan({ cls: "incsearch-counter" });
+	const countHost = isObsidianBar
+		? inputHost.createSpan({ cls: "document-search-count incsearch-count-container" })
+		: inputHost;
+	if (isObsidianBar) {
+		countHost.appendChild(tableIcon);
+		countHost.createSpan({
+			cls: "incsearch-method-indicator",
+			text: "IS",
+			attr: { "aria-label": "Incremental Search plugin", title: "Incremental Search plugin" },
+		});
+	}
+	countHost.createSpan({ cls: "incsearch-counter", attr: { "aria-live": "polite", "aria-atomic": "true" } });
+
+	let highlightButton: HTMLButtonElement | undefined;
+	const updateHighlightButton = () => {
+		if (!highlightButton) return;
+		const always = settings.allMatchesDisplayMode === "always";
+		highlightButton.setAttribute("aria-pressed", String(always));
+		highlightButton.classList.toggle("is-active", always);
+		highlightButton.title = always
+			? "Highlight all matches: Always. Click to use On demand."
+			: "Highlight all matches: On demand. Ctrl/Cmd+Enter toggles highlights. Click to use Always.";
+	};
+	if (isObsidianBar) {
+		const buttons = row.createDiv({ cls: "document-search-buttons" });
+		const addButton = (icon: string, label: string, action: () => void) => {
+			const button = buttons.createEl("button", {
+				cls: "clickable-icon document-search-button",
+				attr: { type: "button", "aria-label": label, title: label },
+			});
+			setIcon(button, icon);
+			button.addEventListener("mousedown", (evt) => evt.preventDefault());
+			button.addEventListener("click", action);
+			return button;
+		};
+		addButton("arrow-up", "Incremental Search: Backward", () => {
+			controller.advance("backward");
+			updateWidgetCounter(controller);
+		});
+		addButton("arrow-down", "Incremental Search: Forward", () => {
+			controller.advance("forward");
+			updateWidgetCounter(controller);
+		});
+		highlightButton = addButton("text-select", "Highlight all matches", () => {
+			const next = settings.allMatchesDisplayMode === "always" ? "on-demand" : "always";
+			void controller.setAllMatchesDisplayMode(next).catch((error: unknown) => {
+				console.error("Incremental Search: could not save highlight mode", error);
+				new Notice("Could not save Highlight all matches. Check the developer console for details.");
+			});
+			updateHighlightButton();
+		});
+		addButton("x", "Cancel search", () => controller.cancel()).title =
+			"Cancel search and restore the original position";
+		updateHighlightButton();
+	}
 
 	el.createDiv({ cls: "incsearch-table-toast is-hidden" });
 
 	activeWidgetEl = el;
 
 	const adjustInputSize = () => {
-		input.size = Math.max(12, input.value.length + 1);
+		if (!isObsidianBar) input.size = Math.max(12, input.value.length + 1);
 	};
 	adjustInputSize();
 
@@ -440,7 +526,7 @@ export function renderSearchWidget(
 		updateCounter();
 	});
 
-	input.addEventListener("blur", (evt) => {
+	const onBlur = (evt: FocusEvent) => {
 		const related = evt.relatedTarget as HTMLElement | null;
 		const activeNow = doc.activeElement;
 		logDebug(
@@ -448,6 +534,7 @@ export function renderSearchWidget(
 			`input blur event fired! relatedTarget=${describeElement(related)}, activeElementNow=${describeElement(activeNow)}`
 		);
 		win.setTimeout(() => {
+			if (activeWidgetEl !== el) return;
 			const activeEl = doc.activeElement;
 			const now = Date.now();
 			const guardRemaining = focusGuardUntil - now;
@@ -483,9 +570,13 @@ export function renderSearchWidget(
 			const focusMovedElsewhere = isAnotherWindowActive || (Boolean(activeEl) && activeEl !== doc.body);
 			controller.accept(!focusMovedElsewhere);
 		}, 100);
+	};
+	input.addEventListener("blur", onBlur);
+	el.addEventListener("focusout", (evt) => {
+		if (evt.target !== input) onBlur(evt);
 	});
 
-	input.addEventListener("keydown", (evt: KeyboardEvent) => {
+	el.addEventListener("keydown", (evt: KeyboardEvent) => {
 		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
 		const keyLower = evt.key.toLowerCase();
 		const isEnter =
@@ -532,6 +623,7 @@ export function renderSearchWidget(
 		}
 
 		if (isEnter) {
+			if (evt.target !== input) return;
 			evt.preventDefault();
 			evt.stopPropagation();
 			if (settings.searchExitBehavior === "obsidian") {

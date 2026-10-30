@@ -458,7 +458,7 @@ describe("engine: computeMatches", () => {
   });
 
   it("filters out reference-style link destinations", () => {
-    const doc = "[text][ref]";
+    const doc = "[text][ref]\n\n[ref]: https://example.com/destination";
     const state = EditorState.create({ doc });
     const cache = mockFileCache({
       links: [{

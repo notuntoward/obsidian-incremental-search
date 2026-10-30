@@ -157,6 +157,159 @@ describe("widget: counter & lifecycle", () => {
     expect(sessionState?.query).toBe("word");
   });
 
+  it("renders the Obsidian-style bar with ordered accessible controls and the existing counter", () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget()!;
+    expect(widget.classList.contains("incsearch-widget-obsidian")).toBe(true);
+    expect(widget.getAttribute("role")).toBe("search");
+    expect(widget.querySelector(".document-search > .document-search-input")).not.toBeNull();
+    expect(widget.querySelector(".document-search > .document-search-buttons")?.querySelectorAll("button")).toHaveLength(4);
+    expect(widget.querySelector(".incsearch-method-indicator")?.textContent).toBe("IS");
+    expect(widget.querySelector(".incsearch-table-icon")?.parentElement?.classList.contains("incsearch-count-container")).toBe(true);
+    expect(widget.querySelector("input")?.placeholder).toBe("Find...");
+    expect(widget.querySelector("input")?.getAttribute("aria-label")).toBe("Incremental search");
+    expect(Array.from(widget.querySelectorAll("button"), (button) => button.getAttribute("aria-label")))
+      .toEqual(["Incremental Search: Backward", "Incremental Search: Forward", "Highlight all matches", "Cancel search"]);
+    expect(widget.querySelector(".incsearch-counter")?.textContent).toBe("1/2");
+    expect(widget.parentElement!.firstElementChild).toBe(widget);
+  });
+
+  it("uses the existing Markdown navigation and cancels back to the origin with X", () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.searchExitBehavior = "obsidian";
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget()!;
+    widget.querySelector<HTMLButtonElement>('[aria-label="Incremental Search: Backward"]')!.click();
+    expect(sessionState?.activeIndex).toBe(1);
+    expect(sessionState?.direction).toBe("backward");
+    expect(widget.querySelector(".incsearch-counter")?.textContent).toBe("2/2");
+    widget.querySelector<HTMLButtonElement>('[aria-label="Incremental Search: Forward"]')!.click();
+    expect(sessionState?.activeIndex).toBe(0);
+    widget.querySelector<HTMLButtonElement>('[aria-label="Cancel search"]')!.click();
+    expect(sessionState).toBeNull();
+    expect(getActiveWidget()).toBeNull();
+  });
+
+  it("persists Always / On demand immediately without re-running or moving the Markdown search", async () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    sessionState!.isDemandPeekActive = true;
+    mockPlugin.saveSettings = vi.fn(async () => {});
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const button = getActiveWidget()!.querySelector<HTMLButtonElement>('[aria-label="Highlight all matches"]')!;
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    button.click();
+    expect(mockPlugin.settings.allMatchesDisplayMode).toBe("always");
+    expect(sessionState?.allMatchesDisplayMode).toBe("always");
+    expect(sessionState?.isDemandPeekActive).toBe(false);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    button.click();
+    expect(mockPlugin.settings.allMatchesDisplayMode).toBe("on-demand");
+    expect(sessionState?.allMatchesDisplayMode).toBe("on-demand");
+    expect(sessionState?.isDemandPeekActive).toBe(false);
+    expect(sessionState?.query).toBe("word");
+    expect(sessionState?.activeIndex).toBe(0);
+    expect(mockPlugin.saveSettings).toHaveBeenCalledTimes(2);
+    await Promise.resolve();
+  });
+
+  it.each(["emacs", "obsidian"])("preserves %s Enter/Escape behavior in the new bar", (behavior) => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.searchExitBehavior = behavior;
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const input = getActiveWidget()!.querySelector("input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    if (behavior === "emacs") {
+      expect(getActiveWidget()).toBeNull();
+    } else {
+      expect(sessionState?.activeIndex).toBe(1);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(getActiveWidget()).toBeNull();
+    }
+  });
+
+  it("keeps Ctrl+Enter temporary in On demand, and does not change the persisted mode", () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    sessionState!.allMatchesDisplayMode = "on-demand";
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const widget = getActiveWidget()!;
+    widget.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", ctrlKey: true, bubbles: true, cancelable: true,
+    }));
+    expect(sessionState?.isDemandPeekActive).toBe(true);
+    expect(mockPlugin.settings.allMatchesDisplayMode).toBe("on-demand");
+    expect(widget.querySelector('[aria-label="Highlight all matches"]')?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("keeps the compact interface and its controls unchanged by default", () => {
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    expect(getActiveWidget()!.classList.contains("incsearch-widget-obsidian")).toBe(false);
+    expect(getActiveWidget()!.querySelector("button")).toBeNull();
+  });
+
+  it("reserves space in the owning view content and removes the layout class on close or unload", () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    const host = document.createElement("div");
+    host.className = "view-content";
+    host.appendChild(mockView.dom.parentElement);
+    renderWidget(mockView, mockPlugin, "", "forward");
+    expect(host.firstElementChild).toBe(getActiveWidget());
+    expect(host.classList.contains("incsearch-bar-host")).toBe(true);
+    removeWidget();
+    expect(host.classList.contains("incsearch-bar-host")).toBe(false);
+    renderWidget(mockView, mockPlugin, "", "forward");
+    removeAllWidgets();
+    expect(host.classList.contains("incsearch-bar-host")).toBe(false);
+    expect(host.querySelector(".incsearch-widget")).toBeNull();
+  });
+
+  it("reports a highlight preference save failure explicitly", async () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    const error = new Error("storage unavailable");
+    mockPlugin.saveSettings = vi.fn(async () => { throw error; });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWidget(mockView, mockPlugin, "word", "forward");
+      getActiveWidget()!.querySelector<HTMLButtonElement>('[aria-label="Highlight all matches"]')!.click();
+      await vi.waitFor(() => {
+        expect(log).toHaveBeenCalledWith("Incremental Search: could not save highlight mode", error);
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("uses the PDF controller for the new bar controls, persistence and cancellation", () => {
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    mockPlugin.saveSettings = vi.fn(async () => {});
+    const controller: any = {
+      adapter: { containerEl: document.createElement("div") },
+      state: { query: "word", totalMatchesCount: 7, activeIndex: 2, direction: "backward" },
+      advance: vi.fn(),
+      setAllMatchesDisplayMode: vi.fn(),
+      cancel: vi.fn(),
+    };
+    const close = vi.fn(() => removeWidget());
+    renderPdfWidget(controller, mockPlugin, "word", "backward", close);
+    const widget = getActiveWidget()!;
+    expect(widget.querySelector(".incsearch-counter")?.textContent).toBe("3/7");
+    widget.querySelector<HTMLButtonElement>('[aria-label="Incremental Search: Backward"]')!.click();
+    widget.querySelector<HTMLButtonElement>('[aria-label="Incremental Search: Forward"]')!.click();
+    expect(controller.advance.mock.calls).toEqual([["backward"], ["forward"]]);
+    widget.querySelector<HTMLButtonElement>('[aria-label="Highlight all matches"]')!.click();
+    expect(controller.setAllMatchesDisplayMode).toHaveBeenCalledWith("always");
+    expect(mockPlugin.settings.allMatchesDisplayMode).toBe("always");
+    expect(mockPlugin.saveSettings).toHaveBeenCalledTimes(1);
+    widget.querySelector<HTMLButtonElement>('[aria-label="Cancel search"]')!.click();
+    expect(controller.cancel).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(getActiveWidget()).toBeNull();
+  });
+
   it("handles Enter keydown by committing the match", () => {
     renderWidget(mockView, mockPlugin, "word", "forward");
     const widget = getActiveWidget();
@@ -718,6 +871,7 @@ describe("widget: unified SearchSessionController & adapters", () => {
       onInput: (q: string) => { queryInput = q; },
       advance: (dir) => { advancedDir = dir; },
       toggleDemandHighlights: () => { toggled = true; },
+      setAllMatchesDisplayMode: async () => {},
       accept: () => { accepted = true; removeWidget(); },
       cancel: () => { cancelled = true; removeWidget(); },
     };
@@ -770,6 +924,7 @@ describe("widget: unified SearchSessionController & adapters", () => {
       onInput: () => { },
       advance: () => { },
       toggleDemandHighlights: () => { },
+      setAllMatchesDisplayMode: async () => {},
       accept: () => { },
       cancel: () => { },
     };
@@ -816,6 +971,7 @@ describe("widget: blur focus hand-off and pop-out windows", () => {
       onInput: () => { },
       advance: () => { },
       toggleDemandHighlights: () => { },
+      setAllMatchesDisplayMode: async () => {},
       accept,
       cancel: () => { },
     };
@@ -918,5 +1074,38 @@ describe("widget: blur focus hand-off and pop-out windows", () => {
 
     expect(popout.querySelectorAll(".incsearch-widget").length).toBe(0);
     expect(getActiveWidget()).toBeNull();
+  });
+
+  it("keeps the Obsidian-style bar and its controls in the pop-out document without stealing focus", () => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    const container = popout.createElement("div");
+    popout.body.appendChild(container);
+    const { controller, accept } = makeController(container);
+    const advance = vi.spyOn(controller, "advance");
+    vi.stubGlobal("activeDocument", popout);
+    vi.stubGlobal("activeWindow", window);
+    try {
+      renderSearchWidget(controller, { ...settings, searchInterface: "obsidian" }, "q", "forward");
+      const widget = getActiveWidget()!;
+      expect(widget.ownerDocument).toBe(popout);
+      expect(widget.querySelector("input")!.ownerDocument).toBe(popout);
+      const button = widget.querySelector<HTMLButtonElement>('[aria-label="Incremental Search: Forward"]')!;
+      expect(button.ownerDocument).toBe(popout);
+      Object.defineProperty(popout, "activeElement", { get: () => button, configurable: true });
+      widget.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+      button.click();
+      vi.advanceTimersByTime(350);
+      expect(advance).toHaveBeenCalledWith("forward");
+      expect(accept).not.toHaveBeenCalled();
+      expect(getActiveWidget()).toBe(widget);
+      const other = popout.createElement("textarea");
+      popout.body.appendChild(other);
+      Object.defineProperty(popout, "activeElement", { get: () => other, configurable: true });
+      button.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      vi.advanceTimersByTime(110);
+      expect(accept).toHaveBeenCalledWith(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

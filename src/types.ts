@@ -59,11 +59,12 @@ export interface SearchSessionState {
 
 export type SearchExitBehavior = "emacs" | "obsidian";
 export type SecondaryHighlightStyle = "adaptive" | "underline" | "tint" | "theme" | "custom";
+export type SearchInterface = "compact" | "obsidian" | "popup";
 
 export interface IncrementalSearchSettings {
 	lastQuery: string;
 	spaceAsWildcard: boolean;
-	usePopupModal: boolean;
+	searchInterface: SearchInterface;
 	matchOnlyVisibleLinks: boolean;
 	allMatchesDisplayMode: AllMatchesDisplayMode;
 	searchExitBehavior: SearchExitBehavior;
@@ -78,7 +79,7 @@ export interface IncrementalSearchSettings {
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	lastQuery: "",
 	spaceAsWildcard: true,
-	usePopupModal: false,
+	searchInterface: "compact",
 	matchOnlyVisibleLinks: true,
 	allMatchesDisplayMode: "on-demand",
 	searchExitBehavior: "emacs",

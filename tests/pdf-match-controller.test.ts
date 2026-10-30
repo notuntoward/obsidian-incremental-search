@@ -781,6 +781,35 @@ describe("PDF Match Controller", () => {
 		expect(controller.shouldShowAllMatches()).toBe(false);
 	});
 
+	it("changes the all-match mode immediately without finding again or moving the selected PDF match", async () => {
+		const settings = { ...DEFAULT_SETTINGS, allMatchesDisplayMode: "on-demand" as const };
+		const controller = new PdfMatchController(mockAdapter, settings);
+		try {
+			await controller.search("algorithm");
+			controller.state.activeIndex = 3;
+			controller.toggleDemandHighlights();
+			expect(controller.state.isDemandPeekActive).toBe(true);
+			const find = vi.fn();
+			mockAdapter.executeNativeFind = find;
+			controller.setAllMatchesDisplayMode("always");
+			expect(controller.state.allMatchesDisplayMode).toBe("always");
+			expect(controller.shouldShowAllMatches()).toBe(true);
+			expect(controller.state.isDemandPeekActive).toBe(false);
+			expect(
+				mockAdapter.containerEl.classList.contains("incsearch-pdf-hide-other-matches")
+			).toBe(false);
+			controller.setAllMatchesDisplayMode("on-demand");
+			expect(controller.shouldShowAllMatches()).toBe(false);
+			expect(
+				mockAdapter.containerEl.classList.contains("incsearch-pdf-hide-other-matches")
+			).toBe(true);
+			expect(controller.state.activeIndex).toBe(3);
+			expect(find).not.toHaveBeenCalled();
+		} finally {
+			controller.destroy();
+		}
+	});
+
 	it("restores original scroll position on cancel", async () => {
 		const restoreFn = vi.fn();
 		mockAdapter.restoreScrollPosition = restoreFn;

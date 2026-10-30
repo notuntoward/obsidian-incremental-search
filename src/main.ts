@@ -527,7 +527,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}),
 		});
 
-		if (this.settings.usePopupModal) {
+		if (this.settings.searchInterface === "popup") {
 			logDebug("main", "invoke: opening modal search dialog");
 			const modal = new IncrementalSearchSuggestModal(
 				this.app,
@@ -579,12 +579,20 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 		delete loaded.fuzzyMode;
 
+		if (loaded.searchInterface === undefined) {
+			loaded.searchInterface = loaded.usePopupModal ? "popup" : "compact";
+		}
+		delete loaded.usePopupModal;
+
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 		setDebugLogging(this.settings.debugLogging);
 		await this.saveSettings();
 	}
 
 	async saveSettings() {
+		if (this.settings.searchInterface === "obsidian" && this.settings.allMatchesDisplayMode === "off") {
+			this.settings.allMatchesDisplayMode = "on-demand";
+		}
 		setDebugLogging(this.settings.debugLogging);
 		invalidateAppearanceCache();
 		updateResolvedOutlineColor();
@@ -647,142 +655,203 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
 		}
 		await this.plugin.saveSettings();
-		// Custom-color rows only render when this style is selected; visibility is a
-		// predicate, so re-evaluate it in place rather than rebuilding the tab.
-		if (key === "secondaryHighlightStyle") {
+		if (key === "searchInterface") {
+			// The highlight dropdown's options change with the selected interface.
+			this.update();
+		} else if (key === "secondaryHighlightStyle" || key === "allMatchesDisplayMode") {
 			this.refreshDomState();
 		}
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
+		const showSecondary = () => this.plugin.settings.allMatchesDisplayMode !== "off";
 		return [
 			{
-				name: "Search exit behavior",
-				desc: "Determines how Enter and Escape end an active incremental search session.",
-				control: {
-					type: "dropdown",
-					key: "searchExitBehavior",
-					options: {
-						emacs: "Emacs-style (Enter accepts, Escape cancels)",
-						obsidian: "Obsidian-style (Enter finds next, Escape accepts)",
+				type: "group",
+				heading: "Interface",
+				items: [
+					{
+						name: "Search interface",
+						desc: "Choose the search appearance. The Obsidian-style bar keeps this plugin's matching, navigation and exit behavior. Popup applies to Markdown; PDFs use Compact instead.",
+						control: {
+							type: "dropdown",
+							key: "searchInterface",
+							options: {
+								compact: "Compact",
+								obsidian: "Obsidian-style bar",
+								popup: "Popup",
+							},
+						},
 					},
-				},
+				],
 			},
 			{
-				name: "Highlight all matches",
-				desc: "Controls when matches other than the current match are highlighted during incremental search.",
-				control: {
-					type: "dropdown",
-					key: "allMatchesDisplayMode",
-					options: {
-						always: "Always",
-						"on-demand": "On demand (Ctrl+Enter to toggle)",
-						off: "Off",
+				type: "group",
+				heading: "Matching",
+				items: [
+					{
+						name: "Space-as-wildcard matching",
+						desc: "Match words separated by wildcard spaces instead of literal substring matches.",
+						control: {
+							type: "toggle",
+							key: "spaceAsWildcard",
+						},
 					},
-				},
-			},
-			{
-				name: "Secondary match highlight style",
-				desc: "Visual styling strategy for non-current matches. 'Adaptive' automatically derives fill and edge colors from the active theme and current match.",
-				control: {
-					type: "dropdown",
-					key: "secondaryHighlightStyle",
-					options: {
-						adaptive: "Adaptive (Theme-matched fill + edge)",
-						underline: "Dotted underline only",
-						tint: "Subtle background tint only",
-						theme: "Obsidian highlight default",
-						custom: "Custom colors",
+					{
+						name: "Match only visible part of links",
+						desc: "Ignore hidden URLs in markdown links and hidden destinations in wikilinks. Applies to Markdown.",
+						control: {
+							type: "toggle",
+							key: "matchOnlyVisibleLinks",
+						},
 					},
-				},
+				],
 			},
 			{
-				name: "Secondary match prominence",
-				desc: "Controls the visual strength and subordination level of secondary matches relative to the active match.",
-				control: {
-					type: "slider",
-					key: PROMINENCE_PERCENT_KEY,
-					min: 20,
-					max: 100,
-					step: 5,
-					displayFormat: (value: number) => `${value}%`,
-				},
+				type: "group",
+				heading: "Navigation & exit",
+				items: [
+					{
+						name: "Search exit behavior",
+						desc: "Determines how Enter and Escape end an active incremental search session.",
+						control: {
+							type: "dropdown",
+							key: "searchExitBehavior",
+							options: {
+								emacs: "Emacs-style (Enter accepts, Escape cancels)",
+								obsidian: "Obsidian-style (Enter finds next, Escape accepts)",
+							},
+						},
+					},
+				],
 			},
 			{
-				name: "Enforce text legibility (WCAG)",
-				desc: "Automatically fall back to a dotted underline if background tinting would compromise normal text contrast.",
-				control: {
-					type: "toggle",
-					key: "secondaryEnforceLegibility",
-				},
-			},
+				type: "group",
+				heading: "Match highlighting",
+				items: [
+					{
+						name: "Highlight all matches",
+						desc:
+							this.plugin.settings.searchInterface === "obsidian"
+								? "The bar button switches Always / On demand and saves your choice. In On demand, Ctrl/Cmd+Enter temporarily toggles other matches. Off is unavailable with this interface."
+								: "Controls when other matches are highlighted. In On demand, Ctrl/Cmd+Enter temporarily toggles them.",
+						control: {
+							type: "dropdown",
+							key: "allMatchesDisplayMode",
+							options: {
+								always: "Always",
+								"on-demand": "On demand (Ctrl+Enter to toggle)",
+								...(this.plugin.settings.searchInterface === "obsidian"
+									? {}
+									: { off: "Off" }),
+							},
+						},
+					},
+					{
+						name: "Secondary match highlight style",
+						visible: showSecondary,
+						desc: "Visual styling strategy for non-current matches. 'Adaptive' automatically derives fill and edge colors from the active theme and current match.",
+						control: {
+							type: "dropdown",
+							key: "secondaryHighlightStyle",
+							options: {
+								adaptive: "Adaptive (Theme-matched fill + edge)",
+								underline: "Dotted underline only",
+								tint: "Subtle background tint only",
+								theme: "Obsidian highlight default",
+								custom: "Custom colors",
+							},
+						},
+					},
+					{
+						name: "Secondary match prominence",
+						visible: showSecondary,
+						desc: "Controls the visual strength and subordination level of secondary matches relative to the active match.",
+						control: {
+							type: "slider",
+							key: PROMINENCE_PERCENT_KEY,
+							min: 20,
+							max: 100,
+							step: 5,
+							displayFormat: (value: number) => `${value}%`,
+						},
+					},
+					{
+						name: "Enforce text legibility (WCAG)",
+						visible: () =>
+							showSecondary() &&
+							this.plugin.settings.secondaryHighlightStyle !== "underline" &&
+							this.plugin.settings.secondaryHighlightStyle !== "theme",
+						desc: "Automatically fall back to a dotted underline if background tinting would compromise normal text contrast.",
+						control: {
+							type: "toggle",
+							key: "secondaryEnforceLegibility",
+						},
+					},
 
-			{
-				name: "Custom color (Light theme)",
-				desc: "Custom CSS color (hex, rgb, or rgba) for secondary highlights in light mode.",
-				visible: () => this.plugin.settings.secondaryHighlightStyle === "custom",
-				control: {
-					type: "text",
-					key: "secondaryCustomLightColor",
-					placeholder: "#ffe066 or rgba(255, 224, 102, 0.5)",
-				},
+					{
+						name: "Custom color (Light theme)",
+						desc: "Custom CSS color (hex, rgb, or rgba) for secondary highlights in light mode.",
+						visible: () =>
+							showSecondary() &&
+							this.plugin.settings.secondaryHighlightStyle === "custom",
+						control: {
+							type: "text",
+							key: "secondaryCustomLightColor",
+							placeholder: "#ffe066 or rgba(255, 224, 102, 0.5)",
+						},
+					},
+					{
+						name: "Custom color (Dark theme)",
+						desc: "Custom CSS color (hex, rgb, or rgba) for secondary highlights in dark mode.",
+						visible: () =>
+							showSecondary() &&
+							this.plugin.settings.secondaryHighlightStyle === "custom",
+						control: {
+							type: "text",
+							key: "secondaryCustomDarkColor",
+							placeholder: "#705dcf or rgba(112, 93, 207, 0.5)",
+						},
+					},
+					{
+						name: "Highlighting live preview",
+						visible: showSecondary,
+						desc: "Preview of the current and secondary match styles in the active theme.",
+						render: (setting: Setting) => {
+							// Full-width preview: stack the row and append the sample beneath it,
+							// reusing the .incsearch-settings-preview box styling.
+							setting.settingEl.addClass("incsearch-settings-preview-row");
+							const box = setting.settingEl.createDiv({
+								cls: "incsearch-settings-preview",
+							});
+							box.createSpan({ text: "Example text demonstrating an " });
+							box.createSpan({
+								cls: "incsearch-match-exact is-current",
+								text: "active match",
+							});
+							box.createSpan({ text: " and a " });
+							box.createSpan({
+								cls: "incsearch-match-exact",
+								text: "secondary match",
+							});
+							box.createSpan({ text: " in the active theme." });
+						},
+					},
+				],
 			},
 			{
-				name: "Custom color (Dark theme)",
-				desc: "Custom CSS color (hex, rgb, or rgba) for secondary highlights in dark mode.",
-				visible: () => this.plugin.settings.secondaryHighlightStyle === "custom",
-				control: {
-					type: "text",
-					key: "secondaryCustomDarkColor",
-					placeholder: "#705dcf or rgba(112, 93, 207, 0.5)",
-				},
-			},
-			{
-				name: "Highlighting live preview",
-				desc: "Preview of the current and secondary match styles in the active theme.",
-				render: (setting: Setting) => {
-					// Full-width preview: stack the row and append the sample beneath it,
-					// reusing the .incsearch-settings-preview box styling.
-					setting.settingEl.addClass("incsearch-settings-preview-row");
-					const box = setting.settingEl.createDiv({ cls: "incsearch-settings-preview" });
-					box.createSpan({ text: "Example text demonstrating an " });
-					box.createSpan({ cls: "incsearch-match-exact is-current", text: "active match" });
-					box.createSpan({ text: " and a " });
-					box.createSpan({ cls: "incsearch-match-exact", text: "secondary match" });
-					box.createSpan({ text: " in the active theme." });
-				},
-			},
-			{
-				name: "Space-as-wildcard matching",
-				desc: "Match words separated by wildcard spaces instead of literal substring matches.",
-				control: {
-					type: "toggle",
-					key: "spaceAsWildcard",
-				},
-			},
-			{
-				name: "Match only visible part of links",
-				desc: "Ignore hidden URLs in markdown links and hidden destinations in wikilinks.",
-				control: {
-					type: "toggle",
-					key: "matchOnlyVisibleLinks",
-				},
-			},
-			{
-				name: "Use popup modal interface",
-				desc: "If enabled, use a center-screen popup instead of the inline floating widget.",
-				control: {
-					type: "toggle",
-					key: "usePopupModal",
-				},
-			},
-			{
-				name: "Debug logging",
-				desc: "Write detailed diagnostic messages to the developer console. Leave this off unless you are troubleshooting.",
-				control: {
-					type: "toggle",
-					key: "debugLogging",
-				},
+				type: "group",
+				heading: "Troubleshooting",
+				items: [
+					{
+						name: "Debug logging",
+						desc: "Write detailed diagnostic messages to the developer console. Leave this off unless you are troubleshooting.",
+						control: {
+							type: "toggle",
+							key: "debugLogging",
+						},
+					},
+				],
 			},
 		];
 	}

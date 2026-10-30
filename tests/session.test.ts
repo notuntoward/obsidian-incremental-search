@@ -143,6 +143,16 @@ describe("session: recomputeQuery directional cursor placement", () => {
     expect(sessionState?.activeIndex).toBe(1);
   });
 
+  it.each(["forward", "backward"] as const)("navigates only visible link matches without metadata (%s)", (direction) => {
+    const text = "[theory](https://example.com/theory) [[theory|label]] [[theory]]";
+    const view = createEditorView(text, text.indexOf("https"), direction);
+    recomputeQuery(view, "theory", direction, true, true);
+    expect(sessionState?.matches.map(({ from }) => from)).toEqual([1, text.lastIndexOf("theory")]);
+    expect(sessionState?.activeIndex).toBe(direction === "forward" ? 1 : 0);
+    advance(view, direction);
+    expect(sessionState?.activeIndex).toBe(direction === "forward" ? 0 : 1);
+  });
+
   it("wraps forward to index 0 if cursor is past all matches", () => {
     const text = "cat ...   cat";
     const view = createEditorView(text, 50, "forward");

@@ -1,6 +1,7 @@
 import { EditorState } from "@codemirror/state";
-import { CachedMetadata, ReferenceCache } from "obsidian";
+import { CachedMetadata } from "obsidian";
 import { MatchRange, SearchQueryOptions, CompiledQuery } from "./types";
+import { getHiddenLinkRanges } from "./visible-links";
 
 /**
  * Determines case sensitivity using smart-case:
@@ -306,13 +307,11 @@ export function findMatchesInText(
 }
 
 /**
- * Delegates link-syntax and frontmatter parsing to Obsidian's MetadataCache.
+ * Delegates frontmatter parsing to Obsidian's MetadataCache.
  * Frontmatter is always non-visible metadata and is always excluded.
- * Link destinations/URLs are excluded when filterHiddenLinks is true.
  */
 function getHiddenRangesFromCache(
-	cache: CachedMetadata,
-	filterHiddenLinks: boolean
+	cache: CachedMetadata
 ): { from: number; to: number }[] {
 	const ranges: { from: number; to: number }[] = [];
 
@@ -341,60 +340,51 @@ function getHiddenRangesFromCache(
 		}
 	}
 
-	// 2. Hidden Links / Destinations (Filtered when filterHiddenLinks is true)
-	if (filterHiddenLinks) {
-		const allLinks: ReferenceCache[] = [...(cache.links || []), ...(cache.embeds || [])];
-		for (const link of allLinks) {
-			const start = link.position.start.offset;
-			const end = link.position.end.offset;
-			const original = link.original;
-			const displayText = link.displayText;
-
-			if (!displayText || displayText === original) continue;
-
-			if (original.startsWith("![[") || original.startsWith("[[")) {
-				const lastPipeIndex = original.lastIndexOf("|");
-				if (lastPipeIndex !== -1 && lastPipeIndex > 0) {
-					ranges.push({ from: start, to: start + lastPipeIndex + 1 });
-					if (original.endsWith("]]")) {
-						ranges.push({ from: end - 2, to: end });
-					}
-				}
-			} else if (original.startsWith("[")) {
-				const aliasEndIndex = original.indexOf("](");
-				if (aliasEndIndex !== -1) {
-					ranges.push({ from: start, to: start + 1 });
-					ranges.push({ from: start + aliasEndIndex, to: end });
-				} else {
-					const refEndIndex = original.indexOf("][");
-					if (refEndIndex !== -1) {
-						ranges.push({ from: start, to: start + 1 });
-						ranges.push({ from: start + refEndIndex, to: end });
-					}
-				}
-			}
-		}
-	}
-
 	return ranges;
 }
 
-function isMatchHidden(m: MatchRange, hiddenRanges: { from: number; to: number }[]): boolean {
-	const checkOverlap = (start: number, end: number) => {
-		for (const hr of hiddenRanges) {
-			if (start < hr.to && end > hr.from) return true;
+function findVisibleMatches(
+	text: string,
+	from: number,
+	ranges: readonly { from: number; to: number }[],
+	compiled: CompiledQuery,
+	options: SearchQueryOptions
+): MatchRange[] {
+	// Match before mapping back to source: a hidden wildcard token must not
+	// consume a visible candidate, and highlights must never cover a destination.
+	let visible = "";
+	const offsets: number[] = [];
+	let cursor = 0;
+	for (const range of ranges) {
+		const start = Math.max(cursor, range.from - from);
+		for (; cursor < Math.min(start, text.length); cursor++) {
+			visible += text[cursor];
+			offsets.push(from + cursor);
 		}
-		return false;
-	};
-
-	if (m.chars && m.chars.length > 0) {
-		for (const c of m.chars) {
-			if (checkOverlap(c.from, c.to)) return true;
-		}
-		return false;
+		cursor = Math.max(cursor, range.to - from);
+	}
+	for (; cursor < text.length; cursor++) {
+		visible += text[cursor];
+		offsets.push(from + cursor);
 	}
 
-	return checkOverlap(m.from, m.to);
+	return findMatchesInText(visible, compiled, options).map(match => {
+		const chars: { from: number; to: number }[] = [];
+		for (const token of match.chars ?? [match]) {
+			let start = token.from;
+			for (let i = start + 1; i <= token.to; i++) {
+				if (i === token.to || offsets[i] !== offsets[i - 1] + 1) {
+					chars.push({ from: offsets[start], to: offsets[i - 1] + 1 });
+					start = i;
+				}
+			}
+		}
+		return {
+			from: offsets[match.from],
+			to: offsets[match.to - 1] + 1,
+			...(match.chars || chars.length > 1 ? { chars } : {}),
+		};
+	});
 }
 
 function findCellBoundaries(lineText: string, matchStart: number, matchEnd: number) {
@@ -442,9 +432,10 @@ export function computeMatches(
 	if (!compiled) return [];
 
 	const results: MatchRange[] = [];
-	const hiddenRanges = linkCache
-		? getHiddenRangesFromCache(linkCache, matchOnlyVisibleLinks)
-		: [];
+	const hiddenRanges = [
+		...(linkCache ? getHiddenRangesFromCache(linkCache) : []),
+		...(matchOnlyVisibleLinks ? getHiddenLinkRanges(state.doc) : []),
+	].sort((a, b) => a.from - b.from);
 
 	const tableRanges: { from: number; to: number }[] = [];
 	if (linkCache && (linkCache as any).sections) {
@@ -456,13 +447,17 @@ export function computeMatches(
 	}
 
 	const doc = state.doc;
+	let hiddenIndex = 0;
 	for (let i = 1; i <= doc.lines; i++) {
 		const line = doc.line(i);
-		let lineMatches = findMatchesInText(line.text, compiled, searchOptions, line.from);
-
-		if (lineMatches.length > 0 && hiddenRanges.length > 0) {
-			lineMatches = lineMatches.filter((m) => !isMatchHidden(m, hiddenRanges));
+		while (hiddenIndex < hiddenRanges.length && hiddenRanges[hiddenIndex].to <= line.from) {
+			hiddenIndex++;
 		}
+		let endIndex = hiddenIndex;
+		while (endIndex < hiddenRanges.length && hiddenRanges[endIndex].from < line.to) endIndex++;
+		const lineMatches = endIndex > hiddenIndex
+			? findVisibleMatches(line.text, line.from, hiddenRanges.slice(hiddenIndex, endIndex), compiled, searchOptions)
+			: findMatchesInText(line.text, compiled, searchOptions, line.from);
 
 		if (lineMatches.length > 0 && tableRanges.length > 0) {
 			for (const m of lineMatches) {

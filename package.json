@@ -38,6 +38,8 @@
     "fast-check": "^4.5.3",
     "globals": "^17.6.0",
     "jsdom": "^29.0.1",
+    "mdast-util-from-markdown": "^2.1.0",
+    "micromark-util-types": "^2.0.2",
     "obsidian": "~1.14.4",
     "pdfjs-dist": "^6.2.108",
     "playwright": "^1.59.1",

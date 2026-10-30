@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import IncrementalSearchPlugin from "../src/main";
+import IncrementalSearchPlugin, { IncrementalSearchSuggestModal } from "../src/main";
 import { getActiveWidget } from "../src/widget";
 import * as colors from "../src/utils/colors";
 import { isPdfView, createPdfViewAdapter } from "../src/pdf/pdf-view-adapter";
@@ -224,8 +224,9 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(getActiveWidget()).toBeNull();
   });
 
-  it("opens IncrementalSearchSuggestModal when usePopupModal is enabled", () => {
-    plugin.settings.usePopupModal = true;
+  it("opens IncrementalSearchSuggestModal when the Popup interface is selected", () => {
+    plugin.settings.searchInterface = "popup";
+    const open = vi.spyOn(IncrementalSearchSuggestModal.prototype, "open");
 
     const mockEditor = {
       cm: {
@@ -250,6 +251,8 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(() => {
       plugin.handleCommand(false, "forward", mockEditor as any);
     }).not.toThrow();
+    expect(open).toHaveBeenCalledTimes(1);
+    open.mockRestore();
   });
 
   it("provides declarative setting definitions via getSettingDefinitions()", async () => {
@@ -456,6 +459,65 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(plugin.settings.secondaryEnforceLegibility).toBe(true);
   });
 
+  it.each([
+    [{}, "compact"],
+    [{ usePopupModal: false }, "compact"],
+    [{ usePopupModal: true }, "popup"],
+    [{ usePopupModal: true, searchInterface: "obsidian" }, "obsidian"],
+  ])("migrates interface preferences from %j to %s", async (stored, expected) => {
+    plugin.loadData = async () => stored;
+    await plugin.loadSettings();
+    expect(plugin.settings.searchInterface).toBe(expected);
+    expect(plugin.settings.usePopupModal).toBeUndefined();
+  });
+
+  it("normalizes persisted Off to On demand only for the Obsidian-style bar", async () => {
+    plugin.loadData = async () => ({ searchInterface: "obsidian", allMatchesDisplayMode: "off" });
+    await plugin.loadSettings();
+    expect(plugin.settings.allMatchesDisplayMode).toBe("on-demand");
+    plugin.loadData = async () => ({ searchInterface: "compact", allMatchesDisplayMode: "off" });
+    await plugin.loadSettings();
+    expect(plugin.settings.allMatchesDisplayMode).toBe("off");
+  });
+
+  it("groups settings and updates conditional controls without losing their values", async () => {
+    let tab: any;
+    plugin.addSettingTab = (value: any) => { tab = value; };
+    await plugin.onload();
+    expect(tab.getSettingDefinitions().map((group: any) => [group.type, group.heading])).toEqual([
+      ["group", "Interface"],
+      ["group", "Matching"],
+      ["group", "Navigation & exit"],
+      ["group", "Match highlighting"],
+      ["group", "Troubleshooting"],
+    ]);
+    const rows = () => tab.getSettingDefinitions().flatMap((group: any) => group.items);
+    const byName = (name: string) => rows().find((row: any) => row.name === name);
+    plugin.settings.allMatchesDisplayMode = "off";
+    plugin.settings.secondaryCustomLightColor = "#abcdef";
+    await tab.setControlValue("searchInterface", "obsidian");
+    expect(plugin.settings.allMatchesDisplayMode).toBe("on-demand");
+    expect(byName("Highlight all matches").control.options.off).toBeUndefined();
+    expect(byName("Search interface").control.options).toEqual({
+      compact: "Compact", obsidian: "Obsidian-style bar", popup: "Popup",
+    });
+    await tab.setControlValue("searchInterface", "compact");
+    expect(byName("Highlight all matches").control.options.off).toBe("Off");
+    await tab.setControlValue("allMatchesDisplayMode", "off");
+    for (const name of ["Secondary match highlight style", "Secondary match prominence", "Enforce text legibility (WCAG)", "Custom color (Light theme)", "Custom color (Dark theme)", "Highlighting live preview"]) {
+      expect(byName(name).visible(), name).toBe(false);
+    }
+    await tab.setControlValue("allMatchesDisplayMode", "on-demand");
+    await tab.setControlValue("secondaryHighlightStyle", "underline");
+    expect(byName("Enforce text legibility (WCAG)").visible()).toBe(false);
+    await tab.setControlValue("secondaryHighlightStyle", "theme");
+    expect(byName("Enforce text legibility (WCAG)").visible()).toBe(false);
+    await tab.setControlValue("secondaryHighlightStyle", "custom");
+    expect(byName("Enforce text legibility (WCAG)").visible()).toBe(true);
+    expect(byName("Custom color (Light theme)").visible()).toBe(true);
+    expect(plugin.settings.secondaryCustomLightColor).toBe("#abcdef");
+  });
+
   it("migrates legacy boolean fuzzyMode to spaceAsWildcard", async () => {
     plugin.loadData = async () => ({
       fuzzyMode: false,
@@ -473,7 +535,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     await plugin.onload();
     expect(tab).not.toBeNull();
 
-    const definitions = tab.getSettingDefinitions();
+    const definitions = tab.getSettingDefinitions().flatMap((group: any) => group.items);
     const byName = (name: string) => definitions.find((d: any) => d.name === name);
     const styleDef = byName("Secondary match highlight style");
     const prominenceDef = byName("Secondary match prominence");

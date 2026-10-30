@@ -68,7 +68,7 @@ To assign hotkeys: **Settings → Hotkeys**, search for "Incremental Search," an
 
 ## In-search controls
 
-Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on the **Search exit behavior** setting (**Settings → Incremental Search → Navigation & exit behavior**) — the two columns below show the two available modes.
+Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on the **Search exit behavior** setting (**Settings → Incremental Search → Navigation & exit**) — the two columns below show the two available modes.
 
 | Key | Emacs-style mode (default) | Obsidian-style mode |
 | :--- | :--- | :--- |
@@ -82,27 +82,43 @@ Once a search is active, these keys control navigation and how the search sessio
 | `Ctrl+Enter` / `Cmd+Enter` | Toggle highlighting of other matches — only when "Highlight all matches" is set to *On demand* | Same as Emacs-style |
 | Click outside / switch tab | Dismiss, keep current cursor position | Dismiss, keep current cursor position |
 
+The optional **Obsidian-style bar** changes the appearance, not the search engine or keyboard behavior. Its controls, from left to right after the input, are:
+
+| Control | Action |
+| :--- | :--- |
+| Up arrow | Incremental Search: Backward |
+| Down arrow | Incremental Search: Forward |
+| Highlight all matches | Switch the saved setting between Always and On demand, applying it immediately without moving the current match |
+| X | Cancel search, restore the original cursor/scroll position, and hide the bar, regardless of Search exit behavior |
+
+The highlight button is active for **Always**. In **On demand**, `Ctrl+Enter` / `Cmd+Enter` still toggles highlights temporarily without changing the saved setting. The bar uses Obsidian's native find-bar layout and input styling, with a small muted **IS** indicator beside the match count to identify the plugin. It works in Markdown and PDFs, in the main window or a pop-out.
+
 ## Settings
 
-All options live under **Settings → Incremental Search**.
+All options live under **Settings → Incremental Search**, organized into native settings groups.
 
-**Navigation & exit behavior**
+**Interface**
+- *Search interface* — Compact (the original floating box, default), Obsidian-style bar (full-width above the document), or Popup (center-screen modal for Markdown; PDFs retain Compact). Existing popup preferences are migrated automatically.
+- Choosing the Obsidian-style bar changes a saved *Highlight all matches: Off* to *On demand*. Off is unavailable while this interface is selected; switching back makes Off available again.
+
+**Matching**
+- *Space-as-wildcard matching* — toggle wildcard gaps on spaces vs. plain substring search.
+- *Match only visible part of links* — searches Markdown link labels and wikilink aliases, never their hidden destinations or link titles (default on). Bare wikilinks such as `[[note#heading]]` remain searchable because their targets are displayed. Image/embed source syntax and reference definitions are excluded; visibly written URLs and literal link examples inside code remain searchable. Filtering uses the current editor text, including unsaved edits, and does not depend on Obsidian caching external URLs. Turning this off makes link destinations searchable again.
+
+**Navigation & exit**
 - *Search exit behavior* — Emacs-style (`Enter` accepts, `Esc` cancels) or Obsidian-style (`Enter` finds next, `Esc` accepts). This also determines the default bindings shown in the table above.
 
 **Match highlighting**
 - *Highlight all matches* — on demand (default; toggle with `Ctrl+Enter`/`Cmd+Enter`), always, or off. `Ctrl+Enter` only has an effect when this is set to *on demand*.
+- Appearance controls and the preview are hidden when highlighting is Off; their saved values are retained.
 - *Secondary match highlight style* — adaptive theme-matched (default), dotted underline, subtle tint, Obsidian's default highlight, or custom colors.
 - *Secondary match prominence* — slider, 20 to 100 percent (default 75).
-- *Enforce text legibility (WCAG)* — keeps secondary-match contrast above the WCAG AA floor (4.5:1), falling back to a dotted underline if a color combination would fail (default on).
+- *Enforce text legibility (WCAG)* — keeps secondary-match contrast above the WCAG AA floor (4.5:1), falling back to a dotted underline if a color combination would fail (default on). Hidden for Underline and Obsidian-default styles, where it has no effect.
 - *Custom colors* — light/dark theme color overrides, shown when "Custom colors" style is selected.
 - A live preview swatch in the settings tab shows how highlights will look in your current theme.
 
-**Matching rules**
-- *Space-as-wildcard matching* — toggle wildcard gaps on spaces vs. plain substring search.
-- *Match only visible part of links* — ignores hidden URLs and wikilink destinations when searching (default on).
-
-**Interface**
-- *Use popup modal interface* — swap the inline floating widget for a center-screen modal.
+**Troubleshooting**
+- *Debug logging* — detailed developer-console diagnostics, off by default.
 
 ## Customizing highlight colors
 

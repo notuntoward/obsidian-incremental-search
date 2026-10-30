@@ -22,6 +22,20 @@ interface AutoFoldedRange {
 
 let autoUnfoldedFoldRanges: AutoFoldedRange[] = [];
 let autoUnfoldedCallouts: HTMLElement[] = [];
+export function setAllMatchesDisplayMode(view: EditorView, mode: AllMatchesDisplayMode) {
+	const session = view.state.field(searchSessionField, false);
+	if (!session) return;
+	view.dispatch({
+		effects: setSession.of({
+			...session,
+			allMatchesDisplayMode: mode,
+			isDemandPeekActive: false,
+		}),
+	});
+	const activeMatch = session.matches[session.activeIndex];
+	if (activeMatch) applyLivePreviewHighlights(view, activeMatch);
+}
+
 export function toggleDemandHighlights(view: EditorView) {
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
