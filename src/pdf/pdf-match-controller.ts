@@ -1,7 +1,7 @@
 import { ownerWindow } from "commons/windows";
 import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode, shouldShowAllMatches } from "../types";
 import { findWildcardMatches, isCaseSensitive, isWithinMaxGap, parseWildcardQuery } from "../engine";
-import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition } from "./types";
+import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition, PdfMatchPosition } from "./types";
 import { PdfViewAdapter } from "./pdf-view-adapter";
 import { clearAllPdfHighlights } from "./highlight-layer";
 import { clearSecondaryHighlights } from "./text-layer-highlighter";
@@ -353,6 +353,11 @@ export class PdfMatchController {
 	settings: IncrementalSearchSettings;
 	state: PdfSessionState;
 	originAnchor: PdfViewportAnchor;
+	/** Last accepted match in this PDF; searches start after it while it is in view. */
+	startAfter: PdfMatchPosition | null = null;
+	/** Set by accept(): the match the user accepted, for the next search's startAfter. */
+	acceptedPosition: PdfMatchPosition | null = null;
+	private advancePastAcceptedPending = false;
 	originScrollPosition: PdfScrollPosition;
 	originPageNumber: number;
 	unsubscribers: (() => void)[] = [];
@@ -674,12 +679,19 @@ export class PdfMatchController {
 		};
 
 		// First visible match fragment in scan order: topmost for forward,
-		// bottom-most for backward.
+		// bottom-most for backward. A still-visible accepted match takes precedence:
+		// the search continues past it, like the Markdown cursor.
 		const scanOrder = backward ? candidates.slice().reverse() : candidates;
 		let visibleMatchEl: HTMLElement | null = null;
 		let visibleMatchRect: BoundingRectLike | null = null;
 		let visiblePageNum = -1;
-		for (const { el, rect } of scanOrder) {
+		const afterAccepted = this.findMatchAfterAccepted(allMatchHeads, candidates, backward, isVisibleForSteering);
+		if (afterAccepted) {
+			visibleMatchEl = afterAccepted.el;
+			visibleMatchRect = afterAccepted.rect;
+			visiblePageNum = afterAccepted.pageNum;
+		}
+		for (const { el, rect } of afterAccepted ? [] : scanOrder) {
 			if (!isVisibleForSteering(rect)) continue;
 			visibleMatchEl = resolveMatchHeadElement(el);
 			visibleMatchRect = rect;
@@ -784,6 +796,63 @@ export class PdfMatchController {
 		}
 
 		return { el: visibleMatchEl, rect: targetRect, pageNumber: visiblePageNum };
+	}
+
+	/**
+	 * The match a search starts from when the last accepted match (`startAfter`) is
+	 * still in the search-time view: the next match after it in the search direction.
+	 * When the accepted match is itself still a match (a recalled query), steps from
+	 * it in PDF.js's match order, as advancing does; otherwise takes the first match
+	 * past its position in on-screen order. Returns null to fall back to the viewport rule.
+	 */
+	private findMatchAfterAccepted(
+		heads: Array<{ el: HTMLElement; pageNum: number }>,
+		candidates: Array<{ el: HTMLElement; rect: BoundingRectLike }>,
+		backward: boolean,
+		isVisible: (rect: BoundingRectLike) => boolean
+	): { el: HTMLElement; rect: BoundingRectLike; pageNum: number } | null {
+		const pos = this.startAfter;
+		if (!pos) return null;
+		const pageEl = this.adapter.getPageElement(pos.pageNumber);
+		if (!pageEl) return null;
+		const pageRect = pageEl.getBoundingClientRect();
+		if (!pageRect.width || !pageRect.height) return null;
+		const x = pageRect.left + pos.x * pageRect.width;
+		const y = pageRect.top + pos.y * pageRect.height;
+		if (!isVisible({ top: y, bottom: y + 1, left: x, right: x + 1 })) return null;
+
+		// Same query: PDF.js's match numbering is exact even when only some highlights
+		// are rendered, so let the search land and then step to the match after it.
+		if (pos.query === this.state.query && typeof pos.activeIndex === "number") {
+			if (this.isInitialSearchPending) this.advancePastAcceptedPending = true;
+			return null;
+		}
+
+		const tolerance = 2;
+		const pick = (el: HTMLElement) => {
+			const head = resolveMatchHeadElement(el);
+			return { el: head, rect: head.getBoundingClientRect(), pageNum: this.getMatchPageNumber(head) };
+		};
+		const sameIdx = heads.findIndex(({ el, pageNum }) => {
+			if (pageNum !== pos.pageNumber) return false;
+			const rect = el.getBoundingClientRect();
+			return Math.abs(rect.left - x) <= tolerance && Math.abs(rect.top - y) <= tolerance;
+		});
+		if (sameIdx !== -1) {
+			const next = heads[sameIdx + (backward ? -1 : 1)];
+			if (next) return pick(next.el);
+			// PDF.js often highlights only its own pick at this point, which is then the
+			// accepted match: select it and step past it once the search lands, as advancing would.
+			if (this.isInitialSearchPending) this.advancePastAcceptedPending = true;
+			return pick(heads[sameIdx].el);
+		}
+		const isPast = (rect: BoundingRectLike) =>
+			backward
+				? rect.top < y - tolerance || (Math.abs(rect.top - y) <= tolerance && rect.left < x - tolerance)
+				: rect.top > y + tolerance || (Math.abs(rect.top - y) <= tolerance && rect.left > x + tolerance);
+		const ordered = backward ? candidates.slice().reverse() : candidates;
+		const found = ordered.find(({ rect }) => isPast(rect));
+		return found ? pick(found.el) : null;
 	}
 
 	/**
@@ -1115,6 +1184,16 @@ export class PdfMatchController {
 					}
 				}
 				this.isInitialSearchPending = false;
+				if (this.advancePastAcceptedPending) {
+					this.advancePastAcceptedPending = false;
+					const query = this.state.query;
+					const direction = this.state.direction;
+					this.ownerWin.setTimeout(() => {
+						if (this.state.query !== query || !this.adapter.containerEl.classList.contains("incsearch-active-pdf")) return;
+						logDebug("pdf", "advancing past the accepted match the search landed on");
+						this.stepPastAccepted(direction);
+					}, 0);
+				}
 
 				const targetHeight = targetRect ? (targetRect.height ?? (targetRect.bottom - targetRect.top)) : 0;
 				const targetWidth = targetRect ? (targetRect.width ?? (targetRect.right - targetRect.left)) : 0;
@@ -1708,7 +1787,56 @@ export class PdfMatchController {
 
 	accept() {
 		logDebug("pdf", "PdfMatchController accept called");
+		this.acceptedPosition = this.captureSelectedMatchPosition();
 		this.destroy();
+	}
+
+	private captureSelectedMatchPosition(): PdfMatchPosition | null {
+		if (!this.state.query) return null;
+		const selected = this.getSelectedMatchElement();
+		if (!selected) return null;
+		const head = resolveMatchHeadElement(selected);
+		const pageNumber = this.getMatchPageNumber(head);
+		const pageEl = this.adapter.getPageElement(pageNumber);
+		if (pageNumber <= 0 || !pageEl || typeof head.getBoundingClientRect !== "function") return null;
+		const pageRect = pageEl.getBoundingClientRect();
+		const rect = head.getBoundingClientRect();
+		if (!pageRect.width || !pageRect.height) return null;
+		return {
+			pageNumber,
+			x: (rect.left - pageRect.left) / pageRect.width,
+			y: (rect.top - pageRect.top) / pageRect.height,
+			query: this.state.query,
+			activeIndex: this.state.activeIndex,
+		};
+	}
+
+	/**
+	 * Steps PDF.js's cursor from wherever the search landed to the match after the
+	 * accepted one (`startAfter.activeIndex`), wrapping like next/previous do.
+	 */
+	private stepPastAccepted(direction: SearchDirection) {
+		const accepted = this.startAfter?.activeIndex;
+		const findController: any = this.findControllerRef ?? this.adapter.findController;
+		const pageMatches = findController?.pageMatches ?? findController?._pageMatches;
+		const selected = this.adapter.getActiveFindMatchInfo?.();
+		if (typeof accepted !== "number") {
+			this.advance(direction);
+			return;
+		}
+		if (!Array.isArray(pageMatches) || !selected) return;
+		let total = 0;
+		let current = -1;
+		pageMatches.forEach((matches: unknown, pageIdx: number) => {
+			if (pageIdx === selected.pageIndex) current = total + selected.matchIndex;
+			total += Array.isArray(matches) ? matches.length : 0;
+		});
+		if (total === 0 || current < 0 || current >= total) return;
+		const step = direction === "backward" ? -1 : 1;
+		const mod = (n: number) => ((n % total) + total) % total;
+		const steps = mod((mod(accepted + step) - current) * step);
+		logDebug("pdf", `stepPastAccepted: accepted=${accepted} current=${current} total=${total} steps=${steps}`);
+		for (let i = 0; i < steps; i++) this.advance(direction);
 	}
 
 	cancel() {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import IncrementalSearchPlugin from "../src/main";
-import { getActiveWidget, renderWidget } from "../src/widget";
+import { getActiveWidget, removeWidget, renderWidget } from "../src/widget";
 import * as colors from "../src/utils/colors";
 import { isPdfView, createPdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 
@@ -16,6 +16,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     commands = {};
     dispatches = [];
     currentSession = null;
+    removeWidget();
 
     // Mock the Obsidian Plugin app/manifest
     const app = {
@@ -46,6 +47,35 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     await plugin.onload();
   });
 
+  // A mock editor whose CodeMirror DOM is attached, so the search bar can be rendered beside it.
+  const makeEditor = (stateExtras: Record<string, any> = {}) => {
+    const host = document.body.createDiv();
+    const dom = host.createDiv();
+    return {
+      cm: {
+        state: {
+          selection: { main: { anchor: 0, head: 0 } },
+          field: () => currentSession,
+          ...stateExtras,
+        },
+        dispatch: (args: any) => {
+          dispatches.push(args);
+          const value = args.effects?.value;
+          if (value === null) currentSession = null;
+          else if (value?.query !== undefined) currentSession = value;
+        },
+        dom,
+        focus: () => {},
+      },
+    };
+  };
+  const recallDoc = {
+    doc: {
+      lines: 1,
+      line: (_i: number) => ({ text: "here is a previous search match", from: 0, to: 31, length: 31 }),
+    },
+  };
+
   it("registers forward and backward commands", () => {
     expect(commands["forward"]).toBeDefined();
     expect(commands["backward"]).toBeDefined();
@@ -72,7 +102,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
         dispatch: (args: any) => {
           if (args.effects?.value?.query !== undefined) currentSession = args.effects.value;
         },
-        dom: { parentElement: container },
+        dom: container.createDiv(),
       },
     };
     vi.spyOn(plugin, "getActiveTarget").mockReturnValue({ type: "editor", editor });
@@ -183,28 +213,14 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
   });
 
   it("advances the session if one is already active with query", () => {
+    const mockEditor = makeEditor();
+    plugin.handleCommand(false, "forward", mockEditor as any);
     currentSession = {
       query: "test",
       direction: "forward",
       matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
       activeIndex: 0,
       originSelection: { anchor: 0, head: 0 },
-    };
-
-    const mockEditor = {
-      cm: {
-        state: {
-          selection: { main: { anchor: 0, head: 0 } },
-          field: () => currentSession,
-        },
-        dispatch: (args: any) => {
-          dispatches.push(args);
-          if (args.effects && args.effects.value !== undefined && args.effects.value.query !== undefined) {
-            currentSession = args.effects.value;
-          }
-        },
-        dom: { parentElement: document.createElement("div") },
-      },
     };
 
     // Trigger forward search again (like pressing search command hotkey a second time)
@@ -217,7 +233,28 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
 
   it("recalls lastQuery when active session query is empty (double-tap recall)", () => {
     plugin.settings.lastQuery = "previous search";
+    const mockEditor = makeEditor(recallDoc);
 
+    // First press opens an empty bar; the repeat press recalls lastQuery.
+    plugin.handleCommand(false, "forward", mockEditor as any);
+    expect(getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input")?.value).toBe("");
+    // Scrolling to the recalled match can move focus out of the bar; its blur handler
+    // would then accept and close it, so the repeat press must refocus the input.
+    (mockEditor.cm.dom as HTMLElement).tabIndex = 0;
+    (mockEditor.cm.dom as HTMLElement).focus();
+    plugin.handleCommand(false, "backward", mockEditor as any);
+
+    expect(currentSession.query).toBe("previous search");
+    expect(currentSession.direction).toBe("backward");
+    const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
+    expect(input?.value).toBe("previous search");
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("starts empty instead of recalling lastQuery when a stale session has no visible bar", () => {
+    plugin.settings.lastQuery = "previous search";
+    const mockEditor = makeEditor(recallDoc);
+    // The bar was closed elsewhere (pane click, leaf switch) without ending this note's session.
     currentSession = {
       query: "",
       direction: "forward",
@@ -225,57 +262,40 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
       activeIndex: 0,
       originSelection: { anchor: 0, head: 0 },
     };
+    expect(getActiveWidget()).toBeNull();
 
-    const mockEditor = {
-      cm: {
-        state: {
-          selection: { main: { anchor: 0, head: 0 } },
-          field: () => currentSession,
-          doc: {
-            lines: 1,
-            line: (_i: number) => ({ text: "here is a previous search match", from: 0, to: 31, length: 31 }),
-          },
-        },
-        dispatch: (args: any) => {
-          dispatches.push(args);
-          if (args.effects && args.effects.value !== undefined && args.effects.value.query !== undefined) {
-            currentSession = args.effects.value;
-          }
-        },
-        dom: { parentElement: document.createElement("div") },
-      },
-    };
+    plugin.handleCommand(false, "forward", mockEditor as any);
 
-    // Trigger backward search on empty active session -> recalls lastQuery in backward direction
-    plugin.handleCommand(false, "backward", mockEditor as any);
+    expect(currentSession.query).toBe("");
+    expect(getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input")?.value).toBe("");
+  });
 
-    expect(currentSession.query).toBe("previous search");
-    expect(currentSession.direction).toBe("backward");
+  it("starts empty when the open bar belongs to another note", () => {
+    plugin.settings.lastQuery = "previous search";
+    const otherNote = makeEditor(recallDoc);
+    plugin.handleCommand(false, "forward", otherNote as any);
+    const otherSession = currentSession;
+
+    // A stale session in this note must not be treated as a repeat press of the other bar.
+    const thisNote = makeEditor(recallDoc);
+    currentSession = { ...otherSession, query: "" };
+    plugin.handleCommand(false, "forward", thisNote as any);
+
+    expect(currentSession.query).toBe("");
+    const widget = getActiveWidget();
+    expect(widget?.parentElement?.contains(thisNote.cm.dom)).toBe(true);
+    expect(widget?.querySelector<HTMLInputElement>(".incsearch-input")?.value).toBe("");
   });
 
   it("advances backward if reverse command is invoked during active search", () => {
+    const mockEditor = makeEditor();
+    plugin.handleCommand(false, "forward", mockEditor as any);
     currentSession = {
       query: "test",
       direction: "forward", // initially forward
       matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
       activeIndex: 0,
       originSelection: { anchor: 0, head: 0 },
-    };
-
-    const mockEditor = {
-      cm: {
-        state: {
-          selection: { main: { anchor: 0, head: 0 } },
-          field: () => currentSession,
-        },
-        dispatch: (args: any) => {
-          dispatches.push(args);
-          if (args.effects && args.effects.value && args.effects.value.query !== undefined) {
-            currentSession = args.effects.value;
-          }
-        },
-        dom: { parentElement: document.createElement("div") },
-      },
     };
 
     // Trigger backward search
@@ -379,6 +399,143 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     commands["forward"].checkCallback(false);
     expect(plugin.pdfController).not.toBeNull();
     expect(getActiveWidget()).not.toBeNull();
+  });
+
+  describe("initial PDF query", () => {
+    const openPdfWithSelection = (selectInsidePdf: boolean) => {
+      plugin.settings.searchInterface = "obsidian";
+      const viewContent = document.createElement("div");
+      viewContent.className = "view-content";
+      const pdfText = viewContent.createSpan({ text: "effects into context,\nthey were compared" });
+      const otherNote = document.createElement("div");
+      const otherText = otherNote.createSpan({ text: "text from another note" });
+      document.body.append(viewContent, otherNote);
+      const range = document.createRange();
+      range.selectNodeContents(selectInsidePdf ? pdfText : otherText);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      plugin.app.workspace.getActiveViewOfType = () => ({
+        getViewType: () => "pdf",
+        contentEl: viewContent,
+        viewer: {
+          child: { pdfViewer: { pdfViewer: { pdfDocument: { numPages: 1 }, pagesCount: 1 } } },
+        },
+      });
+      commands["forward"].checkCallback(false);
+      const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
+      selection.removeAllRanges();
+      viewContent.remove();
+      otherNote.remove();
+      return input;
+    };
+
+    it("starts empty when the selected text is outside the PDF", () => {
+      const input = openPdfWithSelection(false);
+      expect(input?.value).toBe("");
+      expect(plugin.pdfController?.state.query).toBe("");
+    });
+
+    it("seeds from a selection inside the PDF, joining line breaks", () => {
+      const input = openPdfWithSelection(true);
+      expect(input?.value).toBe("effects into context, they were compared");
+    });
+
+    it("keeps the bar focused when a repeat press recalls lastQuery", () => {
+      plugin.settings.searchInterface = "obsidian";
+      plugin.settings.lastQuery = "bob";
+      const viewContent = document.createElement("div");
+      viewContent.className = "view-content";
+      const viewer = viewContent.createDiv({ attr: { tabindex: "0" } });
+      document.body.append(viewContent);
+      const pdfView = {
+        getViewType: () => "pdf",
+        contentEl: viewContent,
+        viewer: {
+          child: { pdfViewer: { pdfViewer: { pdfDocument: { numPages: 1 }, pagesCount: 1 } } },
+        },
+      };
+      plugin.app.workspace.getActiveViewOfType = () => pdfView;
+      try {
+        commands["forward"].checkCallback(false);
+        const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
+        expect(input?.value).toBe("");
+        const search = vi.spyOn(plugin.pdfController!, "search").mockResolvedValue(undefined);
+        // Scrolling to the recalled match moves focus into the PDF viewer.
+        viewer.focus();
+
+        commands["forward"].checkCallback(false);
+
+        expect(search).toHaveBeenCalledWith("bob", "forward");
+        expect(input?.value).toBe("bob");
+        expect(document.activeElement).toBe(input);
+      } finally {
+        viewContent.remove();
+      }
+    });
+
+    it("hands the accepted match position to the next search in the same PDF only", () => {
+      plugin.settings.searchInterface = "obsidian";
+      plugin.settings.searchExitBehavior = "emacs";
+      const viewContent = document.createElement("div");
+      viewContent.className = "view-content";
+      document.body.append(viewContent);
+      const makePdfView = (path: string) => ({
+        getViewType: () => "pdf",
+        file: { path },
+        contentEl: viewContent,
+        viewer: {
+          child: { pdfViewer: { pdfViewer: { pdfDocument: { numPages: 1 }, pagesCount: 1 } } },
+        },
+      });
+      const paperA = makePdfView("a.pdf");
+      const paperB = makePdfView("b.pdf");
+      const accepted = { pageNumber: 3, x: 0.25, y: 0.5 };
+      try {
+        plugin.app.workspace.getActiveViewOfType = () => paperA;
+        commands["forward"].checkCallback(false);
+        expect(plugin.pdfController?.startAfter).toBeNull();
+        const controller = plugin.pdfController!;
+        vi.spyOn(controller, "accept").mockImplementation(() => {
+          controller.acceptedPosition = accepted;
+        });
+        getActiveWidget()!.querySelector<HTMLInputElement>(".incsearch-input")!
+          .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        expect(getActiveWidget()).toBeNull();
+
+        commands["forward"].checkCallback(false);
+        expect(plugin.pdfController?.startAfter).toEqual(accepted);
+        // Cancelling keeps the previously accepted position, like Markdown's cursor.
+        getActiveWidget()!.querySelector<HTMLInputElement>(".incsearch-input")!
+          .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+
+        plugin.app.workspace.getActiveViewOfType = () => paperB;
+        commands["forward"].checkCallback(false);
+        expect(plugin.pdfController?.startAfter).toBeNull();
+        removeWidget();
+
+        plugin.app.workspace.getActiveViewOfType = () => paperA;
+        commands["forward"].checkCallback(false);
+        expect(plugin.pdfController?.startAfter).toEqual(accepted);
+      } finally {
+        viewContent.remove();
+      }
+    });
+
+    it("starts empty instead of recalling lastQuery after the PDF bar was closed elsewhere", () => {
+      plugin.settings.lastQuery = "previous search";
+      openPdfWithSelection(false);
+      const staleController = plugin.pdfController;
+      const pdfView = plugin.activePdfView;
+      removeWidget(); // e.g. a click in another pane removes the bar but keeps the controller
+
+      plugin.invokePdf(pdfView, "forward");
+
+      expect(plugin.pdfController).not.toBe(staleController);
+      expect(plugin.pdfController?.state.query).toBe("");
+      expect(getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input")?.value).toBe("");
+    });
   });
 
   it("routes search correctly when PDF and Markdown note are open side-by-side", () => {

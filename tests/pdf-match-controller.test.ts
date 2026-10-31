@@ -1880,6 +1880,132 @@ describe("PDF Match Controller", () => {
 			controller.destroy();
 		});
 
+		describe("continuing after the last accepted match", () => {
+			// Page 5 spans screen y 120..1120 and x 0..800; the view shows y 100..600.
+			// DOM (PDF.js match) order: right column (y 520), left column (y 300), lower left (y 400).
+			const at = (top: number, left: number) => ({ pageNumber: 5, x: left / 800, y: (top - 120) / 1000 });
+			const run = (direction: "forward" | "backward", startAfter: ReturnType<typeof at> | null) => {
+				const scenario = buildReorderedColumnsScenario(direction);
+				const lowerLeftMatch = document.createElement("span");
+				lowerLeftMatch.className = "highlight";
+				lowerLeftMatch.getBoundingClientRect = () => ({
+					top: 400, bottom: 420, left: 100, right: 300, height: 20, width: 200,
+				} as DOMRect);
+				scenario.leftColumnMatch.parentElement!.appendChild(lowerLeftMatch);
+				scenario.controller.startAfter = startAfter;
+				scenario.controller.search("appearance", direction);
+				scenario.findController.scrollMatchIntoView({
+					element: scenario.deliveredMatch,
+					pageIndex: 3,
+					matchIndex: 0,
+				});
+				const selected = [scenario.leftColumnMatch, lowerLeftMatch, scenario.rightColumnMatch]
+					.filter((el) => el.classList.contains("selected"));
+				return { ...scenario, lowerLeftMatch, selected };
+			};
+
+			it("moves forward to the next match after the accepted one when it is still a match", () => {
+				const { controller, lowerLeftMatch, selected } = run("forward", at(300, 100));
+				expect(selected).toEqual([lowerLeftMatch]);
+
+				// Accepting records this match as the next search's starting point.
+				controller.accept();
+				expect(controller.acceptedPosition).toMatchObject(at(400, 100));
+			});
+
+			it.each([
+				// [accepted match, expected advances from the landed match 4 of 0..6]
+				["forward", 5, 2],
+				["forward", 6, 3],
+				["forward", 3, 0],
+				["backward", 4, 1],
+				["backward", 5, 0],
+			] as const)(
+				"steps %s from where the search lands to the match after accepted match %i (%i advances)",
+				async (direction, activeIndex, advances) => {
+					const scenario = buildReorderedColumnsScenario(direction);
+					const { controller, findController } = scenario;
+					// The accepted match has no rendered highlight, and only some of the
+					// page's matches do, so the match numbering, not the DOM, has to say
+					// which match comes next.
+					findController.pageMatches = [[10], [20], [30], [40], [50, 60, 70]];
+					mockAdapter.getActiveFindMatchInfo = () => ({ pageIndex: 4, matchIndex: 0 });
+					const advance = vi.spyOn(controller, "advance").mockImplementation(() => {});
+					controller.startAfter = { ...at(450, 100), query: "appearance", activeIndex };
+					controller.search("appearance", direction);
+					findController.scrollMatchIntoView({ element: scenario.deliveredMatch, pageIndex: 3, matchIndex: 0 });
+
+					await new Promise((resolve) => setTimeout(resolve, 0));
+					expect(advance).toHaveBeenCalledTimes(advances);
+					if (advances) expect(advance).toHaveBeenCalledWith(direction);
+					controller.destroy();
+				}
+			);
+
+			it("moves backward to the match before the accepted one in match order", () => {
+				const { controller, leftColumnMatch, selected } = run("backward", at(400, 100));
+				expect(selected).toEqual([leftColumnMatch]);
+				controller.destroy();
+			});
+
+			it("takes the first match past the accepted position when that text no longer matches", () => {
+				const { controller, lowerLeftMatch, selected } = run("forward", at(350, 100));
+				expect(selected).toEqual([lowerLeftMatch]);
+				controller.destroy();
+			});
+
+			it("falls back to the top-most visible match when the accepted match is out of view", () => {
+				const { controller, leftColumnMatch, selected } = run("forward", at(700, 100));
+				expect(selected).toEqual([leftColumnMatch]);
+				controller.destroy();
+			});
+
+			it("steps past the accepted match when PDF.js has highlighted only that match", async () => {
+				const scenario = buildReorderedColumnsScenario("forward");
+				scenario.rightColumnMatch.remove();
+				scenario.deliveredMatch.remove();
+				const { controller, findController, leftColumnMatch } = scenario;
+				const advance = vi.spyOn(controller, "advance").mockImplementation(() => {});
+				controller.startAfter = at(300, 100);
+				controller.search("appearance", "forward");
+				leftColumnMatch.classList.add("selected");
+				// PDF.js reports the text span holding the match, not the highlight itself.
+				const textSpan = document.createElement("span");
+				textSpan.className = "textLayerNode";
+				leftColumnMatch.parentElement!.appendChild(textSpan);
+				findController.scrollMatchIntoView({ element: textSpan, pageIndex: 4, matchIndex: 0 });
+
+				expect(advance).not.toHaveBeenCalled();
+				expect(leftColumnMatch.classList.contains("selected")).toBe(true);
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				expect(advance).toHaveBeenCalledWith("forward");
+				controller.destroy();
+			});
+
+			it("does not step past a delivered match that is not the accepted one", async () => {
+				const scenario = buildReorderedColumnsScenario("forward");
+				scenario.rightColumnMatch.remove();
+				scenario.deliveredMatch.remove();
+				const { controller, findController, leftColumnMatch } = scenario;
+				const advance = vi.spyOn(controller, "advance").mockImplementation(() => {});
+				controller.startAfter = at(200, 100);
+				controller.search("appearance", "forward");
+				leftColumnMatch.classList.add("selected");
+				findController.scrollMatchIntoView({ element: leftColumnMatch, pageIndex: 4, matchIndex: 0 });
+
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				expect(advance).not.toHaveBeenCalled();
+				expect(leftColumnMatch.classList.contains("selected")).toBe(true);
+				controller.destroy();
+			});
+
+			it("does not record a position when accepting with an empty query", () => {
+				const { controller } = buildReorderedColumnsScenario("forward");
+				controller.accept();
+				expect(controller.acceptedPosition).toBeNull();
+			});
+		});
+
 		it("requests all-match highlighting for the initial find so the steering can see every page", async () => {
 			mockAdapter.containerEl.getBoundingClientRect = () => ({
 				top: 100, bottom: 600, left: 0, right: 800, height: 500, width: 800,

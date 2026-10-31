@@ -14,6 +14,7 @@ import {
 	recomputeQuery,
 	advance,
 	commitMatch,
+	closeSession,
 } from "./session";
 import {
 	renderWidget,
@@ -30,6 +31,7 @@ import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/a
 import { logDebug, describeElement, setDebugLogging } from "./utils/logger";
 import { isPdfView, createPdfViewAdapter } from "./pdf/pdf-view-adapter";
 import { PdfMatchController } from "./pdf/pdf-match-controller";
+import type { PdfMatchPosition } from "./pdf/types";
 import { clearAllPdfHighlights } from "./pdf/highlight-layer";
 import { clearSecondaryHighlights } from "./pdf/text-layer-highlighter";
 
@@ -45,10 +47,39 @@ export * from "./utils/adaptive-highlight";
 export * from "./utils/logger";
 export * from "./utils/scroll";
 
+/**
+ * Returns the text selected inside `root`, or "" when the selection is empty or lies
+ * elsewhere (another note, pane or window). PDF line breaks become single spaces.
+ */
+export function getSelectionWithin(root: HTMLElement | null | undefined): string {
+	const selection = root?.ownerDocument?.getSelection();
+	if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return "";
+	const { anchorNode, focusNode } = selection;
+	if (!anchorNode || !focusNode || !root.contains(anchorNode) || !root.contains(focusNode)) return "";
+	return selection.toString().replace(/\s+/g, " ").trim();
+}
+
+// A repeat press (advance or recall) can move focus to the editor or PDF viewer while it
+// scrolls to the match; the widget's blur handler would then accept and close the bar.
+function keepSearchInputFocused(): void {
+	const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
+	if (!input) return;
+	setFocusGuard();
+	input.focus();
+	(input.ownerDocument.defaultView ?? activeWindow).requestAnimationFrame(() => {
+		if (getActiveWidget() && input.ownerDocument.activeElement !== input) {
+			logDebug("main", "repeat press RAF: refocusing input");
+			input.focus();
+		}
+	});
+}
+
 export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;
 	pdfController: PdfMatchController | null = null;
 	activePdfView: any = null;
+	/** Last accepted match per PDF file path; the next search there continues after it. */
+	acceptedPdfMatches = new Map<string, PdfMatchPosition>();
 	lastInteractedLeaf: any = null;
 
 	async onload() {
@@ -359,38 +390,29 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 	invokePdf(view: any, direction: SearchDirection) {
 		logDebug("main", `invokePdf: direction=${direction}, hasController=${Boolean(this.pdfController)}`);
+		// Repeat-press behavior (advance / recall the last query) applies only while this
+		// PDF's search bar is open; otherwise a fresh search starts empty.
+		if (this.pdfController && (this.activePdfView !== view || !getActiveWidget())) {
+			logDebug("main", "invokePdf: discarding stale PDF search");
+			this.pdfController.destroy();
+			this.pdfController = null;
+		}
 		this.activePdfView = view;
 
 		if (this.pdfController) {
 			if (this.pdfController.state.query === "" && this.settings.lastQuery) {
 				logDebug("main", `invokePdf: double-tap recall query="${this.settings.lastQuery}"`);
 				void this.pdfController.search(this.settings.lastQuery, direction);
-				const widget = getActiveWidget();
-				if (widget) {
-					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
-					if (input) {
-						input.value = this.settings.lastQuery;
-						const len = input.value.length;
-						input.setSelectionRange(len, len);
-					}
+				const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
+				if (input) {
+					input.value = this.settings.lastQuery;
+					input.setSelectionRange(input.value.length, input.value.length);
 				}
+				keepSearchInputFocused();
 			} else {
 				logDebug("main", `invokePdf: advancing in direction ${direction}`);
 				this.pdfController.advance(direction);
-				const widget = getActiveWidget();
-				if (widget) {
-					const input = widget.querySelector<HTMLInputElement>(".incsearch-input");
-					if (input) {
-						setFocusGuard();
-						input.focus();
-						(input.ownerDocument.defaultView ?? window).requestAnimationFrame(() => {
-							if (getActiveWidget() && input.ownerDocument.activeElement !== input) {
-								logDebug("main", "invokePdf RAF: refocusing input");
-								input.focus();
-							}
-						});
-					}
-				}
+				keepSearchInputFocused();
 			}
 			updatePdfWidgetCounter(this.pdfController);
 			return;
@@ -409,14 +431,15 @@ export default class IncrementalSearchPlugin extends Plugin {
 				updatePdfWidgetCounter(this.pdfController);
 			}
 		});
+		const pdfPath: string | undefined = view.file?.path;
+		this.pdfController.startAfter = (pdfPath && this.acceptedPdfMatches.get(pdfPath)) || null;
 
-		const startingQuery =
-			typeof window !== "undefined"
-				? activeWindow.getSelection()?.toString().trim() ?? ""
-				: "";
+		const startingQuery = getSelectionWithin(adapter.containerEl);
 		logDebug("main", `invokePdf: rendering PDF widget with startingQuery="${startingQuery}"`);
 		renderPdfWidget(this.pdfController, this, startingQuery, direction, () => {
 			logDebug("main", "invokePdf: onClose callback triggered");
+			const accepted = this.pdfController?.acceptedPosition;
+			if (pdfPath && accepted) this.acceptedPdfMatches.set(pdfPath, accepted);
 			this.pdfController?.destroy();
 			this.pdfController = null;
 			this.activePdfView = null;
@@ -446,7 +469,16 @@ export default class IncrementalSearchPlugin extends Plugin {
 			return;
 		}
 
-		const session = view.state.field(searchSessionField, false);
+		let session = view.state.field(searchSessionField, false);
+		// Repeat-press behavior (advance / recall the last query) applies only while this
+		// note's search bar is open. A session left behind when the bar was closed elsewhere
+		// (pane click, leaf switch, search started in another note) is discarded.
+		const widget = getActiveWidget();
+		if (session && !widget?.parentElement?.contains(view.dom)) {
+			logDebug("main", "invoke: discarding stale session without a visible search bar");
+			closeSession(view, this);
+			session = null;
+		}
 		if (session) {
 			logDebug("main", `invoke: existing session found (query="${session.query}", activeIndex=${session.activeIndex})`);
 			if (session.query === "" && this.settings.lastQuery) {
@@ -465,32 +497,16 @@ export default class IncrementalSearchPlugin extends Plugin {
 					false,
 					this.settings.allMatchesDisplayMode
 				);
-				const widget = getActiveWidget();
-				if (widget) {
-					const input = widget.querySelector(".incsearch-input") as HTMLInputElement;
-					if (input) {
-						input.value = this.settings.lastQuery;
-						const len = input.value.length;
-						input.setSelectionRange(len, len);
-					}
+				const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
+				if (input) {
+					input.value = this.settings.lastQuery;
+					input.setSelectionRange(input.value.length, input.value.length);
 				}
+				keepSearchInputFocused();
 			} else {
 				logDebug("main", `invoke: advancing existing session in direction ${direction}`);
 				advance(view, direction);
-				const widget = getActiveWidget();
-				if (widget) {
-					const input = widget.querySelector<HTMLInputElement>(".incsearch-input");
-					if (input) {
-						setFocusGuard();
-						input.focus();
-						(input.ownerDocument.defaultView ?? window).requestAnimationFrame(() => {
-							if (getActiveWidget() && input.ownerDocument.activeElement !== input) {
-								logDebug("main", "invoke RAF: refocusing input");
-								input.focus();
-							}
-						});
-					}
-				}
+				keepSearchInputFocused();
 			}
 			updateWidgetCounter(view);
 			return;

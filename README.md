@@ -36,7 +36,9 @@ Type a few words and the plugin finds them nearby, in order — you don't need t
 
 For example, searching `the KAN` matches text like *"the original KAN"* — the words don't need to be adjacent.
 
-**Search from active selection:** If text is selected when you start a search, the plugin immediately uses that selection as the search query and jumps to the next occurrence (for forward search) or previous occurrence (for backward search), excluding the active selection itself.
+**Search from active selection:** If text is selected in the note or PDF you are searching when you start a search, the plugin immediately uses that selection as the search query and jumps to the next occurrence (for forward search) or previous occurrence (for backward search), excluding the active selection itself. Otherwise search starts empty; a selection in another note, pane, or window is ignored.
+
+**Where a PDF search starts:** A PDF has no cursor, so the last match you accepted in that PDF stands in for one: while it is still on screen, a new search continues after it (forward) or before it (backward). Otherwise, a forward search starts at the top-most visible match and a backward search at the bottom-most. Cancelling a search does not change the starting point.
 
 **Need an exact match?** Wrap any part of your search in double quotes. Searching `"the KAN"` matches only that exact phrase, with no words in between.
 
@@ -70,9 +72,9 @@ These display names describe Emacs-style directional search. Both commands remai
 available in either keyboard mode. Their command IDs are unchanged, so existing
 hotkey assignments continue to work.
 
-Outside search, these commands open it in the active note or PDF. During search,
-they move to the next or previous match; when the query is empty, repeating a
-command recalls the last query. Both interfaces use the command shortcuts you
+Outside search, these commands open it, empty, in the active note or PDF.
+During search, they move to the next or previous match; when the query is empty,
+repeating a command while the search bar is still open recalls the last query. Both interfaces use the command shortcuts you
 assign here, with no separate Ctrl/Cmd+S or Ctrl/Cmd+R bindings.
 
 ## In-search controls
