@@ -54,7 +54,7 @@ describe("widget: counter & lifecycle", () => {
     };
 
     mockPlugin = {
-      settings: { spaceAsWildcard: true, lastQuery: "", usePopupModal: false, doubleTapWindowMs: 600, matchOnlyVisibleLinks: true },
+      settings: { spaceAsWildcard: true, lastQuery: "", doubleTapWindowMs: 600, matchOnlyVisibleLinks: true },
       saveSettings: async () => { },
       app: {
         workspace: {
@@ -447,7 +447,7 @@ describe("widget: counter & lifecycle", () => {
     expect(getActiveWidget()).toBeNull();
   });
 
-  it("handles Ctrl+S and Ctrl+R in renderPdfWidget without blurring or closing", () => {
+  it("leaves unassigned Ctrl+S and Ctrl+R alone in renderPdfWidget", () => {
     let advancedDir: string | null = null;
     const mockController: any = {
       adapter: { containerEl: document.createElement("div") },
@@ -466,19 +466,32 @@ describe("widget: counter & lifecycle", () => {
     const widget = getActiveWidget();
     const input = widget?.querySelector(".incsearch-input") as HTMLInputElement;
 
-    // Press Ctrl+S -> should advance forward
     const ctrlSEvent = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
     input.dispatchEvent(ctrlSEvent);
-    expect(advancedDir).toBe("forward");
-    expect(ctrlSEvent.defaultPrevented).toBe(true);
+    expect(advancedDir).toBeNull();
+    expect(ctrlSEvent.defaultPrevented).toBe(false);
     expect(closed).toBe(false);
 
-    // Press Ctrl+R -> should advance backward
     const ctrlREvent = new KeyboardEvent("keydown", { key: "r", ctrlKey: true, bubbles: true, cancelable: true });
     input.dispatchEvent(ctrlREvent);
-    expect(advancedDir).toBe("backward");
-    expect(ctrlREvent.defaultPrevented).toBe(true);
+    expect(advancedDir).toBeNull();
+    expect(ctrlREvent.defaultPrevented).toBe(false);
     expect(closed).toBe(false);
+  });
+
+  it.each([
+    ["compact", "emacs"], ["obsidian", "emacs"],
+    ["compact", "obsidian"], ["obsidian", "obsidian"],
+  ])("retains undocumented F3 aliases in %s with %s behavior", (searchInterface, searchExitBehavior) => {
+    mockPlugin.settings.searchInterface = searchInterface;
+    mockPlugin.settings.searchExitBehavior = searchExitBehavior;
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    const input = getActiveWidget()!.querySelector("input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "F3", bubbles: true, cancelable: true }));
+    expect(sessionState?.activeIndex).toBe(1);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "F3", shiftKey: true, bubbles: true, cancelable: true }));
+    expect(sessionState?.activeIndex).toBe(0);
+    expect(getActiveWidget()?.querySelector(".incsearch-key-hints")?.textContent ?? "").not.toContain("F3");
   });
 
   it("handles Enter and Escape in Emacs mode (default) in editor widget", () => {
@@ -670,7 +683,6 @@ describe("widget: focus-guard regression", () => {
       settings: {
         spaceAsWildcard: false,
         lastQuery: "",
-        usePopupModal: false,
         matchOnlyVisibleLinks: false,
         allMatchesDisplayMode: "off",
         searchExitBehavior: "emacs",
@@ -1000,9 +1012,9 @@ describe("widget: unified SearchSessionController & adapters", () => {
     expect(queryInput).toBe("custom");
     expect(counter?.textContent).toBe("1/5");
 
-    // Advance via Ctrl+S
-    const ctrlS = new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true });
-    input.dispatchEvent(ctrlS);
+    // F3 remains a shared, unadvertised navigation alias.
+    const f3 = new KeyboardEvent("keydown", { key: "F3", bubbles: true, cancelable: true });
+    input.dispatchEvent(f3);
     expect(advancedDir).toBe("forward");
 
     // Toggle demand via Ctrl+Enter

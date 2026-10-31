@@ -134,17 +134,8 @@ export class Modal {
 	onClose(): void {}
 }
 
-export class SuggestModal extends Modal {
-  inputEl: any;
-  resultContainerEl: any;
-  constructor(app: any) {
-    super(app);
-    this.inputEl = { value: "", dispatchEvent: () => {} };
-    this.resultContainerEl = typeof document !== "undefined" ? document.createElement("div") : { querySelector: () => null };
-  }
-  setPlaceholder(text: string): void {}
-  setInstructions(_instructions: Array<{ command: string; purpose: string }>): void {}
-}
+// commons/modal exports SuggestModal subclasses alongside the hint renderer.
+export class SuggestModal extends Modal {}
 
 export class Component {
 	load(): void {}

@@ -27,7 +27,6 @@ describe("pop-out window safety (static scan)", () => {
     "src/main.ts",
     "src/widget.ts",
     "src/session.ts",
-    "src/modal.ts",
     "src/pdf/pdf-match-controller.ts",
     "src/pdf/pdf-view-adapter.ts",
     "src/utils/adaptive-highlight.ts",

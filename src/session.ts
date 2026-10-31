@@ -886,23 +886,6 @@ export function advance(view: EditorView, dir: SearchDirection) {
 }
 
 /**
- * Sets the active match to a specific index.
- */
-export function setActiveIndex(view: EditorView, index: number) {
-	const session = view.state.field(searchSessionField, false);
-	if (!session || index < 0 || index >= session.matches.length) return;
-
-	view.dispatch({
-		effects: setSession.of({
-			...session,
-			activeIndex: index,
-		}),
-	});
-
-	scrollToMatch(view, session.matches[index]);
-}
-
-/**
  * Recomputes all matches for a new query and updates the active selection.
  */
 export function recomputeQuery(

@@ -378,7 +378,8 @@ export function renderSearchWidget(
 	controller: SearchSessionController,
 	settings: IncrementalSearchSettings,
 	initialQuery: string,
-	initialDirection: SearchDirection
+	initialDirection: SearchDirection,
+	app?: App
 ) {
 	logDebug(
 		"widget",
@@ -475,7 +476,7 @@ export function renderSearchWidget(
 
 	const hints = isObsidianBar ? el.createDiv({ cls: "incsearch-key-hints" }) : null;
 	const updateHints = () => {
-		if (hints) renderKeyHints(hints, [searchKeyHints(settings)], "incsearch");
+		if (hints) renderKeyHints(hints, [searchKeyHints(settings, app)], "incsearch");
 	};
 	updateHints();
 	let highlightButton: HTMLButtonElement | undefined;
@@ -596,7 +597,6 @@ export function renderSearchWidget(
 
 	el.addEventListener("keydown", (evt: KeyboardEvent) => {
 		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
-		const keyLower = evt.key.toLowerCase();
 		const isEnter =
 			evt.key === "Enter" ||
 			evt.code === "Enter" ||
@@ -607,15 +607,6 @@ export function renderSearchWidget(
 			"widget",
 			`input keydown: key="${evt.key}", code="${evt.code}", ctrl=${evt.ctrlKey}, meta=${evt.metaKey}, shift=${evt.shiftKey}`
 		);
-
-		if (isCtrlOrMeta && (keyLower === "s" || keyLower === "r")) {
-			evt.preventDefault();
-			evt.stopPropagation();
-			const dir: SearchDirection = keyLower === "s" ? "forward" : "backward";
-			controller.advance(dir);
-			updateCounter();
-			return;
-		}
 
 		if (evt.key === "F3") {
 			evt.preventDefault();
@@ -690,7 +681,7 @@ export function renderWidget(
 	initialDirection: SearchDirection
 ) {
 	const controller = createMarkdownSessionController(view, plugin);
-	renderSearchWidget(controller, plugin.settings, initialQuery, initialDirection);
+	renderSearchWidget(controller, plugin.settings, initialQuery, initialDirection, plugin.app);
 }
 
 /**
@@ -698,11 +689,11 @@ export function renderWidget(
  */
 export function renderPdfWidget(
 	controller: PdfMatchController,
-	plugin: { settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
+	plugin: { app: App; settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
 	initialQuery: string,
 	initialDirection: SearchDirection,
 	onClose: () => void
 ) {
 	const sessionController = createPdfSessionController(controller, plugin, onClose);
-	renderSearchWidget(sessionController, plugin.settings, initialQuery, initialDirection);
+	renderSearchWidget(sessionController, plugin.settings, initialQuery, initialDirection, plugin.app);
 }

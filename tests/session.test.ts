@@ -3,7 +3,6 @@ import { EditorState } from "@codemirror/state";
 import { unfoldEffect, foldEffect } from "@codemirror/language";
 import {
   advance,
-  setActiveIndex,
   recomputeQuery,
   commitMatch,
   cancelSession,
@@ -17,7 +16,7 @@ import {
 } from "../src/session";
 import { SearchSessionState, MatchRange } from "../src/types";
 
-describe("session: advance & setActiveIndex", () => {
+describe("session: advance", () => {
   let sessionState: SearchSessionState | null = null;
 
   const createMockView = (session: SearchSessionState | null) => {
@@ -75,24 +74,6 @@ describe("session: advance & setActiveIndex", () => {
     expect(sessionState?.activeIndex).toBe(1);
   });
 
-  it("sets active index when in valid range", () => {
-    const view = createMockView({
-      query: "test",
-      direction: "forward",
-      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }],
-      activeIndex: 0,
-      originSelection: { anchor: 0, head: 0 },
-    });
-
-    setActiveIndex(view, 1);
-    expect(sessionState?.activeIndex).toBe(1);
-
-    // Out of range should be ignored
-    setActiveIndex(view, 5);
-    expect(sessionState?.activeIndex).toBe(1);
-    setActiveIndex(view, -1);
-    expect(sessionState?.activeIndex).toBe(1);
-  });
 });
 
 describe("session: recomputeQuery directional cursor placement", () => {

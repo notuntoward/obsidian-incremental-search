@@ -374,11 +374,6 @@
   outline-offset: -2px;
 }
 
-.incsearch-line-number {
-  color: var(--text-muted);
-  margin-right: 8px;
-}
-
 /* PDF Search Overlay & Matches */
 /* PDF Text Layer Inline Highlights */
 

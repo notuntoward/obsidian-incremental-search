@@ -25,7 +25,6 @@ import {
 	getActiveWidget,
 	setFocusGuard,
 } from "./widget";
-import { IncrementalSearchSuggestModal } from "./modal";
 import { updateResolvedOutlineColor, applyPdfColors } from "./utils/colors";
 import { getOrComputeSecondaryStyle, invalidateAppearanceCache } from "./utils/adaptive-highlight";
 import { logDebug, describeElement, setDebugLogging } from "./utils/logger";
@@ -38,7 +37,6 @@ export * from "./types";
 export * from "./engine";
 export * from "./session";
 export * from "./widget";
-export * from "./modal";
 export * from "./pdf/types";
 export * from "./pdf/highlight-layer";
 export * from "./pdf/pdf-view-adapter";
@@ -191,13 +189,13 @@ export default class IncrementalSearchPlugin extends Plugin {
 
 		this.addCommand({
 			id: "forward",
-			name: "Forward",
+			name: "Forward Emacs",
 			checkCallback: (checking: boolean) => this.handleCommand(checking, "forward"),
 		});
 
 		this.addCommand({
 			id: "backward",
-			name: "Backward",
+			name: "Reverse Emacs",
 			checkCallback: (checking: boolean) => this.handleCommand(checking, "backward"),
 		});
 
@@ -527,41 +525,24 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}),
 		});
 
-		if (this.settings.searchInterface === "popup") {
-			logDebug("main", "invoke: opening modal search dialog");
-			const modal = new IncrementalSearchSuggestModal(
-				this.app,
-				this,
-				editor,
+		if (startingQuery) {
+			const activeFile = this.app.workspace.getActiveFile();
+			const linkCache = activeFile
+				? (this.app.metadataCache.getFileCache(activeFile) ?? undefined)
+				: undefined;
+			recomputeQuery(
 				view,
-				direction
+				startingQuery,
+				direction,
+				this.settings.spaceAsWildcard,
+				this.settings.matchOnlyVisibleLinks,
+				linkCache,
+				false,
+				this.settings.allMatchesDisplayMode
 			);
-			modal.open();
-			if (startingQuery) {
-				modal.inputEl.value = startingQuery;
-				modal.inputEl.dispatchEvent(new Event("input"));
-				modal.inputEl.select();
-			}
-		} else {
-			if (startingQuery) {
-				const activeFile = this.app.workspace.getActiveFile();
-				const linkCache = activeFile
-					? (this.app.metadataCache.getFileCache(activeFile) ?? undefined)
-					: undefined;
-				recomputeQuery(
-					view,
-					startingQuery,
-					direction,
-					this.settings.spaceAsWildcard,
-					this.settings.matchOnlyVisibleLinks,
-					linkCache,
-					false,
-					this.settings.allMatchesDisplayMode
-				);
-			}
-			logDebug("main", "invoke: rendering floating search widget");
-			renderWidget(view, this, startingQuery, direction);
 		}
+		logDebug("main", "invoke: rendering floating search widget");
+		renderWidget(view, this, startingQuery, direction);
 	}
 
 	async loadSettings() {
@@ -579,8 +560,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 		delete loaded.fuzzyMode;
 
-		if (loaded.searchInterface === undefined) {
-			loaded.searchInterface = loaded.usePopupModal ? "popup" : "compact";
+		if (loaded.searchInterface === undefined || loaded.searchInterface === "popup") {
+			loaded.searchInterface = DEFAULT_SETTINGS.searchInterface;
 		}
 		delete loaded.usePopupModal;
 
@@ -673,14 +654,13 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: "Search interface",
-						desc: "Choose the search appearance; matching and keyboard settings stay the same. Popup is Markdown-only; PDFs use Compact.",
+						desc: "Choose Compact or the Obsidian-style bar for notes and PDFs. Matching and keyboard settings stay the same.",
 						control: {
 							type: "dropdown",
 							key: "searchInterface",
 							options: {
 								compact: "Compact",
 								obsidian: "Obsidian-style bar",
-								popup: "Popup",
 							},
 						},
 					},

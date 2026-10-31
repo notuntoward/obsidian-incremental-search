@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import IncrementalSearchPlugin, { IncrementalSearchSuggestModal } from "../src/main";
-import { getActiveWidget } from "../src/widget";
+import IncrementalSearchPlugin from "../src/main";
+import { getActiveWidget, renderWidget } from "../src/widget";
 import * as colors from "../src/utils/colors";
 import { isPdfView, createPdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 
@@ -39,7 +39,6 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     plugin.loadData = async () => ({
       doubleTapWindowMs: 600,
       spaceAsWildcard: true,
-      usePopupModal: false,
       lastQuery: "",
     });
     plugin.saveData = async () => {};
@@ -50,7 +49,74 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
   it("registers forward and backward commands", () => {
     expect(commands["forward"]).toBeDefined();
     expect(commands["backward"]).toBeDefined();
+    expect(commands["forward"].name).toBe("Forward Emacs");
+    expect(commands["backward"].name).toBe("Reverse Emacs");
     expect(plugin.settings.searchExitBehavior).toBe("emacs");
+  });
+
+  it.each(["compact", "obsidian"])("uses the registered command shortcuts once while %s input is focused", (searchInterface) => {
+    plugin.settings.searchInterface = searchInterface;
+    plugin.app.hotkeyManager = {
+      printHotkeyForCommand: (id: string) => id.endsWith(":forward") ? "Alt + N" : "Alt + P",
+    };
+    currentSession = {
+      query: "word", direction: "forward", activeIndex: 0,
+      matches: [{ from: 0, to: 4 }, { from: 10, to: 14 }, { from: 20, to: 24 }],
+      originSelection: { anchor: 0, head: 0 },
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = {
+      cm: {
+        state: { field: () => currentSession },
+        dispatch: (args: any) => {
+          if (args.effects?.value?.query !== undefined) currentSession = args.effects.value;
+        },
+        dom: { parentElement: container },
+      },
+    };
+    vi.spyOn(plugin, "getActiveTarget").mockReturnValue({ type: "editor", editor });
+    // Stand in for Obsidian's native capture dispatcher; the widget must not
+    // register another copy of the command or maintain its own key mapping.
+    let forwardKey = "n";
+    const nativeDispatch = (evt: KeyboardEvent) => {
+      const direction = evt.altKey && evt.key === forwardKey ? "forward"
+        : evt.altKey && evt.key === "p" ? "backward" : null;
+      if (direction && commands[direction].checkCallback(false)) {
+        evt.preventDefault();
+        evt.stopPropagation();
+      }
+    };
+    document.addEventListener("keydown", nativeDispatch, true);
+    try {
+      renderWidget(editor.cm as any, plugin, "word", "forward");
+      const input = getActiveWidget()!.querySelector("input")!;
+      input.focus();
+      const press = (key: string) => {
+        const event = new KeyboardEvent("keydown", { key, altKey: true, bubbles: true, cancelable: true });
+        input.dispatchEvent(event);
+        return event;
+      };
+      expect(press("n").defaultPrevented).toBe(true);
+      expect(currentSession.activeIndex).toBe(1);
+      expect(press("p").defaultPrevented).toBe(true);
+      expect(currentSession.activeIndex).toBe(0);
+      forwardKey = "j";
+      expect(press("n").defaultPrevented).toBe(false);
+      expect(currentSession.activeIndex).toBe(0);
+      expect(press("j").defaultPrevented).toBe(true);
+      expect(currentSession.activeIndex).toBe(1);
+      expect(getActiveWidget()?.querySelector(".incsearch-counter")?.textContent).toBe("2/3");
+      expect(document.activeElement).toBe(input);
+      if (searchInterface === "obsidian") {
+        expect(getActiveWidget()?.querySelector(".incsearch-key-hints")?.textContent).toContain("Alt + N");
+        expect(getActiveWidget()?.querySelector(".incsearch-key-hints")?.textContent).not.toContain("F3");
+      }
+    } finally {
+      document.removeEventListener("keydown", nativeDispatch, true);
+      plugin.onunload();
+      container.remove();
+    }
   });
 
   it("starts a new session if none is active", () => {
@@ -224,9 +290,8 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(getActiveWidget()).toBeNull();
   });
 
-  it("opens IncrementalSearchSuggestModal when the Popup interface is selected", () => {
-    plugin.settings.searchInterface = "popup";
-    const open = vi.spyOn(IncrementalSearchSuggestModal.prototype, "open");
+  it.each(["compact", "obsidian"])("opens the %s inline interface", (searchInterface) => {
+    plugin.settings.searchInterface = searchInterface;
 
     const mockEditor = {
       cm: {
@@ -251,8 +316,10 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(() => {
       plugin.handleCommand(false, "forward", mockEditor as any);
     }).not.toThrow();
-    expect(open).toHaveBeenCalledTimes(1);
-    open.mockRestore();
+    const widget = getActiveWidget();
+    expect(widget).not.toBeNull();
+    expect(widget?.classList.contains("incsearch-widget-obsidian")).toBe(searchInterface === "obsidian");
+    plugin.onunload();
   });
 
   it("provides declarative setting definitions via getSettingDefinitions()", async () => {
@@ -462,13 +529,36 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
   it.each([
     [{}, "compact"],
     [{ usePopupModal: false }, "compact"],
-    [{ usePopupModal: true }, "popup"],
+    [{ usePopupModal: true }, "compact"],
+    [{ searchInterface: "popup" }, "compact"],
+    [{ searchInterface: "compact" }, "compact"],
+    [{ searchInterface: "obsidian" }, "obsidian"],
     [{ usePopupModal: true, searchInterface: "obsidian" }, "obsidian"],
   ])("migrates interface preferences from %j to %s", async (stored, expected) => {
     plugin.loadData = async () => stored;
     await plugin.loadSettings();
     expect(plugin.settings.searchInterface).toBe(expected);
     expect(plugin.settings.usePopupModal).toBeUndefined();
+  });
+
+  it("persists popup migration without resetting other search preferences", async () => {
+    const save = vi.fn();
+    plugin.saveData = save;
+    plugin.loadData = async () => ({
+      searchInterface: "popup",
+      usePopupModal: true,
+      searchExitBehavior: "obsidian",
+      allMatchesDisplayMode: "off",
+      lastQuery: "remember me",
+    });
+    await plugin.loadSettings();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      searchInterface: "compact",
+      searchExitBehavior: "obsidian",
+      allMatchesDisplayMode: "off",
+      lastQuery: "remember me",
+    }));
+    expect(save.mock.calls[0][0]).not.toHaveProperty("usePopupModal");
   });
 
   it("normalizes persisted Off to On demand only for the Obsidian-style bar", async () => {
@@ -504,7 +594,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(plugin.settings.allMatchesDisplayMode).toBe("on-demand");
     expect(byName("Highlight all matches").control.options.off).toBeUndefined();
     expect(byName("Search interface").control.options).toEqual({
-      compact: "Compact", obsidian: "Obsidian-style bar", popup: "Popup",
+      compact: "Compact", obsidian: "Obsidian-style bar",
     });
     await tab.setControlValue("searchInterface", "compact");
     expect(byName("Highlight all matches").control.options.off).toBe("Off");

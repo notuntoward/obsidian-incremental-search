@@ -59,7 +59,7 @@ export interface SearchSessionState {
 
 export type SearchExitBehavior = "emacs" | "obsidian";
 export type SecondaryHighlightStyle = "adaptive" | "underline" | "tint" | "theme" | "custom";
-export type SearchInterface = "compact" | "obsidian" | "popup";
+export type SearchInterface = "compact" | "obsidian";
 
 export interface IncrementalSearchSettings {
 	lastQuery: string;

@@ -4,6 +4,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import type { renderSearchWidget, removeWidget } from "../../src/widget";
 import type { IncrementalSearchSettings } from "../../src/types";
+import type { App } from "obsidian";
 
 declare global {
 	interface Window {
@@ -131,10 +132,23 @@ for (const width of [280, 760]) {
 						},
 						accept: (refocus = true) => { api.accepted.push(refocus); api.removeWidget(); },
 						cancel: () => api.removeWidget(),
-					}, settings, "a long query that must not widen the search bar", "forward");
+					}, settings, "a long query that must not widen the search bar", "forward", {
+						hotkeyManager: {
+							printHotkeyForCommand: (id: string) => id.endsWith(":forward") ? "Alt + S" : "Alt + R",
+						},
+					} as unknown as App);
 				}, { contentType: content, exitMode });
 
 				const input = page.getByRole("textbox", { name: "Incremental search", exact: true });
+				const hints = page.locator(".incsearch-key-hints");
+				await expect(hints).not.toContainText("F3");
+				if (exitMode === "emacs") {
+					await expect(hints).toContainText("Alt + S");
+					await expect(hints).toContainText("Alt + R");
+				} else {
+					await expect(hints).toContainText("Shift+Enter");
+					await expect(hints).not.toContainText("Alt + S");
+				}
 				await expect(input).toBeFocused();
 				const iconTextGap = () => input.evaluate(el => {
 					const icon = el.closest(".document-search")!.querySelector(".incsearch-method-indicator .svg-icon")!;

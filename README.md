@@ -21,9 +21,9 @@ Inspired by GNU Emacs `isearch` and `swiper`, for anyone who'd rather keep their
 
 ## Quick start
 
-1. Run **Incremental Search: Forward** or **Incremental Search: Backward** from the Command Palette (assign a hotkey — see below).
+1. Run **Incremental Search: Forward Emacs** or **Incremental Search: Reverse Emacs** from the Command Palette (assign a hotkey — see below).
 2. Start typing. Matches highlight as you go, starting from your cursor. If you start search with text already selected, it automatically searches for that selection and jumps to the next occurrence.
-3. Press the same hotkey again to jump to the next match, or press `Enter` to land the cursor there and close the search.
+3. Press the same hotkey again to jump to the next match. In the default Emacs-style keyboard mode, `Enter` accepts the match and closes search; in Obsidian-style mode, `Enter` finds the next match and `Esc` accepts.
 
 Works in notes (source and Live Preview), tables, callouts, and PDFs.
 
@@ -59,22 +59,31 @@ To search for a literal quote character inside a quoted phrase, escape it with a
 
 Hotkeys are unassigned by default so they never conflict with your existing keymap.
 
-| Command | Command ID | Suggested hotkey | Description |
-| :--- | :--- | :--- | :--- |
-| Incremental Search: Forward | `incremental-search:forward` | `Ctrl+S` / `Cmd+S` or `Alt+S` | Start or advance forward search from the cursor |
-| Incremental Search: Backward | `incremental-search:backward` | `Ctrl+R` / `Cmd+R` or `Alt+R` | Start or advance backward search from the cursor |
+| Command                      | Command ID                    | Suggested hotkey              | Description                                      |
+| :--------------------------- | :---------------------------- | :---------------------------- | :----------------------------------------------- |
+| Incremental Search: Forward Emacs | `incremental-search:forward` | `Ctrl+S` / `Cmd+S` or `Alt+S` | Start or advance forward search from the cursor |
+| Incremental Search: Reverse Emacs | `incremental-search:backward` | `Ctrl+R` / `Cmd+R` or `Alt+R` | Start or advance backward search from the cursor |
 
 To assign hotkeys: **Settings → Hotkeys**, search for "Incremental Search," and bind both commands.
 
+These display names describe Emacs-style directional search. Both commands remain
+available in either keyboard mode. Their command IDs are unchanged, so existing
+hotkey assignments continue to work.
+
+Outside search, these commands open it in the active note or PDF. During search,
+they move to the next or previous match; when the query is empty, repeating a
+command recalls the last query. Both interfaces use the command shortcuts you
+assign here, with no separate Ctrl/Cmd+S or Ctrl/Cmd+R bindings.
+
 ## In-search controls
 
-Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on **Search keyboard behavior** (**Settings → Incremental Search → Navigation & exit**). This applies to Compact, the Obsidian-style bar and Popup.
+Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on **Search keyboard behavior** (**Settings → Incremental Search → Navigation & exit**). This applies to both Compact and the Obsidian-style bar, in notes and PDFs.
 
 | Key | Emacs-style mode (default) | Obsidian-style mode |
 | :--- | :--- | :--- |
 | Type characters | Updates query, jumps to nearest match | Updates query, jumps to nearest match |
-| Forward hotkey / `F3` | Next match | Next match |
-| Backward hotkey / `Shift+F3` | Previous match | Previous match |
+| Forward command hotkey | Next match | Next match |
+| Backward command hotkey | Previous match | Previous match |
 | `Enter` | Accept match, place cursor, close search | Find next match |
 | `Shift+Enter` | Accept match, place cursor, close search | Find previous match |
 | `Esc` | Cancel, restore original position | Accept match, close search |
@@ -82,18 +91,18 @@ Once a search is active, these keys control navigation and how the search sessio
 | `Ctrl+Enter` / `Cmd+Enter` | Toggle highlighting of other matches — only when "Highlight all matches" is set to *On demand* | Same as Emacs-style |
 | Click outside / switch tab | Dismiss, keep current cursor position | Dismiss, keep current cursor position |
 
-`Ctrl+G` / `Cmd+G` cancels in all three search interfaces, including Popup, regardless of Search keyboard behavior. It works while focus is within the search UI and leaves unrelated shortcuts alone after search closes.
+`Ctrl+G` / `Cmd+G` cancels in either search interface, regardless of Search keyboard behavior. It works while focus is within the search UI and leaves unrelated shortcuts alone after search closes.
 
-The optional **Obsidian-style bar** changes the appearance, not the search engine or selected keyboard behavior. It uses a rounded search row with a scan-search icon (no colored stripe), plus a muted, wrapping shortcut footer below. The footer follows Search keyboard behavior and shows the highlight shortcut only in On demand mode; Compact remains a simple floating box without a footer. Popup uses the same keyboard behavior with a native instruction footer, while retaining its up/down, Ctrl+N/P, Page Up/Down and Home/End result navigation.
+The optional **Obsidian-style bar** changes the appearance, not the search engine or selected keyboard behavior. It uses a rounded search row with a scan-search icon (no colored stripe), plus a muted, wrapping shortcut footer below. In Emacs-style mode, navigation hints show each command's first configured shortcut (or Unassigned); in Obsidian-style mode, they show Enter and Shift+Enter. The footer shows the highlight shortcut only in On demand mode; Compact remains a simple floating box without a footer.
 
-In Obsidian-style keyboard behavior, Enter always searches forward and Shift+Enter always searches backward, regardless of the last search direction. Emacs-style retains Enter/Shift+Enter to accept and Escape to cancel. Ctrl/Cmd+S and Ctrl/Cmd+R, plus F3/Shift+F3, work in all interfaces.
+In Obsidian-style keyboard behavior, Enter always searches forward and Shift+Enter always searches backward, regardless of the last search direction. Emacs-style retains Enter/Shift+Enter to accept and Escape to cancel. Configured command hotkeys work in both interfaces and modes.
 
 The bar's controls, from left to right after the input, are:
 
 | Control | Action |
 | :--- | :--- |
-| Up arrow | Incremental Search: Backward |
-| Down arrow | Incremental Search: Forward |
+| Up arrow | Previous match (reverse search) |
+| Down arrow | Next match (forward search) |
 | Highlight all matches | Switch the saved setting between Always and On demand, applying it immediately without moving the current match |
 | X | Cancel search, restore the original cursor/scroll position, and hide the bar, regardless of Search keyboard behavior |
 
@@ -106,7 +115,7 @@ All options live under **Settings → Incremental Search**, organized into nativ
 Descriptions span the row beneath the label and control instead of wrapping beside wide dropdowns. On narrow panels, controls stack below labels. Dropdown labels are concise; their descriptions explain the behavior.
 
 **Interface**
-- *Search interface* — Compact (the original floating box, default), Obsidian-style bar (full-width above the document), or Popup (center-screen modal for Markdown; PDFs retain Compact). Existing popup preferences are migrated automatically.
+- *Search interface* — Compact (the original floating box, default) or Obsidian-style bar (full-width above the document). Both work in notes and PDFs. The popup interface has been removed; saved popup preferences automatically switch to Compact without resetting other settings.
 - Choosing the Obsidian-style bar changes a saved *Highlight all matches: Off* to *On demand*. Off is unavailable while this interface is selected; switching back makes Off available again.
 
 **Matching**

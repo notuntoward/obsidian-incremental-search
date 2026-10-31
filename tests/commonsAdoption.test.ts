@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import IncrementalSearchPlugin from "../src/main";
-import { IncrementalSearchSuggestModal } from "../src/modal";
 import { renderSearchWidget, removeWidget, removeAllWidgets } from "../src/widget";
 import { applySecondaryStyle } from "../src/utils/adaptive-highlight";
 import { applyPdfColors, clearPdfColors } from "../src/utils/colors";
@@ -91,101 +90,6 @@ describe("commons adoption in obsidian-incremental-search", () => {
       expect(focusSpy).toHaveBeenCalledWith(app, validLeaf);
 
       leafEl.remove();
-    });
-  });
-
-  describe("modal scoping to owner window and owner document", () => {
-    it("registers and cleans up keyboard listeners on ownerWindow rather than global window", () => {
-      const mockOwnerWindow: any = {
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        setTimeout: vi.fn((fn: () => void) => { fn(); return 123; }),
-        clearTimeout: vi.fn(),
-      };
-
-      const container = document.createElement("div");
-      const doc = container.ownerDocument;
-      const originalDefaultView = Object.getOwnPropertyDescriptor(doc, "defaultView");
-      // Define defaultView on container ownerDocument
-      Object.defineProperty(doc, "defaultView", {
-        value: mockOwnerWindow,
-        configurable: true,
-      });
-
-      const mockApp: any = {
-        workspace: { getActiveFile: () => null },
-        metadataCache: { getFileCache: () => null },
-      };
-      const mockPlugin: any = {
-        settings: { spaceAsWildcard: true, allMatchesDisplayMode: "off" },
-        saveSettings: async () => {},
-      };
-
-      const modal = new IncrementalSearchSuggestModal(
-        mockApp,
-        mockPlugin,
-        null,
-        { state: { field: () => null }, dispatch: vi.fn() } as any,
-        "forward"
-      );
-      (modal as any).containerEl = container;
-
-      try {
-        modal.onOpen();
-        expect(mockOwnerWindow.addEventListener).toHaveBeenCalledWith(
-          "keydown",
-          expect.any(Function),
-          { capture: true }
-        );
-
-        modal.onClose();
-        expect(mockOwnerWindow.removeEventListener).toHaveBeenCalledWith(
-          "keydown",
-          expect.any(Function),
-          expect.anything()
-        );
-      } finally {
-        if (originalDefaultView) {
-          Object.defineProperty(doc, "defaultView", originalDefaultView);
-        } else {
-          Reflect.deleteProperty(doc, "defaultView");
-        }
-      }
-    });
-
-    it("creates suggestion text nodes on el.ownerDocument", () => {
-      const customDoc = document.implementation.createHTMLDocument("popout");
-      const el = customDoc.createElement("div");
-      const createTextNodeSpy = vi.spyOn(customDoc, "createTextNode");
-
-      const mockApp: any = {
-        workspace: { getActiveFile: () => null },
-        metadataCache: { getFileCache: () => null },
-      };
-      const mockPlugin: any = {
-        settings: { spaceAsWildcard: true, allMatchesDisplayMode: "off" },
-        saveSettings: async () => {},
-      };
-
-      const modal = new IncrementalSearchSuggestModal(
-        mockApp,
-        mockPlugin,
-        null,
-        {
-          state: {
-            field: () => ({
-              matches: [{ from: 0, to: 4, chars: [] }],
-            }),
-            doc: {
-              lineAt: () => ({ number: 1, from: 0, text: "test line", length: 9 }),
-            },
-          },
-        } as any,
-        "forward"
-      );
-
-      modal.renderSuggestion(0, el);
-      expect(createTextNodeSpy).toHaveBeenCalled();
     });
   });
 
