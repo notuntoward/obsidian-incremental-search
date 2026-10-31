@@ -68,7 +68,7 @@ To assign hotkeys: **Settings → Hotkeys**, search for "Incremental Search," an
 
 ## In-search controls
 
-Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on the **Search exit behavior** setting (**Settings → Incremental Search → Navigation & exit**) — the two columns below show the two available modes.
+Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on **Search keyboard behavior** (**Settings → Incremental Search → Navigation & exit**). This applies to Compact, the Obsidian-style bar and Popup.
 
 | Key | Emacs-style mode (default) | Obsidian-style mode |
 | :--- | :--- | :--- |
@@ -78,24 +78,32 @@ Once a search is active, these keys control navigation and how the search sessio
 | `Enter` | Accept match, place cursor, close search | Find next match |
 | `Shift+Enter` | Accept match, place cursor, close search | Find previous match |
 | `Esc` | Cancel, restore original position | Accept match, close search |
-| `Ctrl+G` | Not bound by default | Not bound by default |
+| `Ctrl+G` / `Cmd+G` | Cancel, restore original position | Cancel, restore original position |
 | `Ctrl+Enter` / `Cmd+Enter` | Toggle highlighting of other matches — only when "Highlight all matches" is set to *On demand* | Same as Emacs-style |
 | Click outside / switch tab | Dismiss, keep current cursor position | Dismiss, keep current cursor position |
 
-The optional **Obsidian-style bar** changes the appearance, not the search engine or keyboard behavior. Its controls, from left to right after the input, are:
+`Ctrl+G` / `Cmd+G` cancels in all three search interfaces, including Popup, regardless of Search keyboard behavior. It works while focus is within the search UI and leaves unrelated shortcuts alone after search closes.
+
+The optional **Obsidian-style bar** changes the appearance, not the search engine or selected keyboard behavior. It uses a rounded search row with a scan-search icon (no colored stripe), plus a muted, wrapping shortcut footer below. The footer follows Search keyboard behavior and shows the highlight shortcut only in On demand mode; Compact remains a simple floating box without a footer. Popup uses the same keyboard behavior with a native instruction footer, while retaining its up/down, Ctrl+N/P, Page Up/Down and Home/End result navigation.
+
+In Obsidian-style keyboard behavior, Enter always searches forward and Shift+Enter always searches backward, regardless of the last search direction. Emacs-style retains Enter/Shift+Enter to accept and Escape to cancel. Ctrl/Cmd+S and Ctrl/Cmd+R, plus F3/Shift+F3, work in all interfaces.
+
+The bar's controls, from left to right after the input, are:
 
 | Control | Action |
 | :--- | :--- |
 | Up arrow | Incremental Search: Backward |
 | Down arrow | Incremental Search: Forward |
 | Highlight all matches | Switch the saved setting between Always and On demand, applying it immediately without moving the current match |
-| X | Cancel search, restore the original cursor/scroll position, and hide the bar, regardless of Search exit behavior |
+| X | Cancel search, restore the original cursor/scroll position, and hide the bar, regardless of Search keyboard behavior |
 
-The highlight button is active for **Always**. In **On demand**, `Ctrl+Enter` / `Cmd+Enter` still toggles highlights temporarily without changing the saved setting. The bar uses Obsidian's native find-bar layout and input styling, with a small muted **IS** indicator beside the match count to identify the plugin. It works in Markdown and PDFs, in the main window or a pop-out.
+The highlight button is active for **Always**. In **On demand**, `Ctrl+Enter` / `Cmd+Enter` still toggles highlights temporarily without changing the saved setting. The scan-search icon identifies the plugin. The bar works in Markdown and PDFs, in the main window or a pop-out.
 
 ## Settings
 
 All options live under **Settings → Incremental Search**, organized into native settings groups.
+
+Descriptions span the row beneath the label and control instead of wrapping beside wide dropdowns. On narrow panels, controls stack below labels. Dropdown labels are concise; their descriptions explain the behavior.
 
 **Interface**
 - *Search interface* — Compact (the original floating box, default), Obsidian-style bar (full-width above the document), or Popup (center-screen modal for Markdown; PDFs retain Compact). Existing popup preferences are migrated automatically.
@@ -106,7 +114,7 @@ All options live under **Settings → Incremental Search**, organized into nativ
 - *Match only visible part of links* — searches Markdown link labels and wikilink aliases, never their hidden destinations or link titles (default on). Bare wikilinks such as `[[note#heading]]` remain searchable because their targets are displayed. Image/embed source syntax and reference definitions are excluded; visibly written URLs and literal link examples inside code remain searchable. Filtering uses the current editor text, including unsaved edits, and does not depend on Obsidian caching external URLs. Turning this off makes link destinations searchable again.
 
 **Navigation & exit**
-- *Search exit behavior* — Emacs-style (`Enter` accepts, `Esc` cancels) or Obsidian-style (`Enter` finds next, `Esc` accepts). This also determines the default bindings shown in the table above.
+- *Search keyboard behavior* — Emacs-style (`Enter` accepts, `Esc` cancels) or Obsidian-style (`Enter` finds next, `Shift+Enter` finds previous, `Esc` accepts), consistently across all interfaces. The renamed setting preserves saved preferences. Shortcut hints follow the selected behavior.
 
 **Match highlighting**
 - *Highlight all matches* — on demand (default; toggle with `Ctrl+Enter`/`Cmd+Enter`), always, or off. `Ctrl+Enter` only has an effect when this is set to *on demand*.

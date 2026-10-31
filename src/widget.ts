@@ -1,5 +1,7 @@
 import { EditorView } from "@codemirror/view";
-import { App, Notice, setIcon } from "obsidian";
+import { App, Notice, Platform, setIcon } from "obsidian";
+import { renderKeyHints } from "commons/modal";
+import { searchKeyHints } from "./search-controls";
 import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode } from "./types";
 import {
 	searchSessionField,
@@ -388,9 +390,18 @@ export function renderSearchWidget(
 	// Pop-out windows have their own document/window; the globals refer to the main window.
 	const doc = container.ownerDocument;
 	const win = doc.defaultView ?? window;
+	const keyTarget = doc.defaultView ?? doc;
 
 	const onGlobalKeyDown = (evt: KeyboardEvent) => {
 		const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+		// Capture before Obsidian's document shortcut handling can swallow cancel.
+		if (isCtrlOrMeta && evt.key.toLowerCase() === "g" && evt.composedPath().includes(el)) {
+			evt.preventDefault();
+			evt.stopImmediatePropagation();
+			logDebug("widget", "Ctrl/Cmd+G: cancelling incremental search");
+			controller.cancel();
+			return;
+		}
 		const isEnter =
 			evt.key === "Enter" ||
 			evt.code === "Enter" ||
@@ -404,9 +415,9 @@ export function renderSearchWidget(
 			controller.toggleDemandHighlights();
 		}
 	};
-	win.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+	keyTarget.addEventListener("keydown", onGlobalKeyDown as EventListener, { capture: true });
 	activeKeyCleanup = () => {
-		win.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+		keyTarget.removeEventListener("keydown", onGlobalKeyDown as EventListener, { capture: true });
 	};
 
 	const isObsidianBar = settings.searchInterface === "obsidian";
@@ -449,18 +460,24 @@ export function renderSearchWidget(
 	});
 
 	const countHost = isObsidianBar
-		? inputHost.createSpan({ cls: "document-search-count incsearch-count-container" })
+		? row.createSpan({ cls: "document-search-count incsearch-count-container" })
 		: inputHost;
 	if (isObsidianBar) {
 		countHost.appendChild(tableIcon);
-		countHost.createSpan({
+		const methodIcon = row.createSpan({
 			cls: "incsearch-method-indicator",
-			text: "IS",
 			attr: { "aria-label": "Incremental Search plugin", title: "Incremental Search plugin" },
 		});
+		row.prepend(methodIcon);
+		setIcon(methodIcon, "scan-search");
 	}
 	countHost.createSpan({ cls: "incsearch-counter", attr: { "aria-live": "polite", "aria-atomic": "true" } });
 
+	const hints = isObsidianBar ? el.createDiv({ cls: "incsearch-key-hints" }) : null;
+	const updateHints = () => {
+		if (hints) renderKeyHints(hints, [searchKeyHints(settings)], "incsearch");
+	};
+	updateHints();
 	let highlightButton: HTMLButtonElement | undefined;
 	const updateHighlightButton = () => {
 		if (!highlightButton) return;
@@ -469,7 +486,8 @@ export function renderSearchWidget(
 		highlightButton.classList.toggle("is-active", always);
 		highlightButton.title = always
 			? "Highlight all matches: Always. Click to use On demand."
-			: "Highlight all matches: On demand. Ctrl/Cmd+Enter toggles highlights. Click to use Always.";
+			: `Highlight all matches: On demand. ${Platform.isMacOS ? "Cmd" : "Ctrl"}+Enter toggles highlights. Click to use Always.`;
+		updateHints();
 	};
 	if (isObsidianBar) {
 		const buttons = row.createDiv({ cls: "document-search-buttons" });
@@ -608,13 +626,6 @@ export function renderSearchWidget(
 			return;
 		}
 
-		if (isCtrlOrMeta && keyLower === "g") {
-			evt.preventDefault();
-			evt.stopPropagation();
-			controller.cancel();
-			return;
-		}
-
 		if (isCtrlOrMeta && isEnter) {
 			evt.preventDefault();
 			evt.stopPropagation();
@@ -627,13 +638,7 @@ export function renderSearchWidget(
 			evt.preventDefault();
 			evt.stopPropagation();
 			if (settings.searchExitBehavior === "obsidian") {
-				const currentDir = controller.getCounterState().direction || "forward";
-				const dir: SearchDirection = evt.shiftKey
-					? currentDir === "forward"
-						? "backward"
-						: "forward"
-					: currentDir;
-				controller.advance(dir);
+				controller.advance(evt.shiftKey ? "backward" : "forward");
 				updateCounter();
 			} else {
 				controller.accept();

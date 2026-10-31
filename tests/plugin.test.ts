@@ -484,6 +484,7 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     let tab: any;
     plugin.addSettingTab = (value: any) => { tab = value; };
     await plugin.onload();
+    expect(tab.getSettingDefinitions().every((group: any) => group.cls === "incsearch-settings-group")).toBe(true);
     expect(tab.getSettingDefinitions().map((group: any) => [group.type, group.heading])).toEqual([
       ["group", "Interface"],
       ["group", "Matching"],
@@ -493,6 +494,10 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     ]);
     const rows = () => tab.getSettingDefinitions().flatMap((group: any) => group.items);
     const byName = (name: string) => rows().find((row: any) => row.name === name);
+    expect(byName("Search keyboard behavior").control.options).toEqual({
+      emacs: "Emacs-style", obsidian: "Obsidian-style",
+    });
+    expect(byName("Secondary match highlight style").control.options.adaptive).toBe("Adaptive");
     plugin.settings.allMatchesDisplayMode = "off";
     plugin.settings.secondaryCustomLightColor = "#abcdef";
     await tab.setControlValue("searchInterface", "obsidian");

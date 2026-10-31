@@ -105,6 +105,201 @@ describe("modal: IncrementalSearchSuggestModal", () => {
     expect(sessionState?.matches).toHaveLength(2);
   });
 
+  it.each(["emacs", "obsidian"])("Popup honors Enter, Shift+Enter and Escape and hints for %s", (searchExitBehavior) => {
+    mockPlugin.settings.searchExitBehavior = searchExitBehavior;
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "backward");
+    const container = document.createElement("div");
+    const input = document.createElement("input");
+    container.appendChild(input);
+    document.body.appendChild(container);
+    Object.defineProperty(modal, "containerEl", { value: container });
+    const instructions = vi.spyOn(modal, "setInstructions");
+    const close = vi.spyOn(modal, "close").mockImplementation(() => modal.onClose());
+    const choose = vi.spyOn(modal, "onChooseSuggestion");
+    const select = vi.fn();
+    Object.defineProperty(modal, "chooser", { value: { values: [0, 1], setSelectedItem: select } });
+    try {
+      modal.getSuggestions("match");
+      modal.onOpen();
+      expect(instructions).toHaveBeenCalledWith(expect.arrayContaining([
+        { command: "Enter", purpose: searchExitBehavior === "emacs" ? "Accept" : "Next" },
+        { command: "Esc", purpose: searchExitBehavior === "emacs" ? "Cancel" : "Accept" },
+        { command: "Ctrl+Enter", purpose: "Highlights" },
+      ]));
+      const press = (key: string, shiftKey = false, ctrlKey = false) =>
+        input.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey, ctrlKey, bubbles: true, cancelable: true }));
+      press("r", false, true);
+      expect(modal.direction).toBe("backward");
+      expect(select).toHaveBeenLastCalledWith(sessionState!.activeIndex);
+      press("s", false, true);
+      expect(modal.direction).toBe("forward");
+      const index = sessionState!.activeIndex;
+      press("Enter", true);
+      if (searchExitBehavior === "obsidian") {
+        expect(close).not.toHaveBeenCalled();
+        expect(sessionState?.activeIndex).toBe((index + 1) % 2);
+        expect(modal.direction).toBe("backward");
+        press("Enter");
+        expect(modal.direction).toBe("forward");
+        press("Escape");
+      }
+      expect(choose).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+      vi.runAllTimers();
+      expect(sessionState).toBeNull();
+      if (searchExitBehavior === "emacs") {
+        // A fresh search still cancels rather than accepts on Escape.
+        sessionState = { query: "", direction: "forward", matches: [], activeIndex: 0, originSelection: { anchor: 2, head: 2 } };
+        modal.chosen = false;
+        modal.getSuggestions("match");
+        modal.onOpen();
+        press("Escape");
+        vi.runAllTimers();
+        expect(choose).toHaveBeenCalledTimes(1);
+        expect(editorCursor).toEqual({ line: 0, ch: 2 });
+      }
+    } finally {
+      modal.modalKeyCleanup?.();
+      modal.observer?.disconnect();
+      container.remove();
+    }
+  });
+
+  it.each(["emacs", "obsidian"])("Popup preserves navigation aliases, composition and highlight toggling in %s", (searchExitBehavior) => {
+    mockPlugin.settings.searchExitBehavior = searchExitBehavior;
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "backward");
+    const container = document.createElement("div");
+    const input = document.createElement("input");
+    container.appendChild(input);
+    document.body.appendChild(container);
+    Object.defineProperty(modal, "containerEl", { value: container });
+    const select = vi.fn();
+    Object.defineProperty(modal, "chooser", { value: { setSelectedItem: select } });
+    const close = vi.spyOn(modal, "close").mockImplementation(() => {});
+    try {
+      modal.getSuggestions("i");
+      modal.onOpen();
+      expect(sessionState!.matches.length).toBeGreaterThan(2);
+      for (const modifiers of [{ ctrlKey: true }, { metaKey: true }]) {
+        for (const [key, shiftKey, direction] of [
+          ["r", false, "backward"], ["s", false, "forward"],
+          ["F3", true, "backward"], ["F3", false, "forward"],
+        ] as const) {
+          const current = sessionState!.activeIndex;
+          const expected = (current + (direction === "forward" ? 1 : -1) + sessionState!.matches.length) % sessionState!.matches.length;
+          const event = new KeyboardEvent("keydown", { key, shiftKey, ...modifiers, bubbles: true, cancelable: true });
+          input.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(true);
+          expect(sessionState!.activeIndex).toBe(expected);
+          expect(sessionState!.direction).toBe(direction);
+          expect(select).toHaveBeenLastCalledWith(expected);
+        }
+      }
+      const before = sessionState;
+      const composing = new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(composing);
+      expect(composing.defaultPrevented).toBe(false);
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "F3", bubbles: true }));
+      expect(sessionState).toBe(before);
+      expect(close).not.toHaveBeenCalled();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+      expect(sessionState!.isDemandPeekActive).toBe(true);
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+      expect(sessionState!.isDemandPeekActive).toBe(false);
+      modal.getSuggestions("xyznonexistent");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(close).toHaveBeenCalledTimes(searchExitBehavior === "emacs" ? 1 : 0);
+      if (searchExitBehavior === "obsidian") {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        expect(close).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      modal.onClose();
+      vi.runAllTimers();
+      container.remove();
+    }
+  });
+
+  it.each(["ctrlKey", "metaKey"])("captures %s+G before host shortcuts and cancels Popup regardless of exit mode", (modifier) => {
+    for (const searchExitBehavior of ["emacs", "obsidian"]) {
+      sessionState = {
+        query: "", direction: "forward", matches: [], activeIndex: 0,
+        originSelection: { anchor: 2, head: 2 },
+      };
+      mockPlugin.settings.searchExitBehavior = searchExitBehavior;
+      const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
+      const container = document.createElement("div");
+      const input = document.createElement("input");
+      container.appendChild(input);
+      document.body.appendChild(container);
+      Object.defineProperty(modal, "containerEl", { value: container });
+      const close = vi.spyOn(modal, "close").mockImplementation(() => modal.onClose());
+      const hostShortcut = vi.fn((evt: Event) => evt.stopImmediatePropagation());
+      document.addEventListener("keydown", hostShortcut, true);
+      try {
+        modal.getSuggestions("match");
+        modal.onOpen();
+        const event = new KeyboardEvent("keydown", {
+          key: "g", [modifier]: true, bubbles: true, cancelable: true,
+        });
+        input.dispatchEvent(event);
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(event.defaultPrevented).toBe(true);
+        expect(hostShortcut).not.toHaveBeenCalled();
+        vi.runAllTimers();
+        expect(sessionState).toBeNull();
+        expect(editorCursor).toEqual({ line: 0, ch: 2 });
+        expect(mockPlugin.settings.lastQuery).toBe("match");
+        input.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "g", [modifier]: true, bubbles: true, cancelable: true,
+        }));
+        expect(close).toHaveBeenCalledTimes(1);
+      } finally {
+        modal.modalKeyCleanup?.();
+        modal.observer?.disconnect();
+        document.removeEventListener("keydown", hostShortcut, true);
+        container.remove();
+      }
+    }
+  });
+
+  it("scopes Popup Ctrl+G to its owning pop-out and leaves plain G and other documents alone", () => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    const container = popout.createElement("div");
+    const input = popout.createElement("input");
+    container.appendChild(input);
+    popout.body.appendChild(container);
+    const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
+    Object.defineProperty(modal, "containerEl", { value: container });
+    const close = vi.spyOn(modal, "close").mockImplementation(() => modal.onClose());
+    Object.defineProperty(popout, "activeElement", { get: () => input, configurable: true });
+    vi.stubGlobal("activeDocument", popout);
+    vi.stubGlobal("activeWindow", window);
+    try {
+      modal.getSuggestions("match");
+      modal.onOpen();
+      for (const [target, ctrlKey] of [[input, false], [popout.body, true], [document.body, true]] as const) {
+        const event = new KeyboardEvent("keydown", { key: "g", ctrlKey, bubbles: true, cancelable: true });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+        expect(close).not.toHaveBeenCalled();
+      }
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true, cancelable: true }));
+      expect(close).toHaveBeenCalledTimes(1);
+      vi.runAllTimers();
+      expect(sessionState).toBeNull();
+      expect(editorCursor).toEqual({ line: 0, ch: 2 });
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true }));
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      modal.modalKeyCleanup?.();
+      modal.observer?.disconnect();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("getSuggestions returns empty array when query has no matches", () => {
     const modal = new IncrementalSearchSuggestModal(mockApp, mockPlugin, mockEditor, mockView, "forward");
     const suggestions = modal.getSuggestions("xyznonexistent");

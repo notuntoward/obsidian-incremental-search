@@ -249,6 +249,30 @@
 .incsearch-widget.incsearch-widget-obsidian {
   flex: 0 0 auto;
   min-width: 0;
+  container-type: inline-size;
+}
+
+.incsearch-widget-obsidian > .document-search {
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  background: var(--background-secondary, var(--background-primary));
+}
+
+.incsearch-widget-obsidian > .document-search:focus-within {
+  border-color: var(--background-modifier-border-focus);
+}
+
+.incsearch-widget-obsidian .search-input-container input {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.incsearch-widget-obsidian .search-input-container::before {
+  content: none;
 }
 
 .incsearch-widget-obsidian .document-search-input,
@@ -256,11 +280,14 @@
   min-width: 0;
 }
 
-.incsearch-widget-obsidian .incsearch-input {
-  padding-inline-end: calc(var(--size-4-16, 64px) + 16px);
+.incsearch-widget-obsidian .document-search-input input {
+  padding-inline: 0;
 }
 
 .incsearch-widget-obsidian .incsearch-count-container {
+  position: static;
+  transform: none;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--size-4-1, 4px);
@@ -276,10 +303,57 @@
 }
 
 .incsearch-widget-obsidian .incsearch-method-indicator {
-  font-size: 9px;
-  font-weight: var(--font-semibold, 600);
-  letter-spacing: 0.02em;
-  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-inline-end: var(--size-4-1, 4px);
+  color: var(--text-muted);
+}
+
+.incsearch-widget-obsidian .incsearch-method-indicator .svg-icon {
+  width: 24px;
+  height: 24px;
+}
+
+@container (max-width: 360px) {
+  .incsearch-widget-obsidian .incsearch-method-indicator .svg-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .incsearch-widget-obsidian button.document-search-button {
+    padding: 4px;
+  }
+}
+
+.incsearch-key-hints {
+  max-width: var(--file-line-width, 700px);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.incsearch-hint-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--size-4-1, 4px) var(--size-4-3, 12px);
+}
+
+.incsearch-hint {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.incsearch-hint-key {
+  color: var(--text-normal);
+  font-weight: var(--font-medium, 500);
 }
 
 .incsearch-widget-obsidian button.document-search-button {
@@ -466,10 +540,66 @@ mark.incsearch-pdf-match::selection {
   background: transparent !important;
 }
 
+.incsearch-settings-group {
+  container-type: inline-size;
+}
+
+.incsearch-settings-group .setting-item:not(.incsearch-settings-preview-row) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding-block: 12px;
+}
+
+.incsearch-settings-group .setting-item:not(.incsearch-settings-preview-row) .setting-item-info {
+  display: contents;
+}
+
+.incsearch-settings-group .setting-item-name {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.incsearch-settings-group .setting-item-control {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+}
+
+.incsearch-settings-group .setting-item-description {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  margin: 0;
+}
+
+.incsearch-settings-group select,
+.incsearch-settings-group input[type="text"] {
+  max-width: 100%;
+}
+
+@container (max-width: 420px) {
+  .incsearch-settings-group .setting-item:not(.incsearch-settings-preview-row) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .incsearch-settings-group .setting-item-control {
+    grid-column: 1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .incsearch-settings-group .setting-item-description {
+    grid-row: 3;
+  }
+}
+
 /* Settings Preview Box */
 .incsearch-settings-preview {
   padding: 12px 16px;
-  margin: 10px 0 16px 0;
+  margin: 8px 0 0;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m, 6px);

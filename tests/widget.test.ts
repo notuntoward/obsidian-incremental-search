@@ -165,7 +165,7 @@ describe("widget: counter & lifecycle", () => {
     expect(widget.getAttribute("role")).toBe("search");
     expect(widget.querySelector(".document-search > .document-search-input")).not.toBeNull();
     expect(widget.querySelector(".document-search > .document-search-buttons")?.querySelectorAll("button")).toHaveLength(4);
-    expect(widget.querySelector(".incsearch-method-indicator")?.textContent).toBe("IS");
+    expect(widget.querySelector(".incsearch-method-indicator")?.querySelector(".svg-icon")).not.toBeNull();
     expect(widget.querySelector(".incsearch-table-icon")?.parentElement?.classList.contains("incsearch-count-container")).toBe(true);
     expect(widget.querySelector("input")?.placeholder).toBe("Find...");
     expect(widget.querySelector("input")?.getAttribute("aria-label")).toBe("Incremental search");
@@ -173,6 +173,83 @@ describe("widget: counter & lifecycle", () => {
       .toEqual(["Incremental Search: Backward", "Incremental Search: Forward", "Highlight all matches", "Cancel search"]);
     expect(widget.querySelector(".incsearch-counter")?.textContent).toBe("1/2");
     expect(widget.parentElement!.firstElementChild).toBe(widget);
+  });
+
+  it.each(["emacs", "obsidian"])("shows 3b mode-aware hints and retains Compact simplicity (%s)", (searchExitBehavior) => {
+    mockPlugin.settings.searchExitBehavior = searchExitBehavior;
+    mockPlugin.settings.searchInterface = "obsidian";
+    mockPlugin.settings.allMatchesDisplayMode = "on-demand";
+    renderWidget(mockView, mockPlugin, "word", "backward");
+    const hints = getActiveWidget()!.querySelector(".incsearch-key-hints")!;
+    expect(hints.textContent).toContain(searchExitBehavior === "emacs" ? "Enter Accept" : "Enter Next");
+    expect(hints.textContent).toContain(searchExitBehavior === "emacs" ? "Esc Cancel" : "Esc Accept");
+    expect(hints.textContent).toContain("Ctrl+Enter Highlights");
+    mockPlugin.settings.allMatchesDisplayMode = "always";
+    getActiveWidget()!.querySelector<HTMLButtonElement>('[aria-label="Highlight all matches"]')!.click();
+    expect(hints.textContent).toContain("Ctrl+Enter Highlights");
+    getActiveWidget()!.querySelector<HTMLButtonElement>('[aria-label="Highlight all matches"]')!.click();
+    expect(hints.textContent).not.toContain("Ctrl+Enter Highlights");
+    removeWidget();
+    mockPlugin.settings.searchInterface = "compact";
+    renderWidget(mockView, mockPlugin, "word", "forward");
+    expect(getActiveWidget()!.querySelector(".incsearch-key-hints")).toBeNull();
+    expect(getActiveWidget()!.querySelector(".incsearch-method-indicator")).toBeNull();
+  });
+
+  it.each(["compact", "obsidian"])("Obsidian Enter is always forward and Shift+Enter always backward in %s", (searchInterface) => {
+    mockPlugin.settings.searchInterface = searchInterface;
+    mockPlugin.settings.searchExitBehavior = "obsidian";
+    renderWidget(mockView, mockPlugin, "word", "backward");
+    const input = getActiveWidget()!.querySelector("input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(sessionState?.direction).toBe("forward");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+    expect(sessionState?.direction).toBe("backward");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+    expect(sessionState?.direction).toBe("backward");
+  });
+
+  it.each(["compact", "obsidian"])("captures Ctrl/Cmd+G before host shortcuts and restores the origin in %s", (searchInterface) => {
+    mockPlugin.settings.searchInterface = searchInterface;
+    for (const searchExitBehavior of ["emacs", "obsidian"]) {
+      for (const modifier of ["ctrlKey", "metaKey"]) {
+        sessionState = {
+          query: "word", direction: "forward", matches: [{ from: 10, to: 14 }],
+          activeIndex: 0, originSelection: { anchor: 2, head: 5 },
+        };
+        mockPlugin.settings.searchExitBehavior = searchExitBehavior;
+        const container = mockView.dom.parentElement as HTMLElement;
+        document.body.appendChild(container);
+        const dispatch = vi.spyOn(mockView, "dispatch");
+        const hostShortcut = vi.fn((evt: Event) => evt.stopImmediatePropagation());
+        document.addEventListener("keydown", hostShortcut, true);
+        try {
+          renderWidget(mockView, mockPlugin, "word", "forward");
+          const input = getActiveWidget()!.querySelector("input")!;
+          const event = new KeyboardEvent("keydown", {
+            key: "g", [modifier]: true, bubbles: true, cancelable: true,
+          });
+          input.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(true);
+          expect(hostShortcut).not.toHaveBeenCalled();
+          expect(sessionState).toBeNull();
+          expect(getActiveWidget()).toBeNull();
+          expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            selection: expect.objectContaining({ anchor: 2, head: 5 }),
+          }));
+          const count = dispatch.mock.calls.length;
+          document.body.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "g", [modifier]: true, bubbles: true, cancelable: true,
+          }));
+          expect(dispatch).toHaveBeenCalledTimes(count);
+        } finally {
+          document.removeEventListener("keydown", hostShortcut, true);
+          dispatch.mockRestore();
+          removeAllWidgets();
+          container.remove();
+        }
+      }
+    }
   });
 
   it("uses the existing Markdown navigation and cancels back to the origin with X", () => {
@@ -308,6 +385,35 @@ describe("widget: counter & lifecycle", () => {
     expect(controller.cancel).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
     expect(getActiveWidget()).toBeNull();
+  });
+
+  it.each(["compact", "obsidian"])("Ctrl+G cancels the PDF controller once in %s", (searchInterface) => {
+    mockPlugin.settings.searchInterface = searchInterface;
+    mockPlugin.settings.searchExitBehavior = "obsidian";
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const controller: any = {
+      adapter: { containerEl: container },
+      state: { query: "word", totalMatchesCount: 7, activeIndex: 2, direction: "backward" },
+      cancel: vi.fn(),
+    };
+    const close = vi.fn(() => removeWidget());
+    const hostShortcut = vi.fn((evt: Event) => evt.stopImmediatePropagation());
+    document.addEventListener("keydown", hostShortcut, true);
+    try {
+      renderPdfWidget(controller, mockPlugin, "word", "backward", close);
+      getActiveWidget()!.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "g", ctrlKey: true, bubbles: true, cancelable: true,
+      }));
+      expect(controller.cancel).toHaveBeenCalledTimes(1);
+      expect(hostShortcut).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.settings.lastQuery).toBe("word");
+      expect(getActiveWidget()).toBeNull();
+    } finally {
+      document.removeEventListener("keydown", hostShortcut, true);
+      container.remove();
+    }
   });
 
   it("handles Enter keydown by committing the match", () => {
@@ -1063,6 +1169,36 @@ describe("widget: blur focus hand-off and pop-out windows", () => {
     vi.advanceTimersByTime(110);
 
     expect(accept).toHaveBeenCalledWith(false);
+  });
+
+  it.each(["compact", "obsidian"])("scopes Ctrl+G to the %s search UI in its owning pop-out document", (searchInterface) => {
+    const popout = document.implementation.createHTMLDocument("popout");
+    const container = popout.createElement("div");
+    popout.body.appendChild(container);
+    const { controller } = makeController(container);
+    const cancel = vi.spyOn(controller, "cancel").mockImplementation(() => removeWidget());
+    vi.stubGlobal("activeDocument", popout);
+    vi.stubGlobal("activeWindow", window);
+    try {
+      renderSearchWidget(controller, { ...settings, searchInterface }, "q", "forward");
+      const input = getActiveWidget()!.querySelector("input")!;
+      Object.defineProperty(popout, "activeElement", { get: () => input, configurable: true });
+      for (const [target, ctrlKey] of [[input, false], [popout.body, true], [document.body, true]] as const) {
+        const event = new KeyboardEvent("keydown", { key: "g", ctrlKey, bubbles: true, cancelable: true });
+        target.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+        expect(cancel).not.toHaveBeenCalled();
+      }
+      const event = new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(getActiveWidget()).toBeNull();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true }));
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("removeAllWidgets removes a widget living in a pop-out document", () => {

@@ -117,6 +117,8 @@ export class Notice {
 	hide(): void {}
 }
 
+export const Platform = { isMacOS: false };
+
 export class Modal {
 	app: any;
 	contentEl: any;
@@ -141,6 +143,7 @@ export class SuggestModal extends Modal {
     this.resultContainerEl = typeof document !== "undefined" ? document.createElement("div") : { querySelector: () => null };
   }
   setPlaceholder(text: string): void {}
+  setInstructions(_instructions: Array<{ command: string; purpose: string }>): void {}
 }
 
 export class Component {

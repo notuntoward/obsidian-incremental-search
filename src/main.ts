@@ -669,10 +669,11 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Interface",
+				cls: "incsearch-settings-group",
 				items: [
 					{
 						name: "Search interface",
-						desc: "Choose the search appearance. The Obsidian-style bar keeps this plugin's matching, navigation and exit behavior. Popup applies to Markdown; PDFs use Compact instead.",
+						desc: "Choose the search appearance; matching and keyboard settings stay the same. Popup is Markdown-only; PDFs use Compact.",
 						control: {
 							type: "dropdown",
 							key: "searchInterface",
@@ -688,6 +689,7 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Matching",
+				cls: "incsearch-settings-group",
 				items: [
 					{
 						name: "Space-as-wildcard matching",
@@ -710,16 +712,17 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Navigation & exit",
+				cls: "incsearch-settings-group",
 				items: [
 					{
-						name: "Search exit behavior",
-						desc: "Determines how Enter and Escape end an active incremental search session.",
+						name: "Search keyboard behavior",
+						desc: "Emacs: Enter accepts; Escape cancels. Obsidian: Enter next; Shift+Enter previous; Escape accepts. Ctrl/Cmd+G cancels in every interface.",
 						control: {
 							type: "dropdown",
 							key: "searchExitBehavior",
 							options: {
-								emacs: "Emacs-style (Enter accepts, Escape cancels)",
-								obsidian: "Obsidian-style (Enter finds next, Escape accepts)",
+								emacs: "Emacs-style",
+								obsidian: "Obsidian-style",
 							},
 						},
 					},
@@ -728,19 +731,20 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Match highlighting",
+				cls: "incsearch-settings-group",
 				items: [
 					{
 						name: "Highlight all matches",
 						desc:
 							this.plugin.settings.searchInterface === "obsidian"
-								? "The bar button switches Always / On demand and saves your choice. In On demand, Ctrl/Cmd+Enter temporarily toggles other matches. Off is unavailable with this interface."
+								? "The bar button saves Always / On demand. Ctrl/Cmd+Enter toggles other matches in On demand. Off is unavailable for this bar."
 								: "Controls when other matches are highlighted. In On demand, Ctrl/Cmd+Enter temporarily toggles them.",
 						control: {
 							type: "dropdown",
 							key: "allMatchesDisplayMode",
 							options: {
 								always: "Always",
-								"on-demand": "On demand (Ctrl+Enter to toggle)",
+								"on-demand": "On demand",
 								...(this.plugin.settings.searchInterface === "obsidian"
 									? {}
 									: { off: "Off" }),
@@ -750,15 +754,15 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 					{
 						name: "Secondary match highlight style",
 						visible: showSecondary,
-						desc: "Visual styling strategy for non-current matches. 'Adaptive' automatically derives fill and edge colors from the active theme and current match.",
+						desc: "Appearance of other matches. Adaptive uses theme-matched fill and borders.",
 						control: {
 							type: "dropdown",
 							key: "secondaryHighlightStyle",
 							options: {
-								adaptive: "Adaptive (Theme-matched fill + edge)",
-								underline: "Dotted underline only",
-								tint: "Subtle background tint only",
-								theme: "Obsidian highlight default",
+								adaptive: "Adaptive",
+								underline: "Dotted underline",
+								tint: "Background tint",
+								theme: "Obsidian default",
 								custom: "Custom colors",
 							},
 						},
@@ -766,7 +770,7 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 					{
 						name: "Secondary match prominence",
 						visible: showSecondary,
-						desc: "Controls the visual strength and subordination level of secondary matches relative to the active match.",
+						desc: "Strength of other matches relative to the current match.",
 						control: {
 							type: "slider",
 							key: PROMINENCE_PERCENT_KEY,
@@ -782,7 +786,7 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 							showSecondary() &&
 							this.plugin.settings.secondaryHighlightStyle !== "underline" &&
 							this.plugin.settings.secondaryHighlightStyle !== "theme",
-						desc: "Automatically fall back to a dotted underline if background tinting would compromise normal text contrast.",
+						desc: "Use a dotted underline if tinting would reduce text contrast.",
 						control: {
 							type: "toggle",
 							key: "secondaryEnforceLegibility",
@@ -842,6 +846,7 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 			{
 				type: "group",
 				heading: "Troubleshooting",
+				cls: "incsearch-settings-group",
 				items: [
 					{
 						name: "Debug logging",

@@ -1,4 +1,6 @@
 import { ownerWindow, setTimeoutIn } from "commons/windows";
+import { getChooser, setSelectedItemSafely } from "commons/modal";
+import { searchKeyHints } from "./search-controls";
 import { App, SuggestModal, Editor } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
@@ -107,30 +109,61 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 	onOpen() {
 		logDebug("modal", "IncrementalSearchSuggestModal opened");
 		super.onOpen();
-		this.scope.register(["Mod"], "Enter", (evt) => {
-			evt.preventDefault();
-			toggleDemandHighlights(this.cm);
-			return false;
-		});
+		this.setInstructions(searchKeyHints(this.plugin.settings, true).map(({ key, action }) => ({
+			command: key, purpose: action,
+		})));
 
 		const onGlobalKeyDown = (evt: KeyboardEvent) => {
+			if (!evt.composedPath().includes(this.containerEl) || evt.isComposing) return;
 			const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+			const key = evt.key.toLowerCase();
+			const consume = () => {
+				evt.preventDefault();
+				evt.stopImmediatePropagation();
+			};
+			const accept = () => {
+				const session = this.cm.state.field(searchSessionField, false);
+				if (session?.matches.length) this.onChooseSuggestion(session.activeIndex, evt);
+				this.close();
+			};
+			if (isCtrlOrMeta && key === "g") {
+				consume();
+				logDebug("modal", "Ctrl/Cmd+G: cancelling incremental search");
+				this.close();
+				return;
+			}
 			const isEnter =
 				evt.key === "Enter" ||
 				evt.code === "Enter" ||
 				evt.code === "NumpadEnter" ||
 				evt.keyCode === 13;
 			if (isCtrlOrMeta && isEnter) {
-				evt.preventDefault();
-				evt.stopPropagation();
-				evt.stopImmediatePropagation();
+				consume();
 				toggleDemandHighlights(this.cm);
+			} else if (isCtrlOrMeta && (key === "s" || key === "r")) {
+				consume();
+				this.advanceMatch(key === "s" ? "forward" : "backward");
+			} else if (evt.key === "F3") {
+				consume();
+				this.advanceMatch(evt.shiftKey ? "backward" : "forward");
+			} else if (isEnter) {
+				consume();
+				if (this.plugin.settings.searchExitBehavior === "obsidian") {
+					this.advanceMatch(evt.shiftKey ? "backward" : "forward");
+				} else {
+					accept();
+				}
+			} else if (evt.key === "Escape") {
+				consume();
+				if (this.plugin.settings.searchExitBehavior === "obsidian") accept();
+				else this.close();
 			}
 		};
-		const win = ownerWindow(this.containerEl) ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
-		win?.addEventListener("keydown", onGlobalKeyDown, { capture: true });
+		const doc = this.containerEl.ownerDocument;
+		const keyTarget = doc.defaultView ?? doc;
+		keyTarget.addEventListener("keydown", onGlobalKeyDown as EventListener, { capture: true });
 		this.modalKeyCleanup = () => {
-			win?.removeEventListener("keydown", onGlobalKeyDown, { capture: true } as any);
+			keyTarget.removeEventListener("keydown", onGlobalKeyDown as EventListener, { capture: true });
 		};
 
 		this.observer = new MutationObserver((mutations) => {
@@ -152,6 +185,17 @@ export class IncrementalSearchSuggestModal extends SuggestModal<number> {
 			subtree: true,
 			attributeFilter: ["class"],
 		});
+	}
+
+	private advanceMatch(direction: SearchDirection) {
+		this.direction = direction;
+		const session = this.cm.state.field(searchSessionField, false);
+		if (!session?.matches.length) return;
+		const index = (session.activeIndex + (direction === "forward" ? 1 : -1) + session.matches.length) % session.matches.length;
+		this.cm.dispatch({ effects: setSession.of({ ...session, direction }) });
+		setActiveIndex(this.cm, index);
+		const chooser = getChooser(this);
+		if (chooser) setSelectedItemSafely(chooser, index);
 	}
 
 	onClose() {
