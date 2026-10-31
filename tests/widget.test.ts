@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { EditorState, EditorSelection } from "@codemirror/state";
+import { searchSessionField } from "../src/session";
 import {
   updateWidgetCounter,
   updatePdfWidgetCounter,
@@ -1165,6 +1167,76 @@ describe("widget: blur focus hand-off and pop-out windows", () => {
     expect(focus).not.toHaveBeenCalled();
     ctrl.accept();
     expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["compact", "emacs", false],
+    ["compact", "obsidian", false],
+    ["obsidian", "emacs", false],
+    ["obsidian", "obsidian", false],
+    ["compact", "emacs", true],
+    ["compact", "obsidian", true],
+    ["obsidian", "emacs", true],
+    ["obsidian", "obsidian", true],
+  ])("preserves the clicked selection on blur (%s, %s, popout=%s)", (searchInterface, searchExitBehavior, popout) => {
+    const doc = popout ? document.implementation.createHTMLDocument("popout") : document;
+    const container = doc.createElement("div");
+    const editor = doc.createElement("div");
+    editor.contentEditable = "true";
+    container.appendChild(editor);
+    doc.body.appendChild(container);
+    const text = "Approx. 6 wks gait train reduces cartilage deterioration";
+    const matchStart = text.indexOf("cartilage");
+    let state = EditorState.create({
+      doc: text,
+      selection: { anchor: 8 },
+      extensions: [searchSessionField.init(() => ({
+        query: "cartilage",
+        direction: "forward",
+        matches: [{ from: matchStart, to: matchStart + "cartilage".length }],
+        activeIndex: 0,
+        originSelection: { anchor: 8, head: 8 },
+      }))],
+    });
+    const focus = vi.fn();
+    const dispatch = vi.fn((tr) => { state = state.update(tr).state; });
+    const view: any = {
+      get state() { return state; },
+      dispatch,
+      dom: editor,
+      focus,
+    };
+    const plugin: any = {
+      app: {},
+      settings: { ...settings, searchInterface, searchExitBehavior, lastQuery: "" },
+      saveSettings: vi.fn(async () => {}),
+    };
+    vi.stubGlobal("activeDocument", doc);
+    vi.stubGlobal("activeWindow", window);
+    const activeElement = vi.spyOn(doc, "activeElement", "get");
+    try {
+      renderWidget(view, plugin, "cartilage", "forward");
+      vi.advanceTimersByTime(250);
+      const input = getActiveWidget()!.querySelector("input")!;
+      activeElement.mockReturnValue(editor);
+      input.dispatchEvent(new FocusEvent("blur", { relatedTarget: editor }));
+      // CodeMirror places the clicked cursor before the delayed blur cleanup.
+      const clickedSelection = EditorSelection.cursor(3);
+      state = state.update({ selection: clickedSelection }).state;
+      vi.advanceTimersByTime(110);
+
+      expect(state.selection.main).toEqual(clickedSelection);
+      expect(state.field(searchSessionField)).toBeNull();
+      expect(getActiveWidget()).toBeNull();
+      expect(focus).not.toHaveBeenCalled();
+      expect(dispatch.mock.calls.every(([tr]) => tr.selection === undefined)).toBe(true);
+      expect(plugin.settings.lastQuery).toBe("cartilage");
+      expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      activeElement.mockRestore();
+      vi.unstubAllGlobals();
+      container.remove();
+    }
   });
 
   it("evaluates focus against the widget's own (pop-out) document, not the main document", () => {

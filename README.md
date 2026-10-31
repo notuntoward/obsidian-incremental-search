@@ -95,6 +95,8 @@ Once a search is active, these keys control navigation and how the search sessio
 
 `Ctrl+G` / `Cmd+G` cancels in either search interface, regardless of Search keyboard behavior. It works while focus is within the search UI and leaves unrelated shortcuts alone after search closes.
 
+Clicking back into the editor dismisses search and keeps the cursor where you clicked, rather than moving it to the pending match or restoring the search's starting position.
+
 The optional **Obsidian-style bar** changes the appearance, not the search engine or selected keyboard behavior. It uses a rounded search row with a scan-search icon (no colored stripe), plus a muted, wrapping shortcut footer below. In Emacs-style mode, navigation hints show each command's first configured shortcut (or Unassigned); in Obsidian-style mode, they show Enter and Shift+Enter. The footer shows the highlight shortcut only in On demand mode; Compact remains a simple floating box without a footer.
 
 In Obsidian-style keyboard behavior, Enter always searches forward and Shift+Enter always searches backward, regardless of the last search direction. Emacs-style retains Enter/Shift+Enter to accept and Escape to cancel. Configured command hotkeys work in both interfaces and modes.

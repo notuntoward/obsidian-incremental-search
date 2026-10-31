@@ -959,7 +959,7 @@ export function recomputeQuery(
 }
 
 /**
- * Commits the current active match and closes the search session.
+ * Commits the current active match, or preserves selection when focus moved elsewhere.
  */
 export function commitMatch(
 	view: EditorView,
@@ -967,6 +967,10 @@ export function commitMatch(
 	refocus = true
 ) {
 	try {
+		if (!refocus) {
+			closeSession(view, plugin);
+			return;
+		}
 		const session = view.state.field(searchSessionField, false);
 		logDebug("session", `commitMatch: hasSession=${Boolean(session)}, matches=${session?.matches?.length ?? 0}`);
 		if (!session || session.matches.length === 0) {

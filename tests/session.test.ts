@@ -297,7 +297,7 @@ describe("session: termination & query persistence", () => {
     commitMatch(view2, mockPlugin, false);
     expect(focus2).not.toHaveBeenCalled();
     expect(currentSession).toBeNull();
-    expect(dispatches[0].selection.head).toBe(15);
+    expect(dispatches.every((tr) => tr.selection === undefined)).toBe(true);
 
     // Also for the no-matches path
     const view3 = createView({ ...session, matches: [] });

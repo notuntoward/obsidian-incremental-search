@@ -49,7 +49,7 @@ export interface SearchSessionController {
 	setAllMatchesDisplayMode(mode: AllMatchesDisplayMode): Promise<void>;
 
 	/** Called when search is committed (Enter in Emacs mode, Esc in Obsidian mode). */
-	/** `refocus` is false when focus deliberately moved elsewhere (e.g. a click in another pane). */
+	/** `refocus=false` dismisses without changing selection when focus deliberately moved elsewhere. */
 	accept(refocus?: boolean): void;
 
 	/** Called when search is cancelled (Esc in Emacs mode, Ctrl+G). */
