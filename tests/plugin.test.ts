@@ -3,6 +3,7 @@ import IncrementalSearchPlugin from "../src/main";
 import { getActiveWidget, removeWidget, renderWidget } from "../src/widget";
 import * as colors from "../src/utils/colors";
 import { isPdfView, createPdfViewAdapter } from "../src/pdf/pdf-view-adapter";
+import { onSearchNavigation } from "commons/search";
 
 (global as any).Event = class {};
 
@@ -82,6 +83,37 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect(commands["forward"].name).toBe("Forward Emacs");
     expect(commands["backward"].name).toBe("Reverse Emacs");
     expect(plugin.settings.searchExitBehavior).toBe("emacs");
+  });
+
+  it.each([false, true])("routes existing commands to a focused external search before editor fallback (popout=%s)", (popout) => {
+    const doc = popout ? document.implementation.createHTMLDocument() : document;
+    const input = doc.createElement("input");
+    doc.body.appendChild(input);
+    if (popout) Object.defineProperty(doc, "activeElement", { value: input, configurable: true });
+    else input.focus();
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "activeDocument")!;
+    Object.defineProperty(globalThis, "activeDocument", { configurable: true, get: () => doc });
+    const advance = vi.fn();
+    const cleanup = onSearchNavigation(input, (direction, checking) => {
+      if (!checking) advance(direction);
+      return true;
+    });
+    const fallback = vi.spyOn(plugin, "getActiveTarget");
+    try {
+      expect(commands.forward.checkCallback(true)).toBe(true);
+      expect(advance).not.toHaveBeenCalled();
+      expect(commands.forward.checkCallback(false)).toBe(true);
+      expect(advance).toHaveBeenCalledExactlyOnceWith("forward");
+      expect(commands.backward.checkCallback(false)).toBe(true);
+      expect(advance).toHaveBeenLastCalledWith("backward");
+      expect(advance).toHaveBeenCalledTimes(2);
+      expect(fallback).not.toHaveBeenCalled();
+      expect(doc.activeElement).toBe(input);
+    } finally {
+      cleanup();
+      Object.defineProperty(globalThis, "activeDocument", previous);
+      input.remove();
+    }
   });
 
   it.each(["compact", "obsidian"])("uses the registered command shortcuts once while %s input is focused", (searchInterface) => {

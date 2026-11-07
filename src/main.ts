@@ -1,5 +1,6 @@
 import { focusLeafAndWindow, getActiveLeafInFocusedWindow, isLeafAttached, isLeafDetached } from "commons/workspace";
 import { forEachWindow, ownerWindow } from "commons/windows";
+import { dispatchSearchNavigation } from "commons/search";
 import { Plugin, PluginSettingTab, App, Setting, Editor, View, type SettingDefinitionItem } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
@@ -362,6 +363,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 			}
 			return true;
 		}
+		if (dispatchSearchNavigation(activeDocument.activeElement, direction, checking)) return true;
 
 		const target = this.getActiveTarget();
 		logDebug("main", `handleCommand: target=${target?.type ?? "null"}`);

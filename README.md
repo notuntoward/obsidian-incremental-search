@@ -27,6 +27,12 @@ Inspired by GNU Emacs `isearch` and `swiper`, for anyone who'd rather keep their
 
 Works in notes (source and Live Preview), tables, callouts, and PDFs.
 
+When Perplexity Saver's transcript search box has focus, these same Forward
+Emacs / Reverse Emacs commands advance its matches instead of opening a search
+in the note or PDF behind it. Existing shortcut assignments apply unchanged,
+including in pop-out windows; transcript acceptance and playback keys stay
+with Perplexity Saver.
+
 > [!NOTE]
 > PDF search hooks into Obsidian's built-in PDF viewer through undocumented internals, so it may stop working after an Obsidian update. Note search is unaffected.
 
