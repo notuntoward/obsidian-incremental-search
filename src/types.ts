@@ -1,19 +1,7 @@
 export type SearchDirection = "forward" | "backward";
-export type AllMatchesDisplayMode = "always" | "on-demand" | "off";
-
-export function shouldShowAllMatches(
-	mode: AllMatchesDisplayMode = "on-demand",
-	isDemandPeekActive = false
-): boolean {
-	switch (mode) {
-		case "always":
-			return true;
-		case "on-demand":
-			return isDemandPeekActive;
-		case "off":
-			return false;
-	}
-}
+import type { AllMatchesDisplayMode, SearchExitBehavior } from "commons/search";
+export { shouldShowAllMatches } from "commons/search";
+export type { AllMatchesDisplayMode, SearchExitBehavior } from "commons/search";
 
 export interface MatchRange {
 	from: number;
@@ -57,7 +45,6 @@ export interface SearchSessionState {
 	isDemandPeekActive?: boolean;
 }
 
-export type SearchExitBehavior = "emacs" | "obsidian";
 export type SecondaryHighlightStyle = "adaptive" | "underline" | "tint" | "theme" | "custom";
 export type SearchInterface = "compact" | "obsidian";
 

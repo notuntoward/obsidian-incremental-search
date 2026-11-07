@@ -1,6 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { App, Notice, Platform, setIcon } from "obsidian";
 import { renderKeyHints } from "commons/modal";
+import { searchExitAction } from "commons/search";
 import { searchKeyHints } from "./search-controls";
 import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode } from "./types";
 import {
@@ -628,8 +629,9 @@ export function renderSearchWidget(
 			if (evt.target !== input) return;
 			evt.preventDefault();
 			evt.stopPropagation();
-			if (settings.searchExitBehavior === "obsidian") {
-				controller.advance(evt.shiftKey ? "backward" : "forward");
+			const action = searchExitAction("Enter", evt.shiftKey, settings.searchExitBehavior);
+			if (action === "next" || action === "previous") {
+				controller.advance(action === "previous" ? "backward" : "forward");
 				updateCounter();
 			} else {
 				controller.accept();
@@ -637,7 +639,7 @@ export function renderSearchWidget(
 		} else if (evt.key === "Escape") {
 			evt.preventDefault();
 			evt.stopPropagation();
-			if (settings.searchExitBehavior === "obsidian") {
+			if (searchExitAction("Escape", evt.shiftKey, settings.searchExitBehavior) === "accept") {
 				controller.accept();
 			} else {
 				controller.cancel();

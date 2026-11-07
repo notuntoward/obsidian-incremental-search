@@ -33,6 +33,7 @@ const bundle = buildSync({
 		obsidian: path.resolve("tests", "__mocks__", "obsidian.ts"),
 		// Bundle the real hint renderer without unrelated modal APIs needing a full Obsidian mock.
 		"commons/modal": path.resolve("..", "obsidian-commons", "src", "modal", "key-hints.ts"),
+		"commons/search": path.resolve("..", "obsidian-commons", "src", "search", "behavior.ts"),
 	},
 	bundle: true,
 	format: "iife",
