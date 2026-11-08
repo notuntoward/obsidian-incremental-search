@@ -83,6 +83,11 @@ During search, they move to the next or previous match; when the query is empty,
 repeating a command while the search bar is still open recalls the last query. Both interfaces use the command shortcuts you
 assign here, with no separate Ctrl/Cmd+S or Ctrl/Cmd+R bindings.
 
+The start/recall/advance decision is shared through `commons/search` with
+Perplexity Saver's Emacs-style transcript search, so empty-search recall stays
+consistent across notes, PDFs and transcripts. Query storage and matching remain
+owned by each plugin.
+
 ## In-search controls
 
 Once a search is active, these keys control navigation and how the search session ends. Which behavior you get for `Enter`, `Shift+Enter`, and `Esc` depends on **Search keyboard behavior** (**Settings → Incremental Search → Navigation & exit**). This applies to both Compact and the Obsidian-style bar, in notes and PDFs.

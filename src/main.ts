@@ -1,6 +1,6 @@
 import { focusLeafAndWindow, getActiveLeafInFocusedWindow, isLeafAttached, isLeafDetached } from "commons/workspace";
 import { forEachWindow, ownerWindow } from "commons/windows";
-import { dispatchSearchNavigation } from "commons/search";
+import { dispatchSearchNavigation, searchRepeatAction } from "commons/search";
 import { Plugin, PluginSettingTab, App, Setting, Editor, View, type SettingDefinitionItem } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
@@ -402,7 +402,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		this.activePdfView = view;
 
 		if (this.pdfController) {
-			if (this.pdfController.state.query === "" && this.settings.lastQuery) {
+			if (searchRepeatAction(true, this.pdfController.state.query, this.settings.lastQuery) === "recall") {
 				logDebug("main", `invokePdf: double-tap recall query="${this.settings.lastQuery}"`);
 				void this.pdfController.search(this.settings.lastQuery, direction);
 				const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
@@ -483,7 +483,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 		if (session) {
 			logDebug("main", `invoke: existing session found (query="${session.query}", activeIndex=${session.activeIndex})`);
-			if (session.query === "" && this.settings.lastQuery) {
+			if (searchRepeatAction(true, session.query, this.settings.lastQuery) === "recall") {
 				logDebug("main", `invoke: double-tap recall query="${this.settings.lastQuery}"`);
 				const activeFile = this.app.workspace.getActiveFile();
 				const linkCache = activeFile
