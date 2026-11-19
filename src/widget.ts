@@ -242,7 +242,7 @@ export function updateWidgetCounter(target: SearchSessionController | EditorView
 	const dirIndicator = activeWidgetEl.querySelector(".incsearch-dir");
 	const tableIcon = activeWidgetEl.querySelector(
 		".incsearch-table-icon"
-	) as HTMLSpanElement | null;
+	);
 	if (!counter || !dirIndicator) return;
 
 	let state: ReturnType<SearchSessionController["getCounterState"]>;
@@ -290,7 +290,7 @@ export function updatePdfWidgetCounter(controller: PdfMatchController) {
 	const dirIndicator = activeWidgetEl.querySelector(".incsearch-dir");
 	const tableIcon = activeWidgetEl.querySelector(
 		".incsearch-table-icon"
-	) as HTMLSpanElement | null;
+	);
 	if (!counter || !dirIndicator) return;
 
 	if (tableIcon) tableIcon.classList.add("is-hidden");
@@ -363,7 +363,6 @@ export function removeAllWidgets() {
 	logDebug("widget", "removeAllWidgets called");
 	const docs = new Set<Document>();
 	if (typeof activeDocument !== "undefined") docs.add(activeDocument);
-	if (typeof document !== "undefined") docs.add(document);
 	if (activeWidgetEl) docs.add(activeWidgetEl.ownerDocument);
 	removeWidget();
 	docs.forEach((d) => d.querySelectorAll(".incsearch-widget").forEach((w) => {
@@ -407,8 +406,7 @@ export function renderSearchWidget(
 		const isEnter =
 			evt.key === "Enter" ||
 			evt.code === "Enter" ||
-			evt.code === "NumpadEnter" ||
-			evt.keyCode === 13;
+			evt.code === "NumpadEnter";
 		if (isCtrlOrMeta && isEnter) {
 			logDebug("widget", "globalKeyDown: Ctrl+Enter demand highlights toggle");
 			evt.preventDefault();
@@ -417,9 +415,9 @@ export function renderSearchWidget(
 			controller.toggleDemandHighlights();
 		}
 	};
-	keyTarget.addEventListener("keydown", onGlobalKeyDown as EventListener, { capture: true });
+	keyTarget.addEventListener("keydown", onGlobalKeyDown, { capture: true });
 	activeKeyCleanup = () => {
-		keyTarget.removeEventListener("keydown", onGlobalKeyDown as EventListener, { capture: true });
+		keyTarget.removeEventListener("keydown", onGlobalKeyDown, { capture: true });
 	};
 
 	const isObsidianBar = settings.searchInterface === "obsidian";
@@ -601,8 +599,7 @@ export function renderSearchWidget(
 		const isEnter =
 			evt.key === "Enter" ||
 			evt.code === "Enter" ||
-			evt.code === "NumpadEnter" ||
-			evt.keyCode === 13;
+			evt.code === "NumpadEnter";
 
 		logDebug(
 			"widget",
@@ -678,7 +675,7 @@ export function renderSearchWidget(
  */
 export function renderWidget(
 	view: EditorView,
-	plugin: { app: any; settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
+	plugin: { app: App; settings: IncrementalSearchSettings; saveSettings: () => Promise<void> },
 	initialQuery: string,
 	initialDirection: SearchDirection
 ) {

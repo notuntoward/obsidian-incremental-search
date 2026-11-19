@@ -1,7 +1,7 @@
-import { focusLeafAndWindow, getActiveLeafInFocusedWindow, isLeafAttached, isLeafDetached } from "commons/workspace";
-import { forEachWindow, ownerWindow } from "commons/windows";
+import { focusLeafAndWindow, getActiveLeafInFocusedWindow, isLeafDetached } from "commons/workspace";
+import { forEachWindow } from "commons/windows";
 import { dispatchSearchNavigation, searchRepeatAction } from "commons/search";
-import { Plugin, PluginSettingTab, App, Setting, Editor, View, type SettingDefinitionItem } from "obsidian";
+import { Plugin, PluginSettingTab, App, Editor, Setting, View, type SettingDefinitionItem, type WorkspaceLeaf } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
 	IncrementalSearchSettings,
@@ -14,7 +14,6 @@ import {
 	setSession,
 	recomputeQuery,
 	advance,
-	commitMatch,
 	closeSession,
 } from "./session";
 import {
@@ -60,6 +59,19 @@ export function getSelectionWithin(root: HTMLElement | null | undefined): string
 	return selection.toString().replace(/\s+/g, " ").trim();
 }
 
+function getViewEditor(view: View | undefined): Editor | undefined {
+	return (view as { editor?: Editor } | undefined)?.editor;
+}
+
+interface RuntimeLeaf {
+	containerEl: HTMLElement;
+	view: View;
+}
+
+function getRuntimeLeaf(leaf: WorkspaceLeaf): RuntimeLeaf {
+	return leaf as unknown as RuntimeLeaf;
+}
+
 // A repeat press (advance or recall) can move focus to the editor or PDF viewer while it
 // scrolls to the match; the widget's blur handler would then accept and close the bar.
 function keepSearchInputFocused(): void {
@@ -78,10 +90,10 @@ function keepSearchInputFocused(): void {
 export default class IncrementalSearchPlugin extends Plugin {
 	settings: IncrementalSearchSettings;
 	pdfController: PdfMatchController | null = null;
-	activePdfView: any = null;
+	activePdfView: unknown = null;
 	/** Last accepted match per PDF file path; the next search there continues after it. */
 	acceptedPdfMatches = new Map<string, PdfMatchPosition>();
-	lastInteractedLeaf: any = null;
+	lastInteractedLeaf: WorkspaceLeaf | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -117,23 +129,18 @@ export default class IncrementalSearchPlugin extends Plugin {
 				return;
 			}
 
-			const leafEl = target.closest(".workspace-leaf") as HTMLElement | null;
+			const leafEl = target.closest<HTMLElement>(".workspace-leaf");
 			if (!leafEl) return;
 
-			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
-				if (leaf.containerEl === leafEl) {
+			this.app.workspace.iterateAllLeaves?.((leaf) => {
+				const runtimeLeaf = getRuntimeLeaf(leaf);
+				if (runtimeLeaf.containerEl === leafEl) {
 					if (!isLeafDetached(leaf)) {
 						this.lastInteractedLeaf = leaf;
 					} else {
 						this.lastInteractedLeaf = null;
 					}
-					// `workspace.activeLeaf` is discouraged for reading "the current view" (use
-					// `getActiveViewOfType` for that), but there is no supported way to compare
-					// leaf identity to avoid a redundant `setActiveLeaf` call here. Reading the
-					// DOM `mod-active` class instead would race against Obsidian's own
-					// pointerdown/mousedown leaf-activation handling, since we cannot guarantee
-					// listener ordering, so this narrower identity check is kept intentionally.
-					if (this.app.workspace.activeLeaf !== leaf) {
+					if (this.app.workspace.getMostRecentLeaf?.() !== leaf) {
 						logDebug(
 							"main",
 							`handleLeafInteraction setting activeLeaf to ${describeElement(leafEl)}`
@@ -151,7 +158,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 						}
 						removeWidget();
 					}
-					if (isPdfView(leaf.view)) {
+					if (isPdfView(runtimeLeaf.view)) {
 						leafEl.setAttribute("tabindex", "-1");
 						leafEl.focus();
 					}
@@ -167,27 +174,28 @@ export default class IncrementalSearchPlugin extends Plugin {
 			hookedDocs.add(doc);
 			this.registerDomEvent(doc, "pointerdown", handleLeafInteraction, {
 				capture: true,
-			} as any);
+			});
 			this.registerDomEvent(doc, "mousedown", handleLeafInteraction, {
 				capture: true,
-			} as any);
+			});
 		};
 
 		forEachWindow(this, (win) => {
 			hookDocument(win?.document);
 		});
 		this.app.workspace.onLayoutReady(() => {
-			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
-				const doc = leaf.containerEl?.ownerDocument;
+			this.app.workspace.iterateAllLeaves?.((leaf) => {
+				const doc = getRuntimeLeaf(leaf).containerEl?.ownerDocument;
 				if (doc) hookDocument(doc);
 			});
 		});
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
+				const runtimeLeaf = leaf ? getRuntimeLeaf(leaf) : null;
 				logDebug(
 					"main",
-					`active-leaf-change: leaf=${describeElement((leaf as any)?.containerEl)}, isPdf=${isPdfView(leaf?.view)}`
+					`active-leaf-change: leaf=${describeElement(leaf ? getRuntimeLeaf(leaf).containerEl : null)}, isPdf=${isPdfView(leaf ? getRuntimeLeaf(leaf).view : null)}`
 				);
 				if (leaf) {
 					this.lastInteractedLeaf = leaf;
@@ -199,11 +207,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 					this.activePdfView = null;
 					removeWidget();
 				}
-				if (leaf?.view && isPdfView(leaf.view)) {
+				if (runtimeLeaf?.view && isPdfView(runtimeLeaf.view)) {
 					logDebug("main", "active-leaf-change: PDF view active, removing widget");
 					removeWidget();
 					// Clear any residue highlights left behind by previous sessions
-					const adapter = createPdfViewAdapter(leaf.view);
+					const adapter = createPdfViewAdapter(runtimeLeaf.view);
 					if (adapter) {
 						clearSecondaryHighlights(adapter.containerEl);
 						clearAllPdfHighlights(adapter.containerEl);
@@ -246,39 +254,46 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 
 	private getActiveTarget():
-		{ type: "editor"; editor: Editor } | { type: "pdf"; view: any } | null {
+		{ type: "editor"; editor: Editor } | { type: "pdf"; view: unknown } | null {
 		const activeEl = activeDocument.activeElement;
 		logDebug("main", `getActiveTarget: activeElement=${describeElement(activeEl)}`);
 
 		// 1. If document.activeElement is inside a specific workspace leaf, use that leaf
 		if (activeEl && activeEl !== activeDocument.body) {
-			let focusedLeaf: any = null;
-			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
-				if (leaf.containerEl?.contains(activeEl)) {
-					focusedLeaf = leaf;
+			const focusedLeaves: WorkspaceLeaf[] = [];
+			this.app.workspace.iterateAllLeaves?.((leaf) => {
+				if (getRuntimeLeaf(leaf).containerEl?.contains(activeEl)) {
+					focusedLeaves.push(leaf);
 				}
 			});
-			if (focusedLeaf?.view && !isLeafDetached(focusedLeaf)) {
-				if (isPdfView(focusedLeaf.view)) {
+			const focusedLeaf = focusedLeaves[0];
+			const focusedRuntime = focusedLeaf ? getRuntimeLeaf(focusedLeaf) : null;
+			if (focusedLeaf && focusedRuntime?.view && !isLeafDetached(focusedLeaf)) {
+				if (isPdfView(focusedRuntime.view)) {
 					logDebug("main", "getActiveTarget [1]: activeElement in focused leaf -> PDF view");
-					return { type: "pdf", view: focusedLeaf.view };
+					return { type: "pdf", view: focusedRuntime.view };
 				}
-				if (focusedLeaf.view.editor) {
+				const editor = getViewEditor(focusedRuntime.view);
+				if (editor) {
 					logDebug("main", "getActiveTarget [1]: activeElement in focused leaf -> Editor view");
-					return { type: "editor", editor: focusedLeaf.view.editor };
+					return { type: "editor", editor };
 				}
 			}
 		}
 
 		// 2. If the user recently clicked/interacted with a specific leaf
-		if (this.lastInteractedLeaf?.view && !isLeafDetached(this.lastInteractedLeaf)) {
-			if (isPdfView(this.lastInteractedLeaf.view)) {
+		const lastInteractedRuntime = this.lastInteractedLeaf
+			? getRuntimeLeaf(this.lastInteractedLeaf)
+			: null;
+		if (this.lastInteractedLeaf && lastInteractedRuntime?.view && !isLeafDetached(this.lastInteractedLeaf)) {
+			if (isPdfView(lastInteractedRuntime.view)) {
 				logDebug("main", "getActiveTarget [2]: lastInteractedLeaf -> PDF view");
-				return { type: "pdf", view: this.lastInteractedLeaf.view };
+				return { type: "pdf", view: lastInteractedRuntime.view };
 			}
-			if (this.lastInteractedLeaf.view.editor) {
+			const editor = getViewEditor(lastInteractedRuntime.view);
+			if (editor) {
 				logDebug("main", "getActiveTarget [2]: lastInteractedLeaf -> Editor view");
-				return { type: "editor", editor: this.lastInteractedLeaf.view.editor };
+				return { type: "editor", editor };
 			}
 		} else if (this.lastInteractedLeaf && isLeafDetached(this.lastInteractedLeaf)) {
 			this.lastInteractedLeaf = null;
@@ -287,64 +302,70 @@ export default class IncrementalSearchPlugin extends Plugin {
 		// 3. Check leaf with .mod-active in DOM
 		const modActiveLeafEl = activeDocument.querySelector(".workspace-leaf.mod-active");
 		if (modActiveLeafEl) {
-			let activeLeafObj: any = null;
-			this.app.workspace.iterateAllLeaves?.((leaf: any) => {
-				if (leaf.containerEl === modActiveLeafEl) {
-					activeLeafObj = leaf;
+			const activeLeafObjects: WorkspaceLeaf[] = [];
+			this.app.workspace.iterateAllLeaves?.((leaf) => {
+				if (getRuntimeLeaf(leaf).containerEl === modActiveLeafEl) {
+					activeLeafObjects.push(leaf);
 				}
 			});
-			if (activeLeafObj?.view && !isLeafDetached(activeLeafObj)) {
-				if (isPdfView(activeLeafObj.view)) {
+			const activeLeafObj = activeLeafObjects[0];
+			const activeRuntime = activeLeafObj ? getRuntimeLeaf(activeLeafObj) : null;
+			if (activeLeafObj && activeRuntime?.view && !isLeafDetached(activeLeafObj)) {
+				if (isPdfView(activeRuntime.view)) {
 					logDebug("main", "getActiveTarget [3]: mod-active leaf -> PDF view");
-					return { type: "pdf", view: activeLeafObj.view };
+					return { type: "pdf", view: activeRuntime.view };
 				}
-				if (activeLeafObj.view.editor) {
+				const editor = getViewEditor(activeRuntime.view);
+				if (editor) {
 					logDebug("main", "getActiveTarget [3]: mod-active leaf -> Editor view");
-					return { type: "editor", editor: activeLeafObj.view.editor };
+					return { type: "editor", editor };
 				}
 			}
 		}
 
 		// 4. Prefer the active leaf in the focused window
 		const activeInWindow = getActiveLeafInFocusedWindow(this.app);
-		if (activeInWindow?.view && !isLeafDetached(activeInWindow)) {
-			if (isPdfView(activeInWindow.view)) {
+		const activeInWindowRuntime = activeInWindow ? getRuntimeLeaf(activeInWindow) : null;
+		if (activeInWindow && activeInWindowRuntime?.view && !isLeafDetached(activeInWindow)) {
+			if (isPdfView(activeInWindowRuntime.view)) {
 				logDebug("main", "getActiveTarget [4]: getActiveLeafInFocusedWindow -> PDF view");
-				return { type: "pdf", view: activeInWindow.view };
+				return { type: "pdf", view: activeInWindowRuntime.view };
 			}
-			if ((activeInWindow.view as any).editor) {
+			const editor = getViewEditor(activeInWindowRuntime.view);
+			if (editor) {
 				logDebug("main", "getActiveTarget [4]: getActiveLeafInFocusedWindow -> Editor view");
-				return { type: "editor", editor: (activeInWindow.view as any).editor };
+				return { type: "editor", editor };
 			}
 		}
 
 		// 5. Prefer the documented `getMostRecentLeaf()` API over reading `workspace.activeLeaf`
 		// directly; fall back to the discouraged property only if that returns nothing.
-		const activeLeaf =
-			this.app.workspace.getMostRecentLeaf?.() || (this.app.workspace as any).activeLeaf;
-		const activeView = activeLeaf?.view;
+		const activeLeaf = this.app.workspace.getMostRecentLeaf?.();
+		const activeView = activeLeaf ? getRuntimeLeaf(activeLeaf).view : undefined;
 
 		if (activeView && !isLeafDetached(activeLeaf)) {
 			if (isPdfView(activeView)) {
 				logDebug("main", "getActiveTarget [5]: getMostRecentLeaf -> PDF view");
 				return { type: "pdf", view: activeView };
 			}
-			if (activeView?.editor) {
+			const editor = getViewEditor(activeView);
+			if (editor) {
 				logDebug("main", "getActiveTarget [5]: getMostRecentLeaf -> Editor view");
-				return { type: "editor", editor: activeView.editor };
+				return { type: "editor", editor };
 			}
 		}
 
 		// 6. Fallback to activeLeaf on workspace
-		const fallbackView = this.app.workspace.getActiveViewOfType(View as any);
+		const fallbackView = this.app.workspace.getActiveViewOfType(View);
 		if (fallbackView) {
 			if (isPdfView(fallbackView)) {
 				logDebug("main", "getActiveTarget [6]: getActiveViewOfType -> PDF view");
 				return { type: "pdf", view: fallbackView };
 			}
-			if ((fallbackView as any)?.editor) {
+			const editor = (fallbackView as View & { editor?: Editor }).editor;
+			if (editor) {
 				logDebug("main", "getActiveTarget [6]: getActiveViewOfType -> Editor view");
-				return { type: "editor", editor: (fallbackView as any).editor };
+				return { type: "editor", editor };
 			}
 		}
 
@@ -390,7 +411,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 		return false;
 	}
 
-	invokePdf(view: any, direction: SearchDirection) {
+	invokePdf(view: unknown, direction: SearchDirection) {
 		logDebug("main", `invokePdf: direction=${direction}, hasController=${Boolean(this.pdfController)}`);
 		// Repeat-press behavior (advance / recall the last query) applies only while this
 		// PDF's search bar is open; otherwise a fresh search starts empty.
@@ -433,7 +454,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 				updatePdfWidgetCounter(this.pdfController);
 			}
 		});
-		const pdfPath: string | undefined = view.file?.path;
+		const pdfPath = (view as { file?: { path?: string } }).file?.path;
 		this.pdfController.startAfter = (pdfPath && this.acceptedPdfMatches.get(pdfPath)) || null;
 
 		const startingQuery = getSelectionWithin(adapter.containerEl);
@@ -464,8 +485,7 @@ export default class IncrementalSearchPlugin extends Plugin {
 			removeWidget();
 		}
 
-		// @ts-expect-error CodeMirror view is attached to editor.cm in Obsidian runtime
-		const view: EditorView | undefined = editor.cm;
+		const view = (editor as Editor & { cm?: EditorView }).cm;
 		if (!view) {
 			logDebug("main", "invoke: editor.cm view is undefined");
 			return;
@@ -519,8 +539,8 @@ export default class IncrementalSearchPlugin extends Plugin {
 		if (sel && !sel.empty && sel.from !== undefined && sel.to !== undefined) {
 			if (typeof view.state.sliceDoc === "function") {
 				selectedText = view.state.sliceDoc(sel.from, sel.to);
-			} else if (typeof (view.state.doc as any)?.sliceString === "function") {
-				selectedText = (view.state.doc as any).sliceString(sel.from, sel.to);
+			} else if (typeof view.state.doc.sliceString === "function") {
+				selectedText = view.state.doc.sliceString(sel.from, sel.to);
 			} else if (typeof view.state.doc?.toString === "function") {
 				selectedText = view.state.doc.toString().slice(sel.from, sel.to);
 			}
@@ -564,7 +584,13 @@ export default class IncrementalSearchPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const loaded = (await this.loadData()) || {};
+		type PersistedSettings = Omit<Partial<IncrementalSearchSettings>, "searchInterface"> & {
+			highlightAllMatches?: boolean;
+			fuzzyMode?: boolean;
+			searchInterface?: IncrementalSearchSettings["searchInterface"] | "popup";
+			usePopupModal?: boolean;
+		};
+		const loaded = ((await this.loadData()) || {}) as PersistedSettings;
 		if (
 			loaded.allMatchesDisplayMode === undefined &&
 			typeof loaded.highlightAllMatches === "boolean"
@@ -605,9 +631,10 @@ export default class IncrementalSearchPlugin extends Plugin {
 	 * searches are immediately ready after any theme or match-style change.
 	 */
 	refreshAllPdfColors() {
-		this.app.workspace.iterateAllLeaves?.((leaf: any) => {
-			if (leaf?.view && isPdfView(leaf.view)) {
-				const adapter = createPdfViewAdapter(leaf.view);
+		this.app.workspace.iterateAllLeaves?.((leaf) => {
+			const runtimeLeaf = getRuntimeLeaf(leaf);
+			if (runtimeLeaf.view && isPdfView(runtimeLeaf.view)) {
+				const adapter = createPdfViewAdapter(runtimeLeaf.view);
 				if (adapter?.containerEl) {
 					applyPdfColors(adapter.containerEl, this.settings);
 				}

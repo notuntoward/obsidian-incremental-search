@@ -9,7 +9,7 @@ export interface LogEntry {
 	timeMs: number;
 	category: string;
 	message: string;
-	details?: any;
+	details?: unknown;
 }
 
 const MAX_LOG_ENTRIES = 200;
@@ -56,7 +56,7 @@ export function describeElement(el: Element | null | undefined): string {
 /**
  * Records a diagnostic log event.
  */
-export function logDebug(category: string, message: string, details?: any) {
+export function logDebug(category: string, message: string, details?: unknown) {
 	const now = new Date();
 	const entry: LogEntry = {
 		timestamp: formatTime(now),
@@ -73,10 +73,11 @@ export function logDebug(category: string, message: string, details?: any) {
 
 	if (!debugLoggingEnabled) return;
 
+	const diagnosticConsole = console;
 	if (details !== undefined) {
-		console.log(`[IncSearch:${category}] ${entry.timestamp} ${message}`, details);
+		diagnosticConsole.log(`[IncSearch:${category}] ${entry.timestamp} ${message}`, details);
 	} else {
-		console.log(`[IncSearch:${category}] ${entry.timestamp} ${message}`);
+		diagnosticConsole.log(`[IncSearch:${category}] ${entry.timestamp} ${message}`);
 	}
 }
 
@@ -99,7 +100,12 @@ export function clearLogs(): void {
 
 // Expose on global window object for easy inspection in Developer Console
 if (typeof window !== "undefined") {
-	(window as any).IncSearchLog = logBuffer;
-	(window as any).getIncSearchLogs = () => getRecentLogs().join("\n");
-	(window as any).clearIncSearchLogs = clearLogs;
+	const diagnosticsWindow = window as unknown as Window & {
+		IncSearchLog: LogEntry[];
+		getIncSearchLogs: () => string;
+		clearIncSearchLogs: () => void;
+	};
+	diagnosticsWindow.IncSearchLog = logBuffer;
+	diagnosticsWindow.getIncSearchLogs = () => getRecentLogs().join("\n");
+	diagnosticsWindow.clearIncSearchLogs = clearLogs;
 }

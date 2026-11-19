@@ -48,8 +48,8 @@ export function getContrastRatio(lum1: number, lum2: number): number {
  * (PDFs pass their actual page background and font color).
  */
 export function resolveOutlineColor(background?: string, fallbackOverride?: string, doc?: Document): string {
-	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
-	const targetWin = targetDoc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : null);
+	const targetWin = targetDoc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : null);
 
 	if (!targetDoc || !targetWin || !targetDoc.body) {
 		return "#705dcf";
@@ -191,7 +191,7 @@ export function clearPdfColors(containerEl: HTMLElement) {
  * Updates the `--incsearch-current-outline-resolved` CSS variable on the document body.
  */
 export function updateResolvedOutlineColor(doc?: Document) {
-	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : null);
 	if (!targetDoc || !targetDoc.body) return;
 	const resolved = resolveOutlineColor(undefined, undefined, targetDoc);
 	targetDoc.body.style.setProperty("--incsearch-current-outline-resolved", resolved);

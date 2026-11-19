@@ -13,7 +13,7 @@ import {
 import { computeMatches } from "./engine";
 import { removeWidget, showWidgetTableToast, hideWidgetTableToast } from "./widget";
 import { logDebug } from "./utils/logger";
-import { scrollTargetIntoViewIfNeeded, scrollEditorMatchIntoView } from "./utils/scroll";
+import { findAllElements, scrollTargetIntoViewIfNeeded, scrollEditorMatchIntoView } from "./utils/scroll";
 
 interface AutoFoldedRange {
 	from: number;
@@ -157,7 +157,8 @@ export function buildHighlightDecorations(
 	const uniquePositions: { from: number; to: number; mark: Decoration }[] = [];
 	const seenKeys = new Set<string>();
 	for (const p of positions) {
-		const key = `${p.from}:${p.to}:${(p.mark.spec as any)?.class ?? ""}`;
+		const markClass = (p.mark.spec as { class?: string }).class;
+		const key = `${p.from}:${p.to}:${markClass ?? ""}`;
 		if (!seenKeys.has(key)) {
 			seenKeys.add(key);
 			uniquePositions.push(p);
@@ -358,8 +359,8 @@ function getCalloutAtPos(view: EditorView, pos: number): HTMLElement | null {
 		}
 		for (const c of allCallouts) {
 			const embed = c.closest<HTMLElement>(".cm-embed-block");
-			if (embed && typeof (view as any).posAtDOM === "function") {
-				const embedPos = (view as any).posAtDOM(embed);
+			if (embed && typeof view.posAtDOM === "function") {
+				const embedPos = view.posAtDOM(embed);
 				if (embedPos >= calloutRange.from && embedPos <= calloutRange.to) {
 					return c;
 				}
@@ -428,7 +429,6 @@ function highlightMatchedTextInCallout(
 
 	const activeRef: { span: HTMLElement | null } = { span: null };
 	let currentOccur = 0;
-	let matchCount = 0;
 
 	function walk(node: Node) {
 		if (node.nodeType === Node.TEXT_NODE && node.textContent) {
@@ -457,7 +457,6 @@ function highlightMatchedTextInCallout(
 						frag.appendChild(doc.createTextNode(matched));
 					}
 					currentOccur++;
-					matchCount++;
 					lastPos = idx + matchText.length;
 					idx = text.toLowerCase().indexOf(matchText.toLowerCase(), lastPos);
 				}
@@ -506,9 +505,9 @@ function highlightMatchedTextInCallout(
 }
 
 function clearAllCalloutHighlights(view: EditorView) {
-	if (view.dom && typeof view.dom.querySelectorAll === "function") {
+	if (view.dom) {
 		const doc = view.dom.ownerDocument;
-		const spans = Array.from(view.dom.querySelectorAll(".incsearch-callout-match"));
+		const spans = findAllElements(view.dom, ".incsearch-callout-match");
 		if (spans.length > 0) {
 			spans.forEach((span) => {
 				const parent = span.parentNode;
@@ -673,9 +672,9 @@ export function scrollToMatch(view: EditorView, match: MatchRange, isTyping = fa
 }
 
 function clearAllTableHighlights(view: EditorView) {
-	if (view.dom && typeof view.dom.querySelectorAll === "function") {
+	if (view.dom) {
 		const doc = view.dom.ownerDocument;
-		Array.from(view.dom.querySelectorAll(".incsearch-table-cell-match")).forEach((span) => {
+		findAllElements(view.dom, ".incsearch-table-cell-match").forEach((span) => {
 			const parent = span.parentNode;
 			if (parent) {
 				parent.replaceChild(doc.createTextNode(span.textContent || ""), span);
@@ -693,16 +692,18 @@ function getTableWidgetElement(
 	const result = view.domAtPos(tableSectionStart);
 	if (!result) return null;
 	let node: Node | null = result.node;
+	if (!node) return null;
 	if (node.nodeType === Node.TEXT_NODE) {
 		node = node.parentElement;
 	}
-	const el = node instanceof HTMLElement ? node : null;
+	if (!node) return null;
+	const el = node.nodeType === Node.ELEMENT_NODE ? node as HTMLElement : null;
 	if (!el) return null;
 
 	if (el.matches("table")) return el as HTMLTableElement;
 	const innerTable = el.querySelector("table");
-	if (innerTable) return innerTable as HTMLTableElement;
-	return el.closest("table") as HTMLTableElement | null;
+	if (innerTable) return innerTable;
+	return el.closest("table");
 }
 
 function highlightCellMatches(

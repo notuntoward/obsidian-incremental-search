@@ -258,7 +258,7 @@ export function scrollEditorMatchIntoView(
 	options: ScrollTargetOptions = {}
 ): boolean {
 	try {
-		const scrollContainer = (view as any).scrollDOM || view.dom;
+		const scrollContainer = view.scrollDOM || view.dom;
 		if (!scrollContainer || typeof scrollContainer.getBoundingClientRect !== "function") {
 			view.dispatch({
 				effects: EditorView.scrollIntoView(EditorSelection.range(match.from, match.to), {
@@ -403,6 +403,18 @@ export function isMatchElementCandidate(el: { classList?: DOMTokenList } | null 
 	return MATCH_ELEMENT_CLASS_TOKENS.some((token) => classList.contains(token));
 }
 
+export function findAllElements(scope: ParentNode, selector: string): HTMLElement[] {
+	const obsidianFindAll: unknown = Reflect.get(scope, "findAll");
+	if (typeof obsidianFindAll === "function") {
+		const matches: unknown = Reflect.apply(obsidianFindAll, scope, [selector]);
+		if (Array.isArray(matches)) return matches as HTMLElement[];
+	}
+	const nativeFindAll: unknown = Reflect.get(scope, "querySelectorAll");
+	if (typeof nativeFindAll !== "function") return [];
+	const matches: unknown = Reflect.apply(nativeFindAll, scope, [selector]);
+	return Array.from(matches as Iterable<HTMLElement>);
+}
+
 export interface CompoundBoundingRect {
 	top: number;
 	bottom: number;
@@ -421,11 +433,9 @@ export function getCompoundMatchBoundingRect(
 	pageEl?: HTMLElement | null
 ): CompoundBoundingRect | null {
 	const scope = pageEl || containerEl;
-	if (!scope || typeof scope.querySelectorAll !== "function") return null;
+	if (!scope) return null;
 
-	const fragments = Array.from(
-		scope.querySelectorAll<HTMLElement>(CURRENT_MATCH_SELECTOR)
-	).filter((el) => {
+	const fragments = findAllElements(scope, CURRENT_MATCH_SELECTOR).filter((el) => {
 		if (typeof el.getBoundingClientRect !== "function") return false;
 		const r = el.getBoundingClientRect();
 		return r.width > 0 || r.height > 0;

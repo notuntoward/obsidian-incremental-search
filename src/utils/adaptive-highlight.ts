@@ -34,6 +34,15 @@ export const MIN_TEXT_CONTRAST = 4.5;
 export const MAX_ACCEPTABLE_DEGRADATION = 0.92;
 export const DEFAULT_SUBORDINATE_FRACTION = 0.75;
 
+function getCurrentDocument(): Document | null {
+	return typeof activeDocument !== "undefined" ? activeDocument : null;
+}
+
+function getCurrentWindow(doc?: Document | null): Window | null {
+	if (doc?.defaultView) return doc.defaultView;
+	return typeof activeWindow !== "undefined" ? activeWindow : null;
+}
+
 /**
  * Recursively resolves CSS variables (e.g. "var(--color-accent)" or "hsl(var(--accent-h), ...)")
  * using computed styles from the document.
@@ -43,7 +52,7 @@ export function resolveAllCssVariables(
 	el?: Element | null
 ): string {
 	if (!input) return "";
-	const doc = el?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : null);
+	const doc = el?.ownerDocument ?? getCurrentDocument();
 	const target = el ?? doc?.body ?? doc?.documentElement;
 	if (!target) return input.trim();
 	const win = target.ownerDocument.defaultView;
@@ -57,7 +66,7 @@ export function resolveAllCssVariables(
 		if (!result.includes("var(--")) break;
 		result = result.replace(
 			/var\(\s*(--[\w-]+)(?:\s*,\s*([^)]+))?\s*\)/gi,
-			(_, varName, fallback) => {
+			(_match: string, varName: string, fallback: string | undefined) => {
 				const val = cs.getPropertyValue(varName).trim();
 				return val || (fallback ? fallback.trim() : "");
 			}
@@ -163,14 +172,13 @@ export function parseCssColor(value: string | null | undefined): RGBA {
 	}
 
 	// Browser DOM fallback for named colors
-	const doc = typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null);
-	const win = doc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
-	if (doc && doc.createElement && doc.body) {
+	const doc = getCurrentDocument();
+	const win = getCurrentWindow(doc);
+	if (doc?.body) {
 		try {
-			const probe = doc.createElement("span");
-			probe.style.setProperty("color", trimmed);
-			probe.style.display = "none";
-			doc.body.appendChild(probe);
+			const probe = doc.body.createSpan();
+			probe.hide();
+			probe.setCssProps({ color: trimmed });
 			const computed = win ? win.getComputedStyle(probe).color : "";
 			probe.remove();
 			if (computed && computed !== trimmed) {
@@ -325,8 +333,8 @@ export function ensurePerceptibleAccent(accent: RGBA, bg: RGBA, isDarkLegacy?: b
  * Walks up the DOM to find the first opaque background color.
  */
 export function firstOpaqueBackground(el: HTMLElement | null, doc?: Document): RGBA {
-	const targetDoc = doc ?? el?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
-	const targetWin = targetDoc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	const targetDoc = doc ?? el?.ownerDocument ?? getCurrentDocument();
+	const targetWin = getCurrentWindow(targetDoc);
 
 	for (let node: HTMLElement | null = el; node; node = node.parentElement) {
 		if (targetWin) {
@@ -355,8 +363,8 @@ export function firstOpaqueBackground(el: HTMLElement | null, doc?: Document): R
  * Detects box/border/outline decoration on a match element or container.
  */
 export function detectBoxDecoration(matchEl: HTMLElement | null): CssBoxDecoration {
-	const win = matchEl?.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
-	const doc = matchEl?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const win = getCurrentWindow(matchEl?.ownerDocument);
+	const doc = matchEl?.ownerDocument ?? getCurrentDocument();
 	if (!matchEl || !win) {
 		return { source: "none", color: null, thicknessPx: null, raw: "" };
 	}
@@ -399,14 +407,14 @@ export function detectBoxDecoration(matchEl: HTMLElement | null): CssBoxDecorati
  * Measures the active appearance tokens from the live DOM or theme variables.
  */
 export function measureCurrentMatchAppearance(targetEl?: HTMLElement | null): MeasuredAppearance {
-	const doc = targetEl?.ownerDocument ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
-	const win = doc?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
+	const doc = targetEl?.ownerDocument ?? getCurrentDocument();
+	const win = getCurrentWindow(doc);
 	const isDark = doc?.body?.classList.contains("theme-dark");
 	const mode: "light" | "dark" = isDark ? "dark" : "light";
 
 	const currentMatchEl =
 		targetEl ??
-		(doc ? (doc.querySelector(".incsearch-match-exact.is-current") as HTMLElement | null) : null);
+		(doc ? doc.querySelector<HTMLElement>(".incsearch-match-exact.is-current") : null);
 
 	const bodyStyle = doc?.body && typeof win?.getComputedStyle === "function" ? win.getComputedStyle(doc.body) : null;
 
@@ -749,7 +757,7 @@ export function buildSecondaryStyle(
 const appearanceCache = new Map<string, SecondaryStyle>();
 
 export function getAppearanceCacheKey(settings?: Partial<IncrementalSearchSettings>, doc?: Document): string {
-	const targetDoc = doc ?? (typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null));
+	const targetDoc = doc ?? getCurrentDocument();
 	const isDark = targetDoc?.body?.classList.contains("theme-dark");
 	const mode = isDark ? "dark" : "light";
 	const className = targetDoc?.body?.className || "";
@@ -816,11 +824,11 @@ export function getOrComputeSecondaryStyle(
 export function applySecondaryStyle(style: SecondaryStyle, target?: Document | HTMLElement | null): void {
 	let doc: Document | null = null;
 	if (target && "documentElement" in target && "body" in target) {
-		doc = target as Document;
+		doc = target;
 	} else if (target && "ownerDocument" in target) {
-		doc = (target as HTMLElement).ownerDocument;
+		doc = (target).ownerDocument;
 	} else {
-		doc = typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null);
+		doc = getCurrentDocument();
 	}
 	if (!doc || !doc.documentElement || !doc.body) {
 		return;

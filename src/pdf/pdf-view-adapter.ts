@@ -2,6 +2,110 @@ import { PdfViewportAnchor, PdfScrollPosition } from "./types";
 import { isPageCompletelyOffScreen, scrollTargetIntoViewIfNeeded } from "../utils/scroll";
 import { logDebug, describeElement } from "../utils/logger";
 
+type PdfEventHandler = (event: unknown) => void;
+
+export interface PdfEventBusLike {
+	on?(event: string, handler: PdfEventHandler): void;
+	off?(event: string, handler: PdfEventHandler): void;
+	dispatch?(event: string, data: unknown): void;
+}
+
+export interface PdfSelectionLike {
+	pageIdx: number;
+	matchIdx: number;
+}
+
+export interface PdfMatchLike {
+	index: number;
+	length: number;
+}
+
+export interface PdfFindControllerLike {
+	_eventBus?: PdfEventBusLike;
+	eventBus?: PdfEventBusLike;
+	_selected?: PdfSelectionLike;
+	selected?: PdfSelectionLike;
+	_pdfViewer?: PdfViewerLike;
+	pdfViewer?: PdfViewerLike;
+	_linkService?: { pdfViewer?: PdfViewerLike };
+	linkService?: { pdfViewer?: PdfViewerLike };
+	pageMatches?: unknown[][];
+	_pageMatches?: unknown[][];
+	match?: (query: unknown, pageContent: string, pageIndex: number) => PdfMatchLike[] | undefined | null;
+	scrollMatchIntoView?: (params: unknown) => unknown;
+	executeCommand?: (command: string, params: unknown) => unknown;
+	_updateAllPages?: () => unknown;
+	_highlightAll?: boolean;
+	highlightAll?: boolean;
+	state?: { highlightAll?: boolean };
+}
+
+interface PdfPageViewLike {
+	id?: number;
+	pageNumber?: number;
+	index?: number;
+	div?: HTMLElement;
+}
+
+interface PdfVisiblePagesLike {
+	views?: PdfPageViewLike[];
+}
+
+export interface PdfViewerLike {
+	pdfDocument?: PdfDocumentLike;
+	pdfViewer?: PdfViewerLike;
+	numPages?: number;
+	pagesCount?: number;
+	eventBus?: PdfEventBusLike;
+	findController?: PdfFindControllerLike;
+	_pages?: PdfPageViewLike[];
+	pages?: PdfPageViewLike[];
+	currentPageNumber?: number;
+	getPageView?(index: number): PdfPageViewLike | undefined;
+	getVisiblePages?(): PdfVisiblePagesLike | undefined;
+	_getVisiblePages?(): PdfVisiblePagesLike | undefined;
+	scrollPageIntoView?(params: { pageNumber: number } | number): unknown;
+	_scrollIntoView?(params: unknown): unknown;
+	_setCurrentPageNumber?(pageNumber: number, resetCurrentPageView?: boolean): unknown;
+}
+
+interface PdfDocumentLike {
+	numPages?: number;
+}
+
+interface PdfViewChildLike extends PdfViewerLike {
+	containerEl?: HTMLElement;
+	pdfViewer?: PdfViewerLike;
+	pdfDocument?: PdfDocumentLike;
+	eventBus?: PdfEventBusLike;
+	findController?: PdfFindControllerLike;
+	getPage?(): unknown;
+	scrollToPage?(pageNumber: number): unknown;
+	goToPage?(pageNumber: number): unknown;
+	child?: PdfViewChildLike;
+}
+
+interface PdfViewLike {
+	getViewType?(): string;
+	file?: { extension?: string; path?: string };
+	contentEl?: HTMLElement;
+	containerEl?: HTMLElement;
+	viewer?: PdfViewChildLike;
+	child?: PdfViewChildLike;
+	pdfViewer?: PdfViewerLike;
+	findController?: PdfFindControllerLike;
+}
+
+interface PdfPlusWindow extends Window {
+	pdfPlus?: {
+		lib?: {
+			getPDFViewer?(view: PdfViewLike): PdfViewerLike | undefined;
+			getPDFViewerChild?(view: PdfViewLike): PdfViewChildLike | undefined;
+			getPDFDocument?(view: PdfViewLike): PdfDocumentLike | undefined;
+		};
+	};
+}
+
 export interface PdfViewAdapter {
 	numPages: number;
 	containerEl: HTMLElement;
@@ -10,10 +114,10 @@ export interface PdfViewAdapter {
 	getViewportAnchor?(): PdfViewportAnchor;
 	getScrollPosition?(): PdfScrollPosition;
 	restoreScrollPosition?(pos: PdfScrollPosition): void;
-	on(event: string, handler: (...args: any[]) => void): () => void;
+	on(event: string, handler: PdfEventHandler): () => void;
 	scrollPageIntoView(pageNumber: number): void;
-	findController?: any;
-	pdfViewer?: any;
+	findController?: PdfFindControllerLike;
+	pdfViewer?: PdfViewerLike;
 	getActiveFindMatchInfo?(): { pageIndex: number; matchIndex: number } | null;
 	executeNativeFind?(command: {
 		query: string;
@@ -29,50 +133,57 @@ export interface PdfViewAdapter {
 /**
  * Checks if an Obsidian view is a PDF view.
  */
-export function isPdfView(view: any): boolean {
+export function isPdfView(view: unknown): boolean {
 	if (!view) return false;
-	if (typeof view.getViewType === "function") {
-		return view.getViewType() === "pdf";
+	const candidate = view as PdfViewLike;
+	if (typeof candidate.getViewType === "function") {
+		return candidate.getViewType() === "pdf";
 	}
-	if (view.file && typeof view.file.extension === "string") {
-		return view.file.extension.toLowerCase() === "pdf";
+	if (candidate.file && typeof candidate.file.extension === "string") {
+		return candidate.file.extension.toLowerCase() === "pdf";
 	}
-	return Boolean(view.viewer || view.pdfViewer || view.child?.pdfViewer);
+	return Boolean(candidate.viewer || candidate.pdfViewer || candidate.child?.pdfViewer);
 }
 
 /**
  * Resolves the underlying PDF.js PDFViewer and PDFDocumentProxy from an Obsidian view.
  */
-function resolveViewerComponents(view: any): {
-	pdfViewer: any;
-	pdfDocument: any;
-	eventBus: any;
+function resolveViewerComponents(view: unknown): {
+	pdfViewer: PdfViewerLike;
+	pdfDocument: PdfDocumentLike;
+	eventBus: PdfEventBusLike | undefined;
 	containerEl: HTMLElement;
 } | null {
 	if (!view) return null;
+	const candidate = view as PdfViewLike;
 
-	const doc = typeof activeDocument !== "undefined" ? activeDocument : (typeof document !== "undefined" ? document : null);
+	const doc = typeof activeDocument !== "undefined" ? activeDocument : null;
 	const fallbackBody = doc?.body;
 	const containerEl: HTMLElement =
-		view.contentEl || view.containerEl || view.viewer?.child?.containerEl || (fallbackBody as HTMLElement);
+		candidate.contentEl ||
+		candidate.containerEl ||
+		candidate.viewer?.child?.containerEl ||
+		candidate.viewer?.containerEl ||
+		(fallbackBody as HTMLElement);
 
 	// Check if PDF++ plugin API is present on window
-	const win = containerEl?.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : (typeof window !== "undefined" ? window : null));
-	const pdfPlus = (win as any)?.pdfPlus ?? (typeof window !== "undefined" ? (window as any).pdfPlus : undefined);
+	const win = containerEl?.ownerDocument?.defaultView ?? (typeof activeWindow !== "undefined" ? activeWindow : null);
+	const pdfPlusWindow: PdfPlusWindow | null = win;
+	const pdfPlus = pdfPlusWindow?.pdfPlus;
 	if (pdfPlus?.lib) {
 		try {
 			const pv =
-				pdfPlus.lib.getPDFViewer?.(view) ||
-				pdfPlus.lib.getPDFViewerChild?.(view)?.pdfViewer;
+				pdfPlus.lib.getPDFViewer?.(candidate) ||
+				pdfPlus.lib.getPDFViewerChild?.(candidate)?.pdfViewer;
 			const doc =
-				pdfPlus.lib.getPDFDocument?.(view) ||
+				pdfPlus.lib.getPDFDocument?.(candidate) ||
 				pv?.pdfDocument ||
-				pdfPlus.lib.getPDFViewerChild?.(view)?.pdfDocument;
+				pdfPlus.lib.getPDFViewerChild?.(candidate)?.pdfDocument;
 			if (doc && pv) {
 				return {
 					pdfViewer: pv,
 					pdfDocument: doc,
-					eventBus: pv.eventBus || pv.pdfViewer?.eventBus,
+					eventBus: pv.eventBus,
 					containerEl,
 				};
 			}
@@ -82,18 +193,18 @@ function resolveViewerComponents(view: any): {
 	}
 
 	// Native Obsidian PDF view traversal
-	const child = view.viewer?.child || view.child;
+	const child = candidate.viewer?.child ?? candidate.child;
 	const candidateViewers = [
 		child?.pdfViewer?.pdfViewer,
 		child?.pdfViewer,
-		view.viewer?.pdfViewer,
-		view.pdfViewer?.pdfViewer,
-		view.pdfViewer,
-		view.viewer,
-	].filter(Boolean);
+		candidate.viewer?.pdfViewer,
+		candidate.pdfViewer?.pdfViewer,
+		candidate.pdfViewer,
+		candidate.viewer,
+	].filter((viewer): viewer is PdfViewerLike => Boolean(viewer));
 
 	for (const pv of candidateViewers) {
-		const doc = pv.pdfDocument || child?.pdfDocument || view.viewer?.pdfDocument;
+		const doc = pv.pdfDocument || child?.pdfDocument || candidate.viewer?.pdfDocument;
 		if (doc && typeof doc.numPages === "number") {
 			return {
 				pdfViewer: pv,
@@ -106,9 +217,10 @@ function resolveViewerComponents(view: any): {
 
 	// Fallback check if child has direct getPage
 	if (child && typeof child.getPage === "function") {
+		const pdfDocument = child.pdfDocument ?? child;
 		return {
 			pdfViewer: child,
-			pdfDocument: child.pdfDocument || child,
+			pdfDocument,
 			eventBus: child.eventBus,
 			containerEl,
 		};
@@ -183,10 +295,11 @@ export function getScrollContainer(containerEl: HTMLElement, pageEl?: HTMLElemen
 /**
  * Creates a normalized PdfViewAdapter for interacting with an active PDF view.
  */
-export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
+export function createPdfViewAdapter(view: unknown): PdfViewAdapter | null {
 	if (!isPdfView(view)) {
 		return null;
 	}
+	const candidate = view as PdfViewLike;
 
 	const components = resolveViewerComponents(view);
 	if (!components || !components.pdfDocument) {
@@ -200,13 +313,13 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 	if (containerEl && typeof containerEl.setAttribute === "function") {
 		containerEl.setAttribute("tabindex", "-1");
 	}
-	const child = (view as any)?.viewer?.child || (view as any)?.child;
+	const child = candidate.viewer?.child || candidate.child;
 	const findController =
 		pdfViewer?.findController ||
 		child?.findController ||
 		child?.pdfViewer?.findController ||
-		(view as any)?.viewer?.findController ||
-		(view as any)?.findController;
+		candidate.viewer?.findController ||
+		candidate.findController;
 	const findEventBus = findController?._eventBus || findController?.eventBus || eventBus;
 
 	return {
@@ -217,9 +330,9 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 
 		getPageElement(pageNumber: number): HTMLElement | null {
 			// Query by data-page-number attribute
-			const el = containerEl.querySelector(
+			const el = containerEl.querySelector<HTMLElement>(
 				`.page[data-page-number="${pageNumber}"], [data-page-number="${pageNumber}"]`
-			) as HTMLElement | null;
+			);
 			if (el) return el;
 
 			// Fallback to pdfViewer._pages or getPageView
@@ -236,13 +349,13 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 		},
 
 		getActiveFindMatchInfo(): { pageIndex: number; matchIndex: number } | null {
-			const child = (view as any)?.viewer?.child || (view as any)?.child;
+			const child = candidate.viewer?.child || candidate.child;
 			const findController =
 				pdfViewer?.findController ||
 				child?.findController ||
 				child?.pdfViewer?.findController ||
-				(view as any)?.viewer?.findController ||
-				(view as any)?.findController;
+				candidate.viewer?.findController ||
+				candidate.findController;
 			if (findController) {
 				const sel = findController.selected || findController._selected;
 				if (
@@ -263,7 +376,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			try {
 				const visible = pdfViewer.getVisiblePages?.() || pdfViewer._getVisiblePages?.();
 				if (visible && Array.isArray(visible.views) && visible.views.length > 0) {
-					return visible.views.map((v: any) => v.id || v.pageNumber || v.index + 1);
+					return visible.views.map((v) => v.id || v.pageNumber || (v.index ?? 0) + 1);
 				}
 			} catch {
 				// Fallback to DOM intersection
@@ -272,7 +385,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			const visibleNumbers: number[] = [];
 			const pageElements = Array.from(
 				containerEl.querySelectorAll(".page[data-page-number]")
-			) as HTMLElement[];
+			);
 
 			if (pageElements.length > 0) {
 				const containerRect = containerEl.getBoundingClientRect();
@@ -295,7 +408,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			return visibleNumbers;
 		},
 
-		getViewportAnchor(): PdfViewportAnchor {
+		getViewportAnchor(this: PdfViewAdapter): PdfViewportAnchor {
 			const visible = this.getVisiblePageNumbers();
 			const topPageNumber = visible.length > 0 ? Math.min(...visible) : 1;
 			const bottomPageNumber = visible.length > 0 ? Math.max(...visible) : topPageNumber;
@@ -336,7 +449,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			};
 		},
 
-		getScrollPosition(): PdfScrollPosition {
+		getScrollPosition(this: PdfViewAdapter): PdfScrollPosition {
 			const scrollContainer = getScrollContainer(containerEl);
 			const visible = this.getVisiblePageNumbers();
 			return {
@@ -346,7 +459,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			};
 		},
 
-		restoreScrollPosition(pos: PdfScrollPosition) {
+		restoreScrollPosition(this: PdfViewAdapter, pos: PdfScrollPosition) {
 			const scrollContainer = getScrollContainer(containerEl);
 			if (typeof scrollContainer.scrollTo === "function") {
 				scrollContainer.scrollTo({
@@ -370,7 +483,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			}
 		},
 
-		on(event: string, handler: (...args: any[]) => void): () => void {
+		on(event: string, handler: PdfEventHandler): () => void {
 			const unsubs: (() => void)[] = [];
 			if (findEventBus && typeof findEventBus.on === "function") {
 				try {
@@ -389,7 +502,10 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				}
 			}
 
-			const domListener = (evt: any) => handler(evt.detail || evt);
+			const domListener = (evt: Event) => {
+				const detail = (evt as Event & { detail?: unknown }).detail;
+				handler(detail ?? evt);
+			};
 			containerEl.addEventListener(event, domListener);
 			unsubs.push(() => containerEl.removeEventListener(event, domListener));
 
@@ -398,7 +514,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 			};
 		},
 
-		scrollPageIntoView(pageNumber: number) {
+		scrollPageIntoView(this: PdfViewAdapter, pageNumber: number) {
 			const pageEl = this.getPageElement(pageNumber);
 			const scrollContainer = getScrollContainer(containerEl, pageEl);
 			const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
@@ -437,7 +553,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				logDebug("pdf", "adapter.scrollPageIntoView: error in pdfViewer scroll", e);
 			}
 
-			const child = (view as any)?.viewer?.child || (view as any)?.child;
+			const child = candidate.viewer?.child || candidate.child;
 			try {
 				if (typeof child?.scrollToPage === "function") {
 					logDebug("pdf", `adapter.scrollPageIntoView: delegating to child.scrollToPage`);
@@ -475,13 +591,13 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 				"pdf",
 				`adapter.executeNativeFind: query="${query}", type="${type}", findPrevious=${findPrevious}, highlightAll=${highlightAll}`
 			);
-			const child = (view as any)?.viewer?.child || (view as any)?.child;
+			const child = candidate.viewer?.child || candidate.child;
 			const findController =
 				pdfViewer?.findController ||
 				child?.findController ||
 				child?.pdfViewer?.findController ||
-				(view as any)?.viewer?.findController ||
-				(view as any)?.findController;
+				candidate.viewer?.findController ||
+				candidate.findController;
 
 			if (findController) {
 				try {
@@ -508,7 +624,7 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 					});
 					return true;
 				} catch (e) {
-					console.error("Incremental Search: error dispatching to eventBus", e);
+					logDebug("pdf", "adapter.executeNativeFind: error dispatching to eventBus", e);
 				}
 			}
 
@@ -544,8 +660,9 @@ export function createPdfViewAdapter(view: any): PdfViewAdapter | null {
 					}
 					return true;
 				} catch (e) {
-					console.error(
-						"Incremental Search: error executing command on findController",
+					logDebug(
+						"pdf",
+						"adapter.executeNativeFind: error executing command on findController",
 						e
 					);
 				}

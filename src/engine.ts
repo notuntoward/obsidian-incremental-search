@@ -25,6 +25,11 @@ interface QueryChunk {
 	text: string;
 }
 
+interface FrontmatterPositionCache {
+	start: { offset: number };
+	end: { offset: number };
+}
+
 export function splitIntoChunks(query: string): QueryChunk[] {
 	const chunks: QueryChunk[] = [];
 	let i = 0;
@@ -322,8 +327,11 @@ function getHiddenRangesFromCache(
 			to: cache.frontmatterPosition.end.offset,
 		});
 	}
-	if (cache.frontmatter && (cache.frontmatter as any).position) {
-		const pos = (cache.frontmatter as any).position;
+	const frontmatterPosition = (
+		cache.frontmatter as { position?: FrontmatterPositionCache } | undefined
+	)?.position;
+	if (frontmatterPosition) {
+		const pos = frontmatterPosition;
 		if (!ranges.some((r) => r.from === pos.start.offset && r.to === pos.end.offset)) {
 			ranges.push({ from: pos.start.offset, to: pos.end.offset });
 		}
@@ -438,8 +446,8 @@ export function computeMatches(
 	].sort((a, b) => a.from - b.from);
 
 	const tableRanges: { from: number; to: number }[] = [];
-	if (linkCache && (linkCache as any).sections) {
-		for (const sec of (linkCache as any).sections) {
+	if (linkCache?.sections) {
+		for (const sec of linkCache.sections) {
 			if (sec.type === "table") {
 				tableRanges.push({ from: sec.position.start.offset, to: sec.position.end.offset });
 			}

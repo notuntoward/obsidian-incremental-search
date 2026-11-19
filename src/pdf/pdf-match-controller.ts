@@ -2,7 +2,13 @@ import { ownerWindow } from "commons/windows";
 import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode, shouldShowAllMatches } from "../types";
 import { findWildcardMatches, isCaseSensitive, isWithinMaxGap, parseWildcardQuery } from "../engine";
 import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition, PdfMatchPosition } from "./types";
-import { PdfViewAdapter } from "./pdf-view-adapter";
+import {
+	PdfViewAdapter,
+	type PdfFindControllerLike,
+	type PdfMatchLike,
+	type PdfSelectionLike,
+	type PdfViewerLike,
+} from "./pdf-view-adapter";
 import { clearAllPdfHighlights } from "./highlight-layer";
 import { clearSecondaryHighlights } from "./text-layer-highlighter";
 import { applyPdfColors, clearPdfColors } from "../utils/colors";
@@ -20,6 +26,54 @@ import {
 	NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR,
 	BoundingRectLike,
 } from "../utils/scroll";
+
+interface PdfScrollMatchParams {
+	element?: HTMLElement;
+	pageIndex?: number;
+	matchIndex?: number;
+	selected?: PdfSelectionLike;
+	getBoundingClientRect?: () => DOMRect;
+}
+
+interface PdfViewerScrollParams {
+	pageDiv?: HTMLElement;
+	div?: HTMLElement;
+	id?: number;
+	pageNumber?: number;
+}
+
+interface PdfRenderedEvent {
+	pageNumber?: number;
+	pageIndex?: number;
+}
+
+interface PdfFindMatchesEvent {
+	matchesCount?: {
+		current: number;
+		total: number;
+	};
+}
+
+function captureMethod<T extends (...args: never[]) => unknown>(
+	target: object,
+	key: string
+): T {
+	const value: unknown = Reflect.get(target, key);
+	if (typeof value !== "function") {
+		throw new TypeError(`Missing function ${key}`);
+	}
+	return value as T;
+}
+
+function isPdfMatchArray(value: unknown): value is PdfMatchLike[] {
+	return Array.isArray(value) && value.every(
+		(match): match is PdfMatchLike =>
+			typeof match === "object" &&
+			match !== null &&
+			typeof (match as PdfMatchLike).index === "number" &&
+			typeof (match as PdfMatchLike).length === "number"
+	);
+}
 
 /**
  * Processes a query string for PDF.js findController according to space-as-wildcard rules.
@@ -363,11 +417,20 @@ export class PdfMatchController {
 	unsubscribers: (() => void)[] = [];
 	onStateChange?: (state: PdfSessionState) => void;
 	originalElementScrollIntoView?: typeof HTMLElement.prototype.scrollIntoView;
-	originalMatch?: (query: any, pageContent: string, pageIndex: number) => any;
-	originalScrollMatchIntoView?: (params: any) => any;
-	originalViewerSetCurrentPageNumbers: Map<any, any> = new Map();
-	originalViewerScrollIntoViews: Map<any, any> = new Map();
-	originalViewerScrollPageIntoViews: Map<any, any> = new Map();
+	originalMatch?: (query: unknown, pageContent: string, pageIndex: number) => PdfMatchLike[] | undefined | null;
+	originalScrollMatchIntoView?: (params: unknown) => unknown;
+	originalViewerSetCurrentPageNumbers = new Map<
+		PdfViewerLike,
+		NonNullable<PdfViewerLike["_setCurrentPageNumber"]>
+	>();
+	originalViewerScrollIntoViews = new Map<
+		PdfViewerLike,
+		NonNullable<PdfViewerLike["_scrollIntoView"]>
+	>();
+	originalViewerScrollPageIntoViews = new Map<
+		PdfViewerLike,
+		NonNullable<PdfViewerLike["scrollPageIntoView"]>
+	>();
 	userHasManuallyScrolled = false;
 	matchScrollPending = false;
 	isInitialSearchPending = false;
@@ -396,7 +459,7 @@ export class PdfMatchController {
 	private matchScrollTimeout?: number;
 	private programmaticScrollTimeout?: number;
 	/** The patched find controller, used when the steering is re-asserted. */
-	private findControllerRef?: any;
+	private findControllerRef?: PdfFindControllerLike;
 	/** One-shot guard so the runtime context snapshot is logged once per query. */
 	private steeringContextLogged = false;
 	/**
@@ -601,7 +664,7 @@ export class PdfMatchController {
 	 * numbered page (e.g. plugin-injected decorations outside a page).
 	 */
 	getMatchPageNumber(fragment: HTMLElement): number {
-		const pageEl = fragment.closest?.(".page") as HTMLElement | null;
+		const pageEl = fragment.closest?.(".page");
 		const attr = pageEl?.getAttribute?.("data-page-number");
 		const pageNumber = attr ? parseInt(attr, 10) : NaN;
 		return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : -1;
@@ -749,7 +812,7 @@ export class PdfMatchController {
 			}
 
 			const pageMatchesArr =
-				(findController as any)?.pageMatches || (findController as any)?._pageMatches;
+				(findController)?.pageMatches || (findController)?._pageMatches;
 			if (Array.isArray(pageMatchesArr)) {
 				let countBefore = 0;
 				for (let p = 0; p < pageIndex && p < pageMatchesArr.length; p++) {
@@ -1017,15 +1080,25 @@ export class PdfMatchController {
 		const container = this.adapter.containerEl;
 
 		// 1. Intercept DOM scrollIntoView calls inside this PDF container
-		const originalElementScrollIntoView = HTMLElement.prototype.scrollIntoView;
+		const scrollIntoViewCandidate: unknown = Reflect.get(
+			HTMLElement.prototype,
+			"scrollIntoView"
+		);
+		const originalElementScrollIntoView =
+			typeof scrollIntoViewCandidate === "function"
+				? captureMethod<typeof HTMLElement.prototype.scrollIntoView>(
+					HTMLElement.prototype,
+					"scrollIntoView"
+				)
+				: undefined;
 		this.originalElementScrollIntoView = originalElementScrollIntoView;
-		const self = this;
+		const controller = { value: this };
 		HTMLElement.prototype.scrollIntoView = function (
 			this: HTMLElement,
 			arg?: boolean | ScrollIntoViewOptions
 		) {
 			if (container && container.contains(this) && this !== container) {
-				if (self.userHasManuallyScrolled || !self.matchScrollPending) {
+				if (controller.value.userHasManuallyScrolled || !controller.value.matchScrollPending) {
 					logDebug(
 						"pdf",
 						`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: user manually scrolled or no pending scroll, suppressing`
@@ -1035,7 +1108,7 @@ export class PdfMatchController {
 				const scrollContainer = getScrollContainer(container, this);
 				if (scrollContainer) {
 					const isMatchEl = isMatchElementCandidate(this);
-					const pageEl = this.closest?.(".page") as HTMLElement | null;
+					const pageEl = this.closest<HTMLElement>(".page");
 					const targetRect = isMatchEl
 						? (getCompoundMatchBoundingRect(container, pageEl) ?? this.getBoundingClientRect())
 						: this.getBoundingClientRect();
@@ -1044,8 +1117,8 @@ export class PdfMatchController {
 					const targetWidth = targetRect.width ?? (targetRect.right - targetRect.left);
 
 					if (targetHeight > 0 || targetWidth > 0) {
-						self.markProgrammaticScroll();
-						const forceCenter = Boolean(self.pendingTargetPage);
+						controller.value.markProgrammaticScroll();
+						const forceCenter = Boolean(controller.value.pendingTargetPage);
 						const scrolled = scrollTargetIntoViewIfNeeded(targetRect, scrollContainer, {
 							behavior: "smooth",
 							forceCenter,
@@ -1061,12 +1134,13 @@ export class PdfMatchController {
 								`scrollIntoView on <${this.tagName.toLowerCase()}.${this.className}>: off-screen, scrolled to center`
 							);
 						}
-						self.cancelPendingMatchScroll();
+						controller.value.cancelPendingMatchScroll();
 						return;
 					}
 				}
 			}
-			return originalElementScrollIntoView.call(this, arg);
+			originalElementScrollIntoView?.call(this, arg);
+			return;
 		};
 
 		// 2. Intercept PDF.js findController matching
@@ -1074,8 +1148,8 @@ export class PdfMatchController {
 		this.findControllerRef = findController;
 		const pdfViewer =
 			this.adapter.pdfViewer ||
-			(findController as any)?._pdfViewer ||
-			(findController as any)?.pdfViewer;
+			(findController)?._pdfViewer ||
+			(findController)?.pdfViewer;
 
 		logDebug("pdf", "PDF objects inspection:", {
 			hasFindController: Boolean(findController),
@@ -1089,7 +1163,7 @@ export class PdfMatchController {
 
 		if (findController && typeof findController.match === "function") {
 			this.originalMatch = findController.match;
-			findController.match = (query: any, pageContent: string, pageIndex: number) => {
+			findController.match = (query: unknown, pageContent: string, pageIndex: number) => {
 				if (this.usesPluginWildcardSearch()) {
 					const wildcardMatches = findPdfWildcardMatches(
 						pageContent,
@@ -1101,9 +1175,16 @@ export class PdfMatchController {
 					}));
 					return deduplicateRepeatedPdfMatches(pageContent, wildcardMatches);
 				}
+				const originalMatches: unknown = this.originalMatch
+					? Reflect.apply(this.originalMatch, findController, [
+						query,
+						pageContent,
+						pageIndex,
+					])
+					: undefined;
 				return deduplicateRepeatedPdfMatches(
 					pageContent,
-					this.originalMatch?.call(findController, query, pageContent, pageIndex)
+					isPdfMatchArray(originalMatches) ? originalMatches : undefined
 				);
 			};
 		}
@@ -1111,13 +1192,17 @@ export class PdfMatchController {
 		// 3. Intercept PDFFindController.scrollMatchIntoView
 		if (findController && typeof findController.scrollMatchIntoView === "function") {
 			this.originalScrollMatchIntoView = findController.scrollMatchIntoView;
-			findController.scrollMatchIntoView = (params: any) => {
+			findController.scrollMatchIntoView = (params: unknown) => {
+				const scrollParams =
+					typeof params === "number"
+						? params
+						: (params as PdfScrollMatchParams | undefined);
 				const paramsSummary = {
-					element: describeElement(params?.element),
-					pageIndex: params?.pageIndex,
-					matchIndex: params?.matchIndex,
-					selected: params?.selected
-						? { pageIdx: params.selected.pageIdx, matchIdx: params.selected.matchIdx }
+					element: describeElement(typeof scrollParams === "object" ? scrollParams?.element : null),
+					pageIndex: typeof scrollParams === "object" ? scrollParams?.pageIndex : scrollParams,
+					matchIndex: typeof scrollParams === "object" ? scrollParams?.matchIndex : undefined,
+					selected: typeof scrollParams === "object" && scrollParams?.selected
+						? { pageIdx: scrollParams.selected.pageIdx, matchIdx: scrollParams.selected.matchIdx }
 						: null,
 					keys: params && typeof params === "object" ? Object.keys(params).slice(0, 8) : [],
 				};
@@ -1147,16 +1232,20 @@ export class PdfMatchController {
 				const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
 				if (!scrollContainer || !containerRect) return;
 
-				let targetEl = (params?.element ??
-					(typeof params === "object" && typeof (params as any)?.getBoundingClientRect === "function" ? params : null)) as HTMLElement | undefined;
+				let targetEl = typeof scrollParams === "object"
+					? (scrollParams?.element ??
+						(typeof scrollParams?.getBoundingClientRect === "function"
+							? scrollParams as HTMLElement
+							: undefined))
+					: undefined;
 
 				let pageIndex =
-					typeof params === "number"
-						? params
-						: typeof params?.pageIndex === "number"
-							? params.pageIndex
-							: typeof params?.selected?.pageIdx === "number"
-								? params.selected.pageIdx
+					typeof scrollParams === "number"
+						? scrollParams
+						: typeof scrollParams?.pageIndex === "number"
+							? scrollParams.pageIndex
+							: typeof scrollParams?.selected?.pageIdx === "number"
+								? scrollParams.selected.pageIdx
 								: (this.adapter.getActiveFindMatchInfo?.()?.pageIndex ?? -1);
 
 				let pageNumber = pageIndex >= 0 ? pageIndex + 1 : -1;
@@ -1259,12 +1348,14 @@ export class PdfMatchController {
 		const candidateViewers = [
 			findController?._pdfViewer,
 			this.adapter.pdfViewer,
-			(findController as any)?._linkService?.pdfViewer,
-		].filter(Boolean);
+			findController?._linkService?.pdfViewer,
+		].filter((viewer): viewer is PdfViewerLike => Boolean(viewer));
 
 		for (const pv of candidateViewers) {
 			if (pv && typeof pv._setCurrentPageNumber === "function" && !this.originalViewerSetCurrentPageNumbers.has(pv)) {
-				const origSetCurrentPageNumber = pv._setCurrentPageNumber;
+				const origSetCurrentPageNumber = captureMethod<
+					NonNullable<PdfViewerLike["_setCurrentPageNumber"]>
+				>(pv, "_setCurrentPageNumber");
 				this.originalViewerSetCurrentPageNumbers.set(pv, origSetCurrentPageNumber);
 				pv._setCurrentPageNumber = (val: number, resetCurrentPageView = false) => {
 					if (resetCurrentPageView) {
@@ -1287,17 +1378,23 @@ export class PdfMatchController {
 			}
 
 			if (pv && typeof pv._scrollIntoView === "function" && !this.originalViewerScrollIntoViews.has(pv)) {
-				const origScrollIntoView = pv._scrollIntoView;
+				const origScrollIntoView = captureMethod<
+					NonNullable<PdfViewerLike["_scrollIntoView"]>
+				>(pv, "_scrollIntoView");
 				this.originalViewerScrollIntoViews.set(pv, origScrollIntoView);
-				pv._scrollIntoView = (params: any) => {
+				pv._scrollIntoView = (params: unknown) => {
+					const scrollParams = params as PdfViewerScrollParams | undefined;
 					if (this.userHasManuallyScrolled) {
 						logDebug("pdf", "pdfViewer._scrollIntoView: user has manually scrolled, skipping page jump");
 						return;
 					}
-					const pageDiv = params?.pageDiv || params?.div || (params?.id ? this.adapter.getPageElement(params.id) : null);
+					const pageDiv =
+						scrollParams?.pageDiv ||
+						scrollParams?.div ||
+						(scrollParams?.id ? this.adapter.getPageElement(scrollParams.id) : null);
 					const targetPageAttr = pageDiv?.getAttribute?.("data-page-number");
-					const targetPage = typeof params?.pageNumber === "number"
-						? params.pageNumber
+					const targetPage = typeof scrollParams?.pageNumber === "number"
+						? scrollParams.pageNumber
 						: targetPageAttr
 							? parseInt(targetPageAttr, 10)
 							: undefined;
@@ -1323,14 +1420,18 @@ export class PdfMatchController {
 			}
 
 			if (pv && typeof pv.scrollPageIntoView === "function" && !this.originalViewerScrollPageIntoViews.has(pv)) {
-				const origScrollPageIntoView = pv.scrollPageIntoView;
+				const origScrollPageIntoView = captureMethod<
+					NonNullable<PdfViewerLike["scrollPageIntoView"]>
+				>(pv, "scrollPageIntoView");
 				this.originalViewerScrollPageIntoViews.set(pv, origScrollPageIntoView);
-				pv.scrollPageIntoView = (params: any) => {
+				pv.scrollPageIntoView = (params: unknown) => {
 					if (this.userHasManuallyScrolled) {
 						logDebug("pdf", "pdfViewer.scrollPageIntoView: user has manually scrolled, skipping page jump");
 						return;
 					}
-					const pageNum = typeof params === "number" ? params : params?.pageNumber;
+					const pageNum = typeof params === "number"
+						? params
+						: (params as PdfViewerScrollParams | undefined)?.pageNumber;
 					if (this.shouldSuppressViewerPageJump(pageNum)) {
 						logDebug(
 							"pdf",
@@ -1398,7 +1499,7 @@ export class PdfMatchController {
 		};
 		this.ownerWin.addEventListener("scroll", globalScrollListener, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			this.ownerWin.removeEventListener("scroll", globalScrollListener, { capture: true } as any);
+			this.ownerWin.removeEventListener("scroll", globalScrollListener, { capture: true });
 		});
 
 		const onUserManualScroll = () => {
@@ -1425,8 +1526,8 @@ export class PdfMatchController {
 		this.ownerWin.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
 		container.addEventListener("scroll", onScrollCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			this.ownerWin.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
-			container.removeEventListener("scroll", onScrollCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("scroll", onScrollCapture, { capture: true });
+			container.removeEventListener("scroll", onScrollCapture, { capture: true });
 		});
 
 		const onWheelCapture = (evt: Event) => {
@@ -1439,8 +1540,8 @@ export class PdfMatchController {
 		this.ownerWin.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
 		container.addEventListener("wheel", onWheelCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			this.ownerWin.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
-			container.removeEventListener("wheel", onWheelCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("wheel", onWheelCapture, { capture: true });
+			container.removeEventListener("wheel", onWheelCapture, { capture: true });
 		});
 
 		const onPointerDownCapture = (evt: Event) => {
@@ -1453,8 +1554,8 @@ export class PdfMatchController {
 		this.ownerWin.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
 		container.addEventListener("pointerdown", onPointerDownCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			this.ownerWin.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
-			container.removeEventListener("pointerdown", onPointerDownCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("pointerdown", onPointerDownCapture, { capture: true });
+			container.removeEventListener("pointerdown", onPointerDownCapture, { capture: true });
 		});
 
 		const onTouchMoveCapture = (evt: Event) => {
@@ -1466,8 +1567,8 @@ export class PdfMatchController {
 		this.ownerWin.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
 		container.addEventListener("touchmove", onTouchMoveCapture, { capture: true, passive: true });
 		this.unsubscribers.push(() => {
-			this.ownerWin.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
-			container.removeEventListener("touchmove", onTouchMoveCapture, { capture: true } as any);
+			this.ownerWin.removeEventListener("touchmove", onTouchMoveCapture, { capture: true });
+			container.removeEventListener("touchmove", onTouchMoveCapture, { capture: true });
 		});
 
 		const refreshNativeFragmentJoins = () => {
@@ -1496,8 +1597,11 @@ export class PdfMatchController {
 		};
 
 		// Listen to PDF.js text layer rendering events (when DOM spans are mounted)
-		const unsubTextLayerRendered = this.adapter.on("textlayerrendered", (evt: any) => {
-			const pageNumber = evt?.pageNumber || evt?.pageIndex + 1;
+		const unsubTextLayerRendered = this.adapter.on("textlayerrendered", (evt: unknown) => {
+			const renderedEvent = evt as PdfRenderedEvent;
+			const pageNumber =
+				renderedEvent.pageNumber ??
+				(typeof renderedEvent.pageIndex === "number" ? renderedEvent.pageIndex + 1 : undefined);
 			if (this.shouldReassertInitialSteering()) {
 				driveSteeredView();
 			} else if (typeof pageNumber === "number") {
@@ -1550,9 +1654,10 @@ export class PdfMatchController {
 		// initial-search steering owns the selection the steered index must win,
 		// otherwise the counter snaps back to the match PDF.js picked before the
 		// steering ran.
-		const handleFindMatchesCount = (evt: any) => {
-			if (!evt?.matchesCount) return;
-			const { current, total } = evt.matchesCount;
+		const handleFindMatchesCount = (evt: unknown) => {
+			const matchesCount = (evt as PdfFindMatchesEvent).matchesCount;
+			if (!matchesCount) return;
+			const { current, total } = matchesCount;
 			this.state.activeIndex = resolveActiveIndex(current, total);
 			this.state.totalMatchesCount = total;
 			this.notifyStateChange();
@@ -1817,7 +1922,7 @@ export class PdfMatchController {
 	 */
 	private stepPastAccepted(direction: SearchDirection) {
 		const accepted = this.startAfter?.activeIndex;
-		const findController: any = this.findControllerRef ?? this.adapter.findController;
+		const findController = this.findControllerRef ?? this.adapter.findController;
 		const pageMatches = findController?.pageMatches ?? findController?._pageMatches;
 		const selected = this.adapter.getActiveFindMatchInfo?.();
 		if (typeof accepted !== "number") {
