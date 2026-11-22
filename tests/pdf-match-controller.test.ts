@@ -141,12 +141,12 @@ describe("findPdfWildcardMatches", () => {
 		);
 	});
 
-	it("rejects a token pair whose flexible gap exceeds the bound", () => {
-		const pageContent = `intervention ${"x".repeat(300)} modalities`;
-
-		const matches = findPdfWildcardMatches(pageContent, "intervention modalit", false);
-
-		expect(matches).toHaveLength(0);
+	it("uses the word limit rather than the old character limit", () => {
+		const longWord = `intervention ${"x".repeat(300)} modalities`;
+		expect(findPdfWildcardMatches(longWord, "intervention modalit", false)).toHaveLength(1);
+		const longGap = `intervention ${"word ".repeat(21)} modalities`;
+		expect(findPdfWildcardMatches(longGap, "intervention modalit", false)).toHaveLength(0);
+		expect(findPdfWildcardMatches(longGap, "intervention modalit", false, [], 21)).toHaveLength(1);
 	});
 
 	it("skips distant first tokens after PDF.js removes visual line boundaries", () => {
@@ -622,6 +622,20 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 
 		controller.destroy();
 		expect(findController.match).toBe(originalMatch);
+	});
+
+	it("applies the configured word limit in the native PDF find hook", async () => {
+		const text = "alpha one two omega alpha omega";
+		const findController = { match: vi.fn((_query: string, _page: string, _index: number) => []) };
+		const controller = new PdfMatchController({ ...nativeAdapter, findController }, {
+			...DEFAULT_SETTINGS,
+			maxGapWords: 1,
+		});
+		await controller.search("alpha omega");
+		expect(findController.match("alpha omega", text, 0)).toEqual([
+			{ index: text.lastIndexOf("alpha"), length: "alpha omega".length },
+		]);
+		controller.destroy();
 	});
 
 	it("loads page geometry before native wildcard matching and caches it for refinements", async () => {

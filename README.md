@@ -42,6 +42,8 @@ Type a few words and the plugin finds them nearby, in order — you don't need t
 
 For example, searching `the KAN` matches text like *"the original KAN"* — the words don't need to be adjacent.
 
+By default, each wildcard gap in Markdown and PDFs can contain up to 20 complete intervening words. Change **Maximum intervening words** in settings; `0` allows no intervening words. Partial-word matches such as `figure 2` matching `Figures 2` remain supported. Letters, combining marks, and numbers form words; punctuation separates them. The limit reduces distant matches but does not prevent every unrelated match.
+
 **Search from active selection:** If text is selected in the note or PDF you are searching when you start a search, the plugin immediately uses that selection as the search query and jumps to the next occurrence (for forward search) or previous occurrence (for backward search), excluding the active selection itself. Otherwise search starts empty; a selection in another note, pane, or window is ignored.
 
 **Where a PDF search starts:** A PDF has no cursor, so the last match you accepted in that PDF stands in for one: while it is still on screen, a new search continues after it (forward) or before it (backward). Otherwise, a forward search starts at the top-most visible match and a backward search at the bottom-most. Cancelling a search does not change the starting point.
@@ -58,10 +60,10 @@ To search for a literal quote character inside a quoted phrase, escape it with a
 
 **Case sensitivity is automatic.** All-lowercase searches ignore case (`react` matches `React`); typing any capital letter makes the search case-sensitive (`React` matches only `React`).
 
-**Extra spaces are literal.** One space between words is a flexible gap; two or more spaces require one fewer literal spaces in the text.
+**Extra spaces are literal.** One space between terms is a flexible gap. Two spaces join the adjacent terms into a literal phrase with one space: `figure  2` matches `figure 2`, but not `figures 2` or `figure something 2`. The phrase is still a substring, not a whole-word match, so it can match `figure 20`. Three or more spaces require one fewer literal spaces in the text.
 
 > [!TIP]
-> In PDFs, wildcard gaps are limited to 256 characters. Matches also avoid large jumps between unrelated page regions, while allowing normal line wraps and recognizable column transitions. PDF text geometry is cached during a search session; the first wildcard search can take longer for large documents.
+> In PDFs, matches also avoid large jumps between unrelated page regions, while allowing normal line wraps and recognizable column transitions. Adjacent highlight fragments, including ligatures, are joined where appropriate. PDF text geometry is cached during a search session; the first wildcard search can take longer for large documents.
 
 ## Commands & keyboard shortcuts
 
@@ -135,6 +137,7 @@ Descriptions span the row beneath the label and control instead of wrapping besi
 
 **Matching**
 - *Space-as-wildcard matching* — toggle wildcard gaps on spaces vs. plain substring search.
+- *Maximum intervening words* — limit complete words in each wildcard gap for Markdown and PDFs (default 20; `0` permits none).
 - *Match only visible part of links* — searches Markdown link labels and wikilink aliases, never their hidden destinations or link titles (default on). Bare wikilinks such as `[[note#heading]]` remain searchable because their targets are displayed. Image/embed source syntax and reference definitions are excluded; visibly written URLs and literal link examples inside code remain searchable. Filtering uses the current editor text, including unsaved edits, and does not depend on Obsidian caching external URLs. Turning this off makes link destinations searchable again.
 
 **Navigation & exit**

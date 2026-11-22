@@ -23,6 +23,7 @@ export interface SearchQueryOptions {
 	caseSensitive?: boolean;
 	wholeWord?: boolean;
 	maxGapChars?: number;
+	maxGapWords?: number;
 }
 
 export interface CompiledQuery {
@@ -31,6 +32,7 @@ export interface CompiledQuery {
 	caseSensitive: boolean;
 	wholeWord: boolean;
 	maxGapChars?: number;
+	maxGapWords?: number;
 	tokens?: string[];
 	needle?: string;
 }
@@ -51,6 +53,7 @@ export type SearchInterface = "compact" | "obsidian";
 export interface IncrementalSearchSettings {
 	lastQuery: string;
 	spaceAsWildcard: boolean;
+	maxGapWords: number;
 	searchInterface: SearchInterface;
 	matchOnlyVisibleLinks: boolean;
 	allMatchesDisplayMode: AllMatchesDisplayMode;
@@ -66,6 +69,7 @@ export interface IncrementalSearchSettings {
 export const DEFAULT_SETTINGS: IncrementalSearchSettings = {
 	lastQuery: "",
 	spaceAsWildcard: true,
+	maxGapWords: 20,
 	searchInterface: "compact",
 	matchOnlyVisibleLinks: true,
 	allMatchesDisplayMode: "on-demand",

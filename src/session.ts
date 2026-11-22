@@ -898,7 +898,8 @@ export function recomputeQuery(
 	linkCache?: CachedMetadata,
 	isTyping = false,
 	allMatchesDisplayMode: AllMatchesDisplayMode = "on-demand",
-	isDemandPeekActive?: boolean
+	isDemandPeekActive?: boolean,
+	maxGapWords?: number
 ) {
 	const session = view.state.field(searchSessionField, false);
 	if (!session) return;
@@ -908,7 +909,8 @@ export function recomputeQuery(
 		query,
 		spaceAsWildcard,
 		matchOnlyVisibleLinks,
-		linkCache
+		linkCache,
+		{ maxGapWords }
 	);
 	const anchor = session.originSelection.anchor;
 	const head = session.originSelection.head;

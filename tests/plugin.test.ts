@@ -811,6 +811,28 @@ describe("IncrementalSearchPlugin Hotkey Routing & Lifecycle", () => {
     expect((plugin.settings as any).fuzzyMode).toBeUndefined();
   });
 
+  it("defaults, persists, and validates the wildcard word limit", async () => {
+    let tab: any;
+    plugin.addSettingTab = (value: any) => { tab = value; };
+    await plugin.onload();
+    expect(plugin.settings.maxGapWords).toBe(20);
+    const row = tab.getSettingDefinitions().flatMap((group: any) => group.items)
+      .find((item: any) => item.control?.key === "maxGapWords");
+    expect(row.control).toMatchObject({ type: "number", min: 0, step: 1 });
+    const save = vi.fn();
+    plugin.saveData = save;
+    await tab.setControlValue("maxGapWords", 0);
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ maxGapWords: 0 }));
+    await tab.setControlValue("maxGapWords", -1);
+    expect(plugin.settings.maxGapWords).toBe(0);
+    plugin.loadData = async () => ({ maxGapWords: 7 });
+    await plugin.loadSettings();
+    expect(plugin.settings.maxGapWords).toBe(7);
+    plugin.loadData = async () => ({ maxGapWords: -1 });
+    await plugin.loadSettings();
+    expect(plugin.settings.maxGapWords).toBe(20);
+  });
+
   it("exposes secondary highlight controls as declarative definitions", async () => {
     let tab: any = null;
     plugin.addSettingTab = (t: any) => {

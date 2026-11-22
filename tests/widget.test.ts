@@ -159,6 +159,14 @@ describe("widget: counter & lifecycle", () => {
     expect(sessionState?.query).toBe("word");
   });
 
+  it("uses the configured word limit when typing a Markdown query", () => {
+    const text = "alpha one two omega alpha omega";
+    mockView.state.doc = EditorState.create({ doc: text }).doc;
+    mockPlugin.settings.maxGapWords = 1;
+    createMarkdownSessionController(mockView, mockPlugin).onInput("alpha omega");
+    expect(sessionState?.matches.map((match) => text.slice(match.from, match.to))).toEqual(["alpha omega"]);
+  });
+
   it("renders the Obsidian-style bar with ordered accessible controls and the existing counter", () => {
     mockPlugin.settings.searchInterface = "obsidian";
     renderWidget(mockView, mockPlugin, "word", "forward");

@@ -1,6 +1,6 @@
 import { ownerWindow } from "commons/windows";
-import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode, shouldShowAllMatches } from "../types";
-import { findWildcardMatches, isCaseSensitive, isWithinMaxGap, parseWildcardQuery } from "../engine";
+import { SearchDirection, IncrementalSearchSettings, AllMatchesDisplayMode, DEFAULT_SETTINGS, shouldShowAllMatches } from "../types";
+import { findWildcardMatches, isCaseSensitive, parseWildcardQuery } from "../engine";
 import { PdfSessionState, PdfViewportAnchor, PdfScrollPosition, PdfMatchPosition } from "./types";
 import {
 	PdfViewAdapter,
@@ -103,32 +103,20 @@ export function processPdfQuery(
 }
 
 /**
- * Bound on the flexible gap between consecutive wildcard tokens in PDF page text.
- *
- * PDF.js flattens every end-of-line marker to a space before it hands page text to
- * the find controller, so the page arrives as one unbroken string with no line
- * structure. Without a bound, an unquoted query such as "d factor" could pair the
- * first "d" on the page with the last "factor" and return a single match spanning
- * the whole page. Bounding the gap keeps a match to a local neighborhood while
- * still allowing it to span visual lines.
- */
-export const PDF_WILDCARD_MAX_GAP_CHARS = 256;
-
-/**
  * Applies markdown's space-as-wildcard semantics to PDF.js page text while
  * preserving the page-relative offsets expected by the native find controller.
  *
  * Token sequencing and non-greedy tightening come from the shared Layer 1 kernel
  * (`findWildcardMatches`), so PDF and Markdown match identically. Page text has
  * already had every end-of-line marker normalized to a space by PDF.js, so a match
- * may span visual lines; only the flexible gap between its tokens is bounded, via
- * the same `isWithinMaxGap` rule the kernel applies for `maxGapChars`.
+ * may span visual lines; the shared word limit bounds each flexible gap.
  */
 export function findPdfWildcardMatches(
 	pageContent: string,
 	query: string,
 	caseSensitive: boolean,
-	boundaries: number[] = []
+	boundaries: number[] = [],
+	maxGapWords = DEFAULT_SETTINGS.maxGapWords
 ) {
 	const tokens = parseWildcardQuery(query, caseSensitive);
 	if (tokens.length === 0) return [];
@@ -137,11 +125,9 @@ export function findPdfWildcardMatches(
 		const segment = pageContent.slice(start, end);
 		const segmentStart = start;
 		start = end;
-		return findWildcardMatches(segment, tokens, segmentStart, caseSensitive);
+		return findWildcardMatches(segment, tokens, segmentStart, caseSensitive, maxGapWords);
 	});
-	return matches.filter((match) =>
-		isWithinMaxGap(match.chars, PDF_WILDCARD_MAX_GAP_CHARS)
-	);
+	return matches;
 }
 
 const MAX_PDF_MATCH_REPEAT_DISTANCE = 512;
@@ -1298,7 +1284,8 @@ export class PdfMatchController {
 						pageContent,
 						matchingQuery,
 						isCaseSensitive(matchingQuery),
-						boundaries ?? []
+						boundaries ?? [],
+						this.settings.maxGapWords
 					).map((match) => ({
 						index: match.from,
 						length: match.to - match.from,

@@ -124,6 +124,13 @@ describe("session: recomputeQuery directional cursor placement", () => {
     expect(sessionState?.activeIndex).toBe(1);
   });
 
+  it("applies the configured word limit to Markdown searches", () => {
+    const view = createEditorView("alpha one two omega alpha omega", 0, "forward");
+    recomputeQuery(view, "alpha omega", "forward", true, true, undefined, false, "on-demand", undefined, 1);
+    expect(sessionState?.matches).toHaveLength(1);
+    expect(sessionState?.matches[0].from).toBe(20);
+  });
+
   it.each(["forward", "backward"] as const)("navigates only visible link matches without metadata (%s)", (direction) => {
     const text = "[theory](https://example.com/theory) [[theory|label]] [[theory]]";
     const view = createEditorView(text, text.indexOf("https"), direction);

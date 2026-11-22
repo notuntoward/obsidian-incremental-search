@@ -75,7 +75,7 @@ export function splitIntoChunks(query: string): QueryChunk[] {
  * Emacs space-as-wildcard rules and composable double-quoted literal segments:
  * - Double-quoted segments ("...") are matched literally with all internal spaces preserved.
  * - Outside quotes:
- *   - 1 space: Wildcard separator (unbounded gap between tokens)
+ *   - 1 space: Wildcard separator (optionally bounded gap between tokens)
  *   - 2 spaces: Exactly 1 literal space required
  *   - 3 spaces: Exactly 2 literal spaces required
  *   - N spaces: Exactly N - 1 literal spaces required
@@ -157,6 +157,7 @@ export function compileQuery(
 	const caseSensitive = options.caseSensitive ?? isCaseSensitive(query);
 	const wholeWord = Boolean(options.wholeWord);
 	const maxGapChars = options.maxGapChars;
+	const maxGapWords = options.maxGapWords;
 
 	const useWildcard = options.spaceAsWildcard ?? true;
 	if (useWildcard) {
@@ -168,6 +169,7 @@ export function compileQuery(
 			caseSensitive,
 			wholeWord,
 			maxGapChars,
+			maxGapWords,
 			tokens,
 		};
 	}
@@ -178,6 +180,7 @@ export function compileQuery(
 		caseSensitive,
 		wholeWord,
 		maxGapChars,
+		maxGapWords,
 		needle: caseSensitive ? query : query.toLowerCase(),
 	};
 }
@@ -191,7 +194,8 @@ export function findWildcardMatches(
 	text: string,
 	queryOrTokens: string | string[],
 	offset = 0,
-	caseSensitive = false
+	caseSensitive = false,
+	maxGapWords?: number
 ): MatchRange[] {
 	if (!text || text.length === 0) return [];
 	const haystack = caseSensitive ? text : text.toLowerCase();
@@ -247,6 +251,11 @@ export function findWildcardMatches(
 			to: offset + pos + tokens[idx].length,
 		}));
 
+		if (maxGapWords !== undefined && !isWithinMaxWordGap(text, chars, offset, maxGapWords)) {
+			searchStart = firstTokenIdx + 1;
+			continue;
+		}
+
 		results.push({
 			from: offset + firstTokenIdx,
 			to: offset + lastTokenEnd,
@@ -258,6 +267,28 @@ export function findWildcardMatches(
 	}
 
 	return results;
+}
+
+function isWithinMaxWordGap(
+	text: string,
+	chars: { from: number; to: number }[],
+	offset: number,
+	maxGapWords: number
+): boolean {
+	for (let i = 0; i < chars.length - 1; i++) {
+		const start = chars[i].to - offset;
+		const end = chars[i + 1].from - offset;
+		const gap = text.slice(start, end);
+		let count = 0;
+		for (const word of gap.matchAll(/[\p{L}\p{M}\p{N}]+/gu)) {
+			const wordStart = word.index;
+			const wordEnd = wordStart + word[0].length;
+			if (wordStart === 0 && /[\p{L}\p{M}\p{N}]$/u.test(text.slice(Math.max(0, start - 2), start))) continue;
+			if (wordEnd === gap.length && /^[\p{L}\p{M}\p{N}]/u.test(text.slice(end, end + 2))) continue;
+			if (++count > maxGapWords) return false;
+		}
+	}
+	return true;
 }
 
 /**
@@ -281,7 +312,7 @@ export function findMatchesInText(
 	let rawMatches: MatchRange[] = [];
 
 	if (compiled.type === "wildcard" && compiled.tokens) {
-		rawMatches = findWildcardMatches(text, compiled.tokens, offset, compiled.caseSensitive);
+		rawMatches = findWildcardMatches(text, compiled.tokens, offset, compiled.caseSensitive, compiled.maxGapWords);
 	} else if (compiled.type === "literal" && compiled.needle) {
 		const haystack = compiled.caseSensitive ? text : text.toLowerCase();
 		const needle = compiled.needle;

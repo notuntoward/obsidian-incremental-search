@@ -100,7 +100,9 @@ export function createMarkdownSessionController(
 				plugin.settings.matchOnlyVisibleLinks,
 				linkCache,
 				true, // isTyping
-				plugin.settings.allMatchesDisplayMode
+				plugin.settings.allMatchesDisplayMode,
+				undefined,
+				plugin.settings.maxGapWords
 			);
 		},
 		advance(direction: SearchDirection) {

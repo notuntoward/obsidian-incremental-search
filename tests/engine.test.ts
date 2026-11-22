@@ -689,6 +689,34 @@ describe("engine: compileQuery", () => {
 });
 
 describe("engine: findMatchesInText", () => {
+  it("limits complete intervening words in each wildcard gap", () => {
+    const search = (text: string, query = "alpha omega") =>
+      findMatchesInText(text, query, { maxGapWords: 20 });
+    expect(search(`alpha ${"word ".repeat(20)}omega`)).toHaveLength(1);
+    expect(search(`alpha ${"word ".repeat(21)}omega`)).toEqual([]);
+    expect(search(`alpha ${"word ".repeat(20)}beta ${"word ".repeat(20)}omega`, "alpha beta omega")).toHaveLength(1);
+    expect(search(`alpha beta ${"word ".repeat(21)}omega`, "alpha beta omega")).toEqual([]);
+  });
+
+  it("counts Unicode words and numbers but excludes partial endpoint words", () => {
+    const search = (text: string, limit: number) =>
+      findMatchesInText(text, "figure 2", { maxGapWords: limit });
+    expect(search("Figures 32", 0)).toHaveLength(1);
+    expect(search("Figures — café, ７! 32", 2)).toHaveLength(1);
+    expect(search("Figures — café, ７! 32", 1)).toEqual([]);
+    expect(search("Figures abc-def 32", 1)).toEqual([]);
+  });
+
+  it("finds later valid matches after a rejected candidate", () => {
+    const text = `alpha ${"word ".repeat(21)}omega alpha omega`;
+    const matches = findMatchesInText(text, "alpha omega", { maxGapWords: 20 });
+    expect(matches.map((match) => text.slice(match.from, match.to))).toEqual(["alpha omega"]);
+  });
+
+  it("does not apply the word limit to literal searches", () => {
+    expect(findMatchesInText("alpha beta", "alpha beta", { spaceAsWildcard: false, maxGapWords: 0 })).toHaveLength(1);
+  });
+
   it("finds literal matches with whole-word post-filtering", () => {
     const text = "cat concatenate catalog cat";
     const allMatches = findMatchesInText(text, "cat", { spaceAsWildcard: false, wholeWord: false });

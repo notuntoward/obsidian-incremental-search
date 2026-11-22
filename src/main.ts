@@ -1,7 +1,7 @@
 import { focusLeafAndWindow, getActiveLeafInFocusedWindow, isLeafDetached } from "commons/workspace";
 import { forEachWindow } from "commons/windows";
 import { dispatchSearchNavigation, searchRepeatAction } from "commons/search";
-import { Plugin, PluginSettingTab, App, Editor, Setting, View, type SettingDefinitionItem, type WorkspaceLeaf } from "obsidian";
+import { Plugin, PluginSettingTab, App, Editor, Notice, Setting, View, type SettingDefinitionItem, type WorkspaceLeaf } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import {
 	IncrementalSearchSettings,
@@ -517,7 +517,9 @@ export default class IncrementalSearchPlugin extends Plugin {
 					this.settings.matchOnlyVisibleLinks,
 					linkCache,
 					false,
-					this.settings.allMatchesDisplayMode
+					this.settings.allMatchesDisplayMode,
+					undefined,
+					this.settings.maxGapWords
 				);
 				const input = getActiveWidget()?.querySelector<HTMLInputElement>(".incsearch-input");
 				if (input) {
@@ -576,7 +578,9 @@ export default class IncrementalSearchPlugin extends Plugin {
 				this.settings.matchOnlyVisibleLinks,
 				linkCache,
 				false,
-				this.settings.allMatchesDisplayMode
+				this.settings.allMatchesDisplayMode,
+				undefined,
+				this.settings.maxGapWords
 			);
 		}
 		logDebug("main", "invoke: rendering floating search widget");
@@ -609,6 +613,11 @@ export default class IncrementalSearchPlugin extends Plugin {
 		}
 		delete loaded.usePopupModal;
 
+		if (loaded.maxGapWords !== undefined &&
+			(!Number.isSafeInteger(loaded.maxGapWords) || loaded.maxGapWords < 0)) {
+			new Notice("Invalid wildcard word limit; restored the default of 20.");
+			delete loaded.maxGapWords;
+		}
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 		setDebugLogging(this.settings.debugLogging);
 		await this.saveSettings();
@@ -677,6 +686,12 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		if (key === PROMINENCE_PERCENT_KEY) {
 			this.plugin.settings.secondaryProminence = Number(value) / 100;
+		} else if (key === "maxGapWords") {
+			if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+				new Notice("The wildcard word limit must be a non-negative whole number.");
+				return;
+			}
+			this.plugin.settings.maxGapWords = value;
 		} else {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
 		}
@@ -722,6 +737,17 @@ class IncrementalSearchSettingTab extends PluginSettingTab {
 						control: {
 							type: "toggle",
 							key: "spaceAsWildcard",
+						},
+					},
+					{
+						name: "Maximum intervening words",
+						desc: "Maximum complete words between each pair of wildcard search terms in Markdown and PDFs. Zero allows no intervening words.",
+						control: {
+							type: "number",
+							key: "maxGapWords",
+							min: 0,
+							step: 1,
+							defaultValue: DEFAULT_SETTINGS.maxGapWords,
 						},
 					},
 					{

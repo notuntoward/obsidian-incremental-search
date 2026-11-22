@@ -186,5 +186,7 @@ describe("visible link wildcard matching", () => {
     const state = EditorState.create({ doc });
     expect(computeMatches(state, "alpha omega", true, true, undefined, { maxGapChars: 1 })).toHaveLength(1);
     expect(computeMatches(state, "alpha omega", true, false, undefined, { maxGapChars: 1 })).toEqual([]);
+    expect(computeMatches(state, "alpha omega", true, true, undefined, { maxGapWords: 0 })).toHaveLength(1);
+    expect(computeMatches(state, "alpha omega", true, false, undefined, { maxGapWords: 0 })).toEqual([]);
   });
 });
