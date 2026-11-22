@@ -275,6 +275,82 @@ describe("Bug 2: unquoted space-as-wildcard must use the markdown matching kerne
 });
 
 describe("decorateNativeSelectedHighlightFragments", () => {
+	it("unifies adjacent ligature fragments for current and secondary matches without joining separate matches", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span id="a" class="highlight begin selected">signi</span>
+			<span id="b" class="highlight middle selected">ﬁ</span>
+			<span id="c" class="highlight end selected">cance</span>
+			<span id="d" class="highlight begin">signi</span>
+			<span id="e" class="highlight middle">ﬁ</span>
+			<span id="f" class="highlight end">cance</span>
+			<span id="other" class="highlight">other</span>
+		</div>`;
+		const layer = container.querySelector<HTMLElement>(".textLayer")!;
+		Object.defineProperties(layer, {
+			offsetWidth: { value: 500 },
+			offsetHeight: { value: 300 },
+		});
+		layer.getBoundingClientRect = () => ({
+			left: 10, top: 20, right: 1010, bottom: 620, width: 1000, height: 600,
+		} as DOMRect);
+		const bounds = [
+			[100, 160, 100, 132], [158, 175, 103, 132], [170, 230, 100, 132],
+			[100, 160, 200, 232], [158, 175, 203, 232], [170, 230, 200, 232],
+			[231, 270, 200, 232],
+		];
+		const fragments = Array.from(layer.querySelectorAll<HTMLElement>(".highlight"));
+		fragments.forEach((fragment, i) => {
+			const [left, right, top, bottom] = bounds[i];
+			fragment.getBoundingClientRect = () => ({
+				left, right, top, bottom, width: right - left, height: bottom - top,
+			} as DOMRect);
+		});
+
+		decorateNativeSelectedHighlightFragments(container, "significance");
+
+		const overlays = layer.querySelectorAll<HTMLElement>(".incsearch-pdf-fragment-overlay");
+		expect(overlays).toHaveLength(2);
+		expect(overlays[0].classList.contains("is-current")).toBe(true);
+		expect(overlays[0].style.cssText).toContain("left: 45px");
+		expect(overlays[0].style.cssText).toContain("top: 40px");
+		expect(overlays[0].style.cssText).toContain("width: 65px");
+		expect(overlays[0].style.cssText).toContain("height: 16px");
+		expect(overlays[1].classList.contains("is-secondary")).toBe(true);
+		expect(fragments.slice(0, 6).every((el) => el.classList.contains("incsearch-pdf-fragment-covered"))).toBe(true);
+		expect(fragments[6].classList.contains("incsearch-pdf-fragment-covered")).toBe(false);
+		decorateNativeSelectedHighlightFragments(container, "significance");
+		expect(layer.querySelectorAll(".incsearch-pdf-fragment-overlay")).toHaveLength(2);
+	});
+
+	it("keeps line-wrapped fragments and unrelated nearby matches separate", () => {
+		const container = document.createElement("div");
+		container.innerHTML = `<div class="textLayer">
+			<span class="highlight begin">first</span><span class="highlight end">second</span>
+			<span class="highlight begin">third</span><span class="highlight end">fourth</span>
+		</div>`;
+		const layer = container.querySelector<HTMLElement>(".textLayer")!;
+		Object.defineProperties(layer, {
+			offsetWidth: { value: 500 },
+			offsetHeight: { value: 300 },
+		});
+		layer.getBoundingClientRect = () => ({
+			left: 0, top: 0, right: 500, bottom: 300, width: 500, height: 300,
+		} as DOMRect);
+		const bounds = [[100, 150, 10, 30], [10, 60, 35, 55], [61, 110, 35, 55], [300, 350, 35, 55]];
+		layer.querySelectorAll<HTMLElement>(".highlight").forEach((fragment, i) => {
+			const [left, right, top, bottom] = bounds[i];
+			fragment.getBoundingClientRect = () => ({
+				left, right, top, bottom, width: right - left, height: bottom - top,
+			} as DOMRect);
+		});
+
+		decorateNativeSelectedHighlightFragments(container);
+
+		expect(layer.querySelectorAll(".incsearch-pdf-fragment-overlay")).toHaveLength(0);
+		expect(layer.querySelectorAll(".incsearch-pdf-fragment-covered")).toHaveLength(0);
+	});
+
 	it("joins touching same-line fragments but preserves real line breaks", () => {
 		const container = document.createElement("div");
 		container.innerHTML = `<div class="textLayer">
@@ -440,6 +516,40 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 				return true;
 			},
 		};
+	});
+
+	it("updates joined highlight styling when steering selects fragments in separate text spans", () => {
+		containerEl.innerHTML = `<div class="textLayer">
+			<span><span class="highlight begin">signi</span></span>
+			<span class="highlight middle">ﬁ</span>
+			<span><span class="highlight end">cance</span></span>
+		</div>`;
+		const layer = containerEl.querySelector<HTMLElement>(".textLayer")!;
+		Object.defineProperties(layer, {
+			offsetWidth: { value: 500 },
+			offsetHeight: { value: 300 },
+		});
+		layer.getBoundingClientRect = () => ({
+			left: 0, top: 0, right: 500, bottom: 300, width: 500, height: 300,
+		} as DOMRect);
+		const bounds = [[100, 160, 10, 42], [158, 175, 13, 42], [170, 230, 10, 42]];
+		const fragments = Array.from(layer.querySelectorAll<HTMLElement>(".highlight"));
+		fragments.forEach((fragment, i) => {
+			const [left, right, top, bottom] = bounds[i];
+			fragment.getBoundingClientRect = () => ({
+				left, right, top, bottom, width: right - left, height: bottom - top,
+			} as DOMRect);
+		});
+		const controller = new PdfMatchController(nativeAdapter, DEFAULT_SETTINGS);
+		decorateNativeSelectedHighlightFragments(containerEl);
+		expect(layer.querySelector(".incsearch-pdf-fragment-overlay.is-secondary")).not.toBeNull();
+
+		controller.selectAndScrollMatch(fragments[0], 1);
+
+		expect(fragments.every((fragment) => fragment.classList.contains("selected"))).toBe(true);
+		expect(layer.querySelector(".incsearch-pdf-fragment-overlay.is-current")).not.toBeNull();
+		expect(layer.querySelector(".incsearch-pdf-fragment-overlay.is-secondary")).toBeNull();
+		controller.destroy();
 	});
 
 	it("delegates literal search to native find and applies CSS class in on-demand mode", async () => {

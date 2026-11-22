@@ -7,10 +7,12 @@ describe("PDF Highlight Layer", () => {
 		const page = document.createElement("div");
 		page.className = "page incsearch-pdf-native-envelope-active";
 		const selected = document.createElement("span");
-		selected.className = "highlight selected";
+		selected.className = "highlight selected incsearch-pdf-fragment-covered";
 		const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 		overlay.classList.add("incsearch-pdf-native-current-overlay");
-		page.append(selected, overlay);
+		const fragmentOverlay = document.createElement("div");
+		fragmentOverlay.className = "incsearch-pdf-fragment-overlay";
+		page.append(selected, overlay, fragmentOverlay);
 		container.appendChild(page);
 		const deleteHighlight = vi.fn();
 		Object.defineProperty(window, "CSS", {
@@ -21,6 +23,8 @@ describe("PDF Highlight Layer", () => {
 		clearAllPdfHighlights(container);
 
 		expect(container.querySelector(".incsearch-pdf-native-current-overlay")).toBeNull();
+		expect(container.querySelector(".incsearch-pdf-fragment-overlay")).toBeNull();
+		expect(selected.classList.contains("incsearch-pdf-fragment-covered")).toBe(false);
 		expect(container.querySelector(".highlight.selected")).toBeNull();
 		expect(page.classList.contains("incsearch-pdf-native-envelope-active")).toBe(false);
 		expect(deleteHighlight).toHaveBeenCalledWith("incsearch-pdf-current-token");

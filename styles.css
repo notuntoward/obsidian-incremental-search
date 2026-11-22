@@ -479,6 +479,36 @@ mark.incsearch-pdf-secondary,
   border-radius: var(--radius-s, 4px) !important;
 }
 
+.incsearch-active-pdf .textLayer .highlight.incsearch-pdf-fragment-covered,
+.incsearch-active-pdf .text-layer .highlight.incsearch-pdf-fragment-covered {
+  background-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.incsearch-active-pdf .incsearch-pdf-fragment-overlay {
+  position: absolute;
+  transform: none !important;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: var(--radius-s, 2px);
+}
+
+.incsearch-active-pdf .incsearch-pdf-fragment-overlay.is-current {
+  outline: 2px solid var(--incsearch-current-outline-resolved, var(--interactive-accent));
+  outline-offset: 1px;
+  border-radius: var(--radius-s, 4px);
+}
+
+.incsearch-active-pdf .incsearch-pdf-fragment-overlay.is-secondary {
+  background-color: var(--incsearch-secondary-fill);
+  box-shadow: 0 0 0 1px var(--incsearch-secondary-edge, transparent);
+}
+
+.incsearch-pdf-hide-other-matches .incsearch-pdf-fragment-overlay.is-secondary {
+  opacity: 0;
+}
+
 ::highlight(incsearch-pdf-current-token) {
   background-color: var(--incsearch-pdf-secondary-fill, var(--incsearch-secondary-fill));
 }

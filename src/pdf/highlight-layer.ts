@@ -4,6 +4,10 @@ import { NATIVE_CURRENT_MATCH_SELECTOR } from "../utils/scroll";
  * Removes all native PDF.js highlight decorations from the entire viewer container.
  */
 export function clearAllPdfHighlights(containerEl: HTMLElement) {
+	containerEl.querySelectorAll(".incsearch-pdf-fragment-overlay").forEach((el) => el.remove());
+	containerEl.querySelectorAll(".incsearch-pdf-fragment-covered").forEach((el) => {
+		el.classList.remove("incsearch-pdf-fragment-covered");
+	});
 	containerEl
 		.querySelectorAll(".incsearch-pdf-native-current-overlay")
 		.forEach((el) => el.remove());

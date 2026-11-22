@@ -25,6 +25,7 @@ import {
 	ALL_MATCHES_SELECTOR,
 	ALL_MATCH_HEADS_SELECTOR,
 	NATIVE_CURRENT_MATCH_IN_TEXT_LAYER_SELECTOR,
+	TEXT_LAYER_SCOPE_SELECTORS,
 	BoundingRectLike,
 } from "../utils/scroll";
 
@@ -326,6 +327,100 @@ function highlightNativeSelectedTokens(doc: Document, fragments: HTMLElement[], 
 	}
 }
 
+function decorateJoinedNativeFragments(containerEl: HTMLElement) {
+	const layers = Array.from(containerEl.querySelectorAll<HTMLElement>(TEXT_LAYER_SCOPE_SELECTORS.join(", ")));
+	for (const layer of layers) {
+		layer.querySelectorAll(".incsearch-pdf-fragment-overlay").forEach((el) => el.remove());
+		const fragments = Array.from(layer.querySelectorAll<HTMLElement>(".highlight"));
+		fragments.forEach((fragment) => fragment.classList.remove("incsearch-pdf-fragment-covered"));
+
+		const layerRect = layer.getBoundingClientRect();
+		if (!layer.offsetWidth || !layer.offsetHeight || !layerRect.width || !layerRect.height) continue;
+		const scaleX = layerRect.width / layer.offsetWidth;
+		const scaleY = layerRect.height / layer.offsetHeight;
+		const view = layer.ownerDocument.defaultView;
+		if (!view) continue;
+
+		const aligned = new Map<HTMLElement, boolean>();
+		const isAxisAligned = (element: HTMLElement) => {
+			for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+				const cached = aligned.get(node);
+				if (cached === false) return false;
+				if (cached === true) continue;
+				const transform = view.getComputedStyle(node).transform;
+				if (transform && transform !== "none") {
+					if (!view.DOMMatrixReadOnly) return false;
+					const matrix = new view.DOMMatrixReadOnly(transform);
+					if (!matrix.is2D || matrix.b !== 0 || matrix.c !== 0 || matrix.a <= 0 || matrix.d <= 0) {
+						aligned.set(node, false);
+						return false;
+					}
+				}
+				aligned.set(node, true);
+			}
+			return true;
+		};
+
+		const addOverlay = (run: HTMLElement[]) => {
+			if (run.length < 2 || !run.every(isAxisAligned)) return;
+			const selected = run[0].matches(CURRENT_MATCH_SELECTOR);
+			if (!selected && containerEl.classList.contains("incsearch-secondary-style-underline")) return;
+			const rects = run.map((fragment) => fragment.getBoundingClientRect());
+			const left = Math.min(...rects.map((rect) => rect.left));
+			const top = Math.min(...rects.map((rect) => rect.top));
+			const right = Math.max(...rects.map((rect) => rect.right));
+			const bottom = Math.max(...rects.map((rect) => rect.bottom));
+			const overlay = layer.ownerDocument.createElement("div");
+			overlay.className = `incsearch-pdf-fragment-overlay ${selected ? "is-current" : "is-secondary"}`;
+			overlay.style.left = `${(left - layerRect.left) / scaleX}px`;
+			overlay.style.top = `${(top - layerRect.top) / scaleY}px`;
+			overlay.style.width = `${(right - left) / scaleX}px`;
+			overlay.style.height = `${(bottom - top) / scaleY}px`;
+			layer.appendChild(overlay);
+			run.forEach((fragment) => fragment.classList.add("incsearch-pdf-fragment-covered"));
+		};
+
+		let group: HTMLElement[] = [];
+		const finishGroup = () => {
+			let run: HTMLElement[] = [];
+			for (const fragment of group) {
+				const previous = run[run.length - 1];
+				if (previous) {
+					const a = previous.getBoundingClientRect();
+					const b = fragment.getBoundingClientRect();
+					const height = Math.min(a.height, b.height);
+					const overlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+					const gap = b.left - a.right;
+					if (
+						height <= 0 || overlap < height * 0.6 ||
+						b.left < a.left || b.right <= a.right ||
+						gap > Math.max(2, height * 0.2) || gap < -height * 0.3 ||
+						fragment.matches(CURRENT_MATCH_SELECTOR) !== previous.matches(CURRENT_MATCH_SELECTOR)
+					) {
+						addOverlay(run);
+						run = [];
+					}
+				}
+				run.push(fragment);
+			}
+			addOverlay(run);
+			group = [];
+		};
+		for (const fragment of fragments) {
+			if (fragment.classList.contains("begin")) {
+				group = [fragment];
+			} else if (group.length && fragment.classList.contains("middle")) {
+				group.push(fragment);
+			} else if (group.length && fragment.classList.contains("end")) {
+				group.push(fragment);
+				finishGroup();
+			} else {
+				group = [];
+			}
+		}
+	}
+}
+
 /** Styles selected PDF.js fragments without replacing their native geometry. */
 export function decorateNativeSelectedHighlightFragments(containerEl: HTMLElement, query = "") {
 	clearNativeSelectedTokenHighlights(containerEl.ownerDocument);
@@ -371,6 +466,7 @@ export function decorateNativeSelectedHighlightFragments(containerEl: HTMLElemen
 	}
 
 	highlightNativeSelectedTokens(containerEl.ownerDocument, fragments, query);
+	decorateJoinedNativeFragments(containerEl);
 }
 
 /**
@@ -578,13 +674,18 @@ export class PdfMatchController {
 		}
 		headEl.classList.add("selected");
 		if (headEl.classList.contains("begin")) {
-			let next = headEl.nextElementSibling as HTMLElement | null;
+			const layer = headEl.closest<HTMLElement>(TEXT_LAYER_SCOPE_SELECTORS.join(", "));
+			const matches = layer ? Array.from(layer.querySelectorAll<HTMLElement>(".highlight")) : [];
+			const headIndex = matches.indexOf(headEl);
+			let index = headIndex + 1;
+			let next = headIndex >= 0 ? matches[index] : headEl.nextElementSibling as HTMLElement | null;
 			while (next && (next.classList.contains("middle") || next.classList.contains("end"))) {
 				next.classList.add("selected");
 				if (next.classList.contains("end")) break;
-				next = next.nextElementSibling as HTMLElement | null;
+				next = headIndex >= 0 ? matches[++index] : next.nextElementSibling as HTMLElement | null;
 			}
 		}
+		decorateNativeSelectedHighlightFragments(this.adapter.containerEl, this.state.query);
 	}
 
 	/**
@@ -1600,8 +1701,13 @@ export class PdfMatchController {
 			container.removeEventListener("touchmove", onTouchMoveCapture, { capture: true });
 		});
 
+		let fragmentJoinPending = false;
 		const refreshNativeFragmentJoins = () => {
+			if (fragmentJoinPending) return;
+			fragmentJoinPending = true;
 			this.ownerWin.requestAnimationFrame(() => {
+				fragmentJoinPending = false;
+				if (this.destroyed) return;
 				decorateNativeSelectedHighlightFragments(
 					this.adapter.containerEl,
 					this.state.query
