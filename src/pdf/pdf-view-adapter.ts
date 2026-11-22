@@ -1,6 +1,7 @@
 import { PdfViewportAnchor, PdfScrollPosition } from "./types";
 import { isPageCompletelyOffScreen, scrollTargetIntoViewIfNeeded } from "../utils/scroll";
 import { logDebug, describeElement } from "../utils/logger";
+import type { PdfTextItem } from "./text-geometry";
 
 type PdfEventHandler = (event: unknown) => void;
 
@@ -31,6 +32,7 @@ export interface PdfFindControllerLike {
 	linkService?: { pdfViewer?: PdfViewerLike };
 	pageMatches?: unknown[][];
 	_pageMatches?: unknown[][];
+	_pageDiffs?: unknown[];
 	match?: (query: unknown, pageContent: string, pageIndex: number) => PdfMatchLike[] | undefined | null;
 	scrollMatchIntoView?: (params: unknown) => unknown;
 	executeCommand?: (command: string, params: unknown) => unknown;
@@ -71,6 +73,9 @@ export interface PdfViewerLike {
 
 interface PdfDocumentLike {
 	numPages?: number;
+	getPage?(pageNumber: number): Promise<{
+		getTextContent(options: { disableNormalization: boolean }): Promise<{ items: unknown[] }>;
+	}>;
 }
 
 interface PdfViewChildLike extends PdfViewerLike {
@@ -79,7 +84,7 @@ interface PdfViewChildLike extends PdfViewerLike {
 	pdfDocument?: PdfDocumentLike;
 	eventBus?: PdfEventBusLike;
 	findController?: PdfFindControllerLike;
-	getPage?(): unknown;
+	getPage?: PdfDocumentLike["getPage"];
 	scrollToPage?(pageNumber: number): unknown;
 	goToPage?(pageNumber: number): unknown;
 	child?: PdfViewChildLike;
@@ -119,6 +124,7 @@ export interface PdfViewAdapter {
 	findController?: PdfFindControllerLike;
 	pdfViewer?: PdfViewerLike;
 	getActiveFindMatchInfo?(): { pageIndex: number; matchIndex: number } | null;
+	getTextItems?(pageNumber: number): Promise<PdfTextItem[]>;
 	executeNativeFind?(command: {
 		query: string;
 		type?: string;
@@ -327,6 +333,23 @@ export function createPdfViewAdapter(view: unknown): PdfViewAdapter | null {
 		containerEl,
 		findController,
 		pdfViewer,
+		getTextItems: pdfDocument.getPage ? async (pageNumber) => {
+			const page = await pdfDocument.getPage!(pageNumber);
+			const content = await page.getTextContent({ disableNormalization: true });
+			return content.items.flatMap((item): PdfTextItem[] => {
+				if (typeof item !== "object" || item === null || !("str" in item) ||
+					typeof item.str !== "string") return [];
+				const value = item as { str: string; transform?: unknown; width?: unknown; height?: unknown };
+				return [{
+					str: value.str,
+					transform: Array.isArray(value.transform)
+						? Array.from(value.transform, (entry: unknown) => typeof entry === "number" ? entry : NaN)
+						: [],
+					width: typeof value.width === "number" ? value.width : 0,
+					height: typeof value.height === "number" ? value.height : 0,
+				}];
+			});
+		} : undefined,
 
 		getPageElement(pageNumber: number): HTMLElement | null {
 			// Query by data-page-number attribute

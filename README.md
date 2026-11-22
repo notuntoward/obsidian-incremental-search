@@ -58,10 +58,10 @@ To search for a literal quote character inside a quoted phrase, escape it with a
 
 **Case sensitivity is automatic.** All-lowercase searches ignore case (`react` matches `React`); typing any capital letter makes the search case-sensitive (`React` matches only `React`).
 
-**Extra spaces are literal.** One space between words is a flexible gap; two or more spaces require that many literal spaces in the note.
+**Extra spaces are literal.** One space between words is a flexible gap; two or more spaces require one fewer literal spaces in the text.
 
 > [!TIP]
-> In PDFs, gaps between words are bounded. This still lets you type a prefix like `modalit` to match `modalities`, while avoiding false matches that span unrelated paragraphs.
+> In PDFs, wildcard gaps are limited to 256 characters. Matches also avoid large jumps between unrelated page regions, while allowing normal line wraps and recognizable column transitions. PDF text geometry is cached during a search session; the first wildcard search can take longer for large documents.
 
 ## Commands & keyboard shortcuts
 

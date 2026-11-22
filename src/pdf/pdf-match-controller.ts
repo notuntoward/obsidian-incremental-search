@@ -11,6 +11,7 @@ import {
 } from "./pdf-view-adapter";
 import { clearAllPdfHighlights } from "./highlight-layer";
 import { clearSecondaryHighlights } from "./text-layer-highlighter";
+import { findDisjointTextOffsets, normalizedDisjointOffsets } from "./text-geometry";
 import { applyPdfColors, clearPdfColors } from "../utils/colors";
 import { logDebug, describeElement } from "../utils/logger";
 import { getScrollContainer } from "./pdf-view-adapter";
@@ -122,10 +123,22 @@ export const PDF_WILDCARD_MAX_GAP_CHARS = 256;
  * may span visual lines; only the flexible gap between its tokens is bounded, via
  * the same `isWithinMaxGap` rule the kernel applies for `maxGapChars`.
  */
-export function findPdfWildcardMatches(pageContent: string, query: string, caseSensitive: boolean) {
+export function findPdfWildcardMatches(
+	pageContent: string,
+	query: string,
+	caseSensitive: boolean,
+	boundaries: number[] = []
+) {
 	const tokens = parseWildcardQuery(query, caseSensitive);
 	if (tokens.length === 0) return [];
-	return findWildcardMatches(pageContent, tokens, 0, caseSensitive).filter((match) =>
+	let start = 0;
+	const matches = [...boundaries, pageContent.length].flatMap((end) => {
+		const segment = pageContent.slice(start, end);
+		const segmentStart = start;
+		start = end;
+		return findWildcardMatches(segment, tokens, segmentStart, caseSensitive);
+	});
+	return matches.filter((match) =>
 		isWithinMaxGap(match.chars, PDF_WILDCARD_MAX_GAP_CHARS)
 	);
 }
@@ -462,6 +475,13 @@ export class PdfMatchController {
 	private findControllerRef?: PdfFindControllerLike;
 	/** One-shot guard so the runtime context snapshot is logged once per query. */
 	private steeringContextLogged = false;
+	private textGeometry?: Promise<Array<number[] | null>>;
+	private geometryOffsets?: Array<number[] | null>;
+	private searchGeneration = 0;
+	private geometryLoading = false;
+	private pendingGeometryAdvances: SearchDirection[] = [];
+	private nativeMatchQuery = "";
+	private destroyed = false;
 	/**
 	 * Guards the steering re-assert so that several PDF.js events arriving in the
 	 * same frame (text-layer updates fire per page, plus the find-count events)
@@ -1164,11 +1184,20 @@ export class PdfMatchController {
 		if (findController && typeof findController.match === "function") {
 			this.originalMatch = findController.match;
 			findController.match = (query: unknown, pageContent: string, pageIndex: number) => {
-				if (this.usesPluginWildcardSearch()) {
+				const matchingQuery = this.nativeMatchQuery;
+				if (this.usesPluginWildcardSearch(matchingQuery)) {
+					const offsets = this.geometryOffsets?.[pageIndex];
+					const boundaries = offsets
+						? normalizedDisjointOffsets(pageContent, offsets, findController._pageDiffs?.[pageIndex])
+						: [];
+					if (boundaries === null) {
+						logDebug("pdf", "PDF disjoint geometry unavailable: unsupported normalization map", { pageIndex });
+					}
 					const wildcardMatches = findPdfWildcardMatches(
 						pageContent,
-						this.state.query,
-						isCaseSensitive(this.state.query)
+						matchingQuery,
+						isCaseSensitive(matchingQuery),
+						boundaries ?? []
 					).map((match) => ({
 						index: match.from,
 						length: match.to - match.from,
@@ -1598,6 +1627,7 @@ export class PdfMatchController {
 
 		// Listen to PDF.js text layer rendering events (when DOM spans are mounted)
 		const unsubTextLayerRendered = this.adapter.on("textlayerrendered", (evt: unknown) => {
+			if (this.geometryLoading) return;
 			const renderedEvent = evt as PdfRenderedEvent;
 			const pageNumber =
 				renderedEvent.pageNumber ??
@@ -1616,6 +1646,7 @@ export class PdfMatchController {
 		const unsubTextLayerMatches = this.adapter.on(
 			"updatetextlayermatches",
 			() => {
+				if (this.geometryLoading) return;
 				// PDF.js rebuilds the highlight spans from its own selection here, so
 				// re-assert the steered selection after all listeners for this event
 				// have run (the page's own text layer handler is one of them).
@@ -1655,6 +1686,7 @@ export class PdfMatchController {
 		// otherwise the counter snaps back to the match PDF.js picked before the
 		// steering ran.
 		const handleFindMatchesCount = (evt: unknown) => {
+			if (this.geometryLoading) return;
 			const matchesCount = (evt as PdfFindMatchesEvent).matchesCount;
 			if (!matchesCount) return;
 			const { current, total } = matchesCount;
@@ -1680,10 +1712,39 @@ export class PdfMatchController {
 		return parseWildcardQuery(query, isCaseSensitive(query)).length > 1;
 	}
 
+	private loadTextGeometry(): Promise<Array<number[] | null>> {
+		if (!this.textGeometry) {
+			if (!this.adapter.getTextItems) return Promise.resolve([]);
+			const results = Array.from({ length: this.adapter.numPages }, (): number[] | null => null);
+			let nextPage = 1;
+			const worker = async () => {
+				while (!this.destroyed && nextPage <= this.adapter.numPages) {
+					const page = nextPage++;
+					try {
+						const items = await this.adapter.getTextItems!(page);
+						if (items.some((item) => item.str && (item.transform.length < 6 || item.height <= 0))) {
+							logDebug("pdf", "PDF disjoint geometry unavailable for some text items", { page });
+						}
+						results[page - 1] = findDisjointTextOffsets(items);
+					} catch (error: unknown) {
+						logDebug("pdf", "PDF disjoint geometry unavailable: text extraction failed", { page, error });
+					}
+				}
+			};
+			this.textGeometry = Promise.all(
+				Array.from({ length: Math.min(4, this.adapter.numPages) }, () => worker())
+			).then(() => results);
+		}
+		return this.textGeometry;
+	}
+
 	/**
 	 * Executes a search by delegating to the PDF.js native find controller.
 	 */
 	async search(query: string, direction = this.state.direction) {
+		const generation = ++this.searchGeneration;
+		this.geometryLoading = false;
+		this.pendingGeometryAdvances = [];
 		this.state.query = query;
 		this.state.direction = direction;
 		this.state.activeIndex = 0;
@@ -1733,6 +1794,7 @@ export class PdfMatchController {
 			this.adapter.containerEl.classList.add("incsearch-active-pdf");
 			applyPdfColors(this.adapter.containerEl, this.settings);
 			if (query.length === 0) {
+				this.nativeMatchQuery = "";
 				this.adapter.executeNativeFind({
 					query: "",
 					type: "",
@@ -1744,10 +1806,22 @@ export class PdfMatchController {
 				return;
 			}
 
+			if (this.usesPluginWildcardSearch(query) && this.adapter.getTextItems &&
+				this.adapter.findController?.match) {
+				this.geometryLoading = true;
+				this.notifyStateChange();
+				const offsets = await this.loadTextGeometry();
+				if (generation !== this.searchGeneration) return;
+				this.geometryOffsets = offsets;
+				this.geometryLoading = false;
+				if (!this.userHasManuallyScrolled) this.requestMatchScroll();
+			}
+
 			const { processedQuery, phraseSearch } = processPdfQuery(
 				query,
 				this.settings.spaceAsWildcard
 			);
+			this.nativeMatchQuery = query;
 			this.adapter.executeNativeFind({
 				query: processedQuery,
 				type: "",
@@ -1765,6 +1839,9 @@ export class PdfMatchController {
 
 			this.state.isScanning = false;
 			this.notifyStateChange();
+			const pendingAdvances = this.pendingGeometryAdvances;
+			this.pendingGeometryAdvances = [];
+			for (const pendingDirection of pendingAdvances) this.advance(pendingDirection);
 			return;
 		}
 	}
@@ -1808,6 +1885,10 @@ export class PdfMatchController {
 	}
 
 	advance(direction: SearchDirection) {
+		if (this.geometryLoading) {
+			this.pendingGeometryAdvances.push(direction);
+			return;
+		}
 		this.isInitialSearchPending = false;
 		// The user has taken over navigation: the steered selection no longer owns
 		// the match, PDF.js's own cursor drives the counter again, and the next
@@ -1956,6 +2037,10 @@ export class PdfMatchController {
 
 	destroy() {
 		logDebug("pdf", "PdfMatchController destroy called");
+		this.searchGeneration++;
+		this.destroyed = true;
+		this.geometryLoading = false;
+		this.pendingGeometryAdvances = [];
 		this.cancelPendingMatchScroll();
 		this.pendingSteeredMatches = [];
 		this.pendingSteeredMatchesDirection = "forward";

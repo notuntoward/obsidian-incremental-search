@@ -10,6 +10,7 @@ import { findWildcardMatches } from "../src/engine";
 import { PdfViewAdapter } from "../src/pdf/pdf-view-adapter";
 import { DEFAULT_SETTINGS } from "../src/types";
 import * as colors from "../src/utils/colors";
+import { findDisjointTextOffsets, normalizedDisjointOffsets, PdfTextItem } from "../src/pdf/text-geometry";
 
 describe("processPdfQuery (Space-as-wildcard for PDF)", () => {
 	it("treats single space as multi-token wildcard words (phraseSearch: false)", () => {
@@ -161,6 +162,59 @@ describe("findPdfWildcardMatches", () => {
 		expect(matches).toHaveLength(1);
 		const matchedText = pageContent.slice(matches[0].from, matches[0].to);
 		expect(matchedText).toBe("to better");
+	});
+});
+
+describe("PDF wildcard geometry", () => {
+	const item = (str: string, x: number, y: number, height = 10): PdfTextItem => ({
+		str, transform: [height, 0, 0, height, x, y], width: str.length * 5, height,
+	});
+
+	it("splits the caption-to-header jump before matching, without losing a later match", () => {
+		const items = [
+			item("Figure 1. caption ", 50, 95),
+			item("HEADER 1000 2025 ", 520, 738),
+			item("Figure 2", 50, 720),
+		];
+		const text = items.map((part) => part.str).join("");
+		const offsets = findDisjointTextOffsets(items);
+		const boundaries = normalizedDisjointOffsets(text, offsets, [new Uint32Array([0, text.length]), new Int32Array([0, 0])]);
+		expect(boundaries).not.toBeNull();
+		expect(findPdfWildcardMatches(text, "figure 2", false, boundaries!).map((match) =>
+			text.slice(match.from, match.to)
+		)).toEqual(["Figure 2"]);
+	});
+
+	it("keeps normal line wraps and the 20-line-height boundary", () => {
+		const items = [item("risk", 500, 400), item(" of bias", 50, 387), item(" next", 50, 187)];
+		expect(findDisjointTextOffsets(items)).toEqual([]);
+		const text = items.map((part) => part.str).join("");
+		expect(findPdfWildcardMatches(text, "risk bias", false).map((match) =>
+			text.slice(match.from, match.to)
+		)).toEqual(["risk of bias"]);
+	});
+
+	it("preserves established column transitions but not isolated headers", () => {
+		const items = [
+			item("left one ", 50, 120), item("left two ", 50, 110), item("left end ", 50, 100),
+			item("right start ", 320, 700), item("right two ", 320, 690), item("right three ", 320, 680),
+		];
+		const offsets = findDisjointTextOffsets(items);
+		expect(offsets).toEqual([]);
+	});
+
+	it("measures rotated text across lines, not along its baseline", () => {
+		const rotated = (str: string, x: number, y: number): PdfTextItem => ({
+			str, transform: [0, -10, 10, 0, x, y], width: 20, height: 10,
+		});
+		const items = [rotated("risk ", 500, 700), rotated("of bias ", 500, 300), rotated("header", 250, 300)];
+		expect(findDisjointTextOffsets(items)).toEqual(["risk of bias ".length]);
+	});
+
+	it("maps PDF.js normalization offsets and declines an unknown mapping", () => {
+		const text = "a fi b";
+		expect(normalizedDisjointOffsets(text, [3], [[0, 0], [3, -1], [6, -1]])).toEqual([4]);
+		expect(normalizedDisjointOffsets(text, [2], undefined)).toBeNull();
 	});
 });
 
@@ -458,6 +512,73 @@ describe("PDF Match Controller (Native Find & Built-in Geometry)", () => {
 
 		controller.destroy();
 		expect(findController.match).toBe(originalMatch);
+	});
+
+	it("loads page geometry before native wildcard matching and caches it for refinements", async () => {
+		const items: PdfTextItem[] = [
+			{ str: "Figure 1 ", transform: [10, 0, 0, 10, 50, 90], width: 40, height: 10 },
+			{ str: "HEADER 2025 ", transform: [10, 0, 0, 10, 500, 700], width: 60, height: 10 },
+			{ str: "Figure 2", transform: [10, 0, 0, 10, 50, 690], width: 40, height: 10 },
+		];
+		const text = items.map((item) => item.str).join("");
+		const getTextItems = vi.fn(async () => items);
+		const originalMatch = vi.fn((_query: unknown, _text: string, _page: number) => []);
+		const findController = { match: originalMatch, _pageDiffs: [[[0, 0], [text.length, 0]]] };
+		const controller = new PdfMatchController({
+			...nativeAdapter, numPages: 1, findController, getTextItems,
+		}, { ...DEFAULT_SETTINGS, spaceAsWildcard: true });
+
+		await controller.search("figure 2");
+		expect(findController.match("figure 2", text, 0)).toEqual([
+			{ index: text.lastIndexOf("Figure 2"), length: 8 },
+		]);
+		await controller.search("figure 20");
+		expect(getTextItems).toHaveBeenCalledTimes(1);
+		controller.destroy();
+	});
+
+	it("does not dispatch an outdated search when geometry finishes after a new query", async () => {
+		let resolveItems!: (items: PdfTextItem[]) => void;
+		const getTextItems = () => new Promise<PdfTextItem[]>((resolve) => { resolveItems = resolve; });
+		const findController = { match: vi.fn(() => []) };
+		const controller = new PdfMatchController({
+			...nativeAdapter, numPages: 1, findController, getTextItems,
+		}, { ...DEFAULT_SETTINGS, spaceAsWildcard: true });
+		const pending = controller.search("figure 2");
+		await controller.search("new");
+		resolveItems([]);
+		await pending;
+		expect(nativeFindCommands.map((command) => command.query)).toEqual(["new"]);
+		controller.destroy();
+	});
+
+	it("does not dispatch a search after the controller is destroyed while geometry loads", async () => {
+		let resolveItems!: (items: PdfTextItem[]) => void;
+		const getTextItems = () => new Promise<PdfTextItem[]>((resolve) => { resolveItems = resolve; });
+		const controller = new PdfMatchController({
+			...nativeAdapter, numPages: 1, findController: { match: vi.fn(() => []) }, getTextItems,
+		}, { ...DEFAULT_SETTINGS, spaceAsWildcard: true });
+		const pending = controller.search("figure 2");
+		controller.destroy();
+		resolveItems([]);
+		await pending;
+		expect(nativeFindCommands.map((command) => command.query)).toEqual([""]);
+	});
+
+	it("queues navigation until geometry is ready", async () => {
+		let resolveItems!: (items: PdfTextItem[]) => void;
+		const getTextItems = () => new Promise<PdfTextItem[]>((resolve) => { resolveItems = resolve; });
+		const controller = new PdfMatchController({
+			...nativeAdapter, numPages: 1, findController: { match: vi.fn(() => []) }, getTextItems,
+		}, { ...DEFAULT_SETTINGS, spaceAsWildcard: true });
+		const pending = controller.search("figure 2");
+		controller.advance("backward");
+		expect(nativeFindCommands).toEqual([]);
+		resolveItems([]);
+		await pending;
+		expect(nativeFindCommands.map((command) => command.type)).toEqual(["", "again"]);
+		expect(nativeFindCommands[1].findPrevious).toBe(true);
+		controller.destroy();
 	});
 
 	it("delegates double-space literal phrase to native find with phraseSearch: true", async () => {
